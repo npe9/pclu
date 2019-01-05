@@ -1,0 +1,15 @@
+% Copyright Massachusetts Institute of Technology 1981, 1989
+
+% * matches zero or more chars, ^@ matches * char
+% . and .. directory entries are ignored
+
+all_file_names = iter (fs: string) yields (file_name)
+			signals (bad_format, none, not_possible(string))
+	first: bool := true
+	for fn: file_name in _all_file_names_(fs) do
+		first := false
+		yield(fn)
+		end resignal bad_format, not_possible
+	if first
+	   then signal none end
+	end all_file_names

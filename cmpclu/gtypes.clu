@@ -1,0 +1,808 @@
+
+%  Copyright    Massachusetts Institute of Technology     1990,1991
+
+% Cluster to handle type machinations
+
+typ = cluster is begin_local_idn_types,
+		 fix_typelist, fix_type, fix_own_typelist,
+		 fix_own_type, fix_parm_typelist, fix_parm_type,
+		 undo_local_idn_types, undo_global_idn_types
+
+    rep = null
+    own undo_global_idn_type_list: idnlist := idnlist$new()
+    own undo_local_idn_type_list: idnlist := idnlist$new()
+
+    begin_local_idn_types = proc()
+	
+	undo_global_idn_type_list := undo_local_idn_type_list
+	undo_local_idn_type_list := idnlist$new()
+
+	end begin_local_idn_types
+
+    fix_typelist = proc(d:decllist)
+
+	for each_d: decl in decllist$elements(d) do
+	    fix_type(each_d)
+	    end
+
+	end fix_typelist
+
+    fix_type = proc(d:decl)
+	
+	for each_idn: idn in idnlist$elements(d.idns) do
+	    each_idn.kind := idnkind$make_var(d.type_)
+	    undo_local_idn_type_list := idnlist$addh(undo_local_idn_type_list, each_idn)
+	    end
+
+	end fix_type
+
+    fix_own_typelist = proc(d:decllist)
+
+	for each_d: decl in decllist$elements(d) do
+	    fix_own_type(each_d)
+	    end
+
+	end fix_own_typelist
+
+    fix_own_type = proc(d:decl)
+	
+	for each_idn: idn in idnlist$elements(d.idns) do
+	    each_idn.kind := idnkind$make_ownvar(d.type_)
+	    undo_local_idn_type_list := idnlist$addh(undo_local_idn_type_list, each_idn)
+	    end
+
+	end fix_own_type
+
+    fix_parm_typelist = proc(d:decllist)
+
+	for each_d: decl in decllist$elements(d) do
+	    fix_parm_type(each_d)
+	    end
+
+	end fix_parm_typelist
+
+    fix_parm_type = proc(d:decl)
+	
+	for each_idn: idn in idnlist$elements(d.idns) do
+	    tagcase d.type_.abs
+	       tag type_:
+		   each_idn.kind := idnkind$make_tparm(opspeclist$new())
+	       tag cluster_:
+		   each_idn.kind := idnkind$make_vparm(d.type_)
+	       others:
+		   logit(720, "not fixing each_idn.str")
+		   typespec_print(d.type_)
+	       end
+	    undo_local_idn_type_list := idnlist$addh(undo_local_idn_type_list, each_idn)
+	    end
+
+	end fix_parm_type
+
+    undo_local_idn_types = proc()
+
+	for this_idn: idn in idnlist$elements(undo_local_idn_type_list) do
+	    this_idn.kind := idnkind$make_unknown(nil)
+	    end
+	undo_local_idn_type_list := idnlist$new()
+	end undo_local_idn_types
+
+    undo_global_idn_types = proc()
+
+	for this_idn: idn in idnlist$elements(undo_global_idn_type_list) do
+	    this_idn.kind := idnkind$make_unknown(nil)
+	    end
+	undo_global_idn_type_list := idnlist$new()
+	end undo_global_idn_types
+
+    end typ
+
+
+% cluster to differentiate between known signals (defined in err.h)
+%			and user defined signals
+%	also uniquifies user uses of "ok"
+
+sig = cluster is name, lookup, index
+    as = array[string]
+    rep = as
+
+    own known: rep := rep$new()
+    own init: bool := false
+
+    name = proc(n: string) returns (string)
+
+	if lookup(n) 
+	   then
+		return ("ERR_" || n)
+	   else
+		if string$equal(n, "ok")
+		   then
+			return ("\"ERR_ok_UNIQ\"")
+		   else
+			return ("\"ERR_" || n || "\"")
+		   end
+	   end
+	end name
+
+    lookup = proc(n:string) returns (bool)
+
+	if init = false then init_known() end
+	if n = "ok" then n := "ok_UNIQ" end  
+	for each_s: string in as$elements(known) do
+	    if n = each_s then return (true) end
+	    end
+	return (false)
+
+	end lookup
+
+    index = proc(n:string) returns (int) signals (not_found)
+
+	if init = false then init_known() end
+	if n = "ok" then n := "ok_UNIQ" end  
+	for i: int in rep$indexes(known) do
+	    if n = known[i] then return (i-1) end
+	    end
+	signal not_found
+	end index
+
+    init_known = proc()
+	
+	init := true
+
+	err_file_name: file_name := err_name()
+
+	err_stream: stream := stream$open(err_file_name, "read")
+	   except others: return end
+
+	while true do
+	    l: string := stream$getl(err_stream)
+	    pos: int := string$indexs("#define", l)
+	    if pos = 0 then continue end
+	    pos2 : int := string$indexs("ERR_", l)
+	    if pos2 < pos then continue end
+	    l2: string := string$rest(l, pos2)
+	    pos3: int := string$indexs(" ", l2)
+	    pos4: int := string$indexs("\t", l2)
+	    if pos4 = 0 then pos4 := pos3 end
+	    if pos3 = 0 then pos3 := pos4 end
+	    if pos3 = 0 then continue end
+	    pos3 := int$min(pos3, pos4)
+	    as$addh(known, string$substr(l2, 5, pos3-5))
+	    end
+	   except when end_of_file: return end
+
+
+
+	end init_known
+
+    end sig
+
+int_const = cluster is exists
+
+    rep = int
+
+    own low: int := 0
+    own high: int := 50
+
+    exists = proc(i: int) returns (bool)
+
+	if (low <= i cand i <= high) then return (true) end
+	return (false)
+	end exists
+
+    end int_const
+
+g_xref = cluster is add_ent, lookup, flush
+    rep = null
+    an = array[name]
+    ae = array[entry]
+    entry = record[proc_name: name, refs: an]
+
+    own init: bool := false
+    own db: ae := ae$predict(1, 30)
+    own modified: bool := false
+
+    setup = proc()
+	init := true
+	% read in input (if any)
+	ofn: file_name := file_name$parse("pclu.xref")
+	begin
+	    inst: stream := stream$open(ofn, "read")
+	    begin
+		while true do
+		    l: string := stream$getl(inst)
+		    sz: int := string$size(l)
+		    if ~string$empty(l) cand l[sz] = ':' then
+		       nm: string := string$substr(l, 1, sz-1)
+		       refs: an := an$predict(1,20)
+		       while true do
+			   l := stream$getl(inst)
+			   if ~string$empty(l)
+			      then
+				   an$addh(refs, l)
+			      else
+				   ae$addh(db, entry${proc_name:nm, refs: refs})
+				   break
+			      end % if
+			   end % while true
+		       end % if
+		    end % while
+		end % begin
+	       except others: stream$close(inst) end
+	    end % begin
+	   except others: end
+	end setup
+
+    lookup = proc(tyo: stream, nm: string) 
+	       signals (not_possible (string), not_found)
+
+	infn: file_name := file_name$parse("pclu.xref")
+	inst: stream := stream$open(infn, "read")
+	   except others:
+		       signal not_possible (" couldn't open pclu.xref ")
+		  end
+
+	found: bool := false
+
+	% remove parameters from nm
+	loc_left:int := string$indexc('[',nm)
+	if loc_left ~= 0 then
+	   loc_sep:int := string$indexc('$',nm)
+	   if loc_sep = 0 cor loc_sep < loc_left then
+	      nm := string$substr(nm, 1, loc_left-1)
+	      else
+		   nm := string$substr(nm, 1, loc_left-1) ||
+			 string$rest(nm, loc_sep)
+		   loc_left := string$indexc('[', nm)
+		   if loc_left ~= 0 then
+		      nm := string$substr(nm, 1, loc_left-1)
+		      end
+	      end
+	   end
+
+	current_entry: string := ""
+	while true do
+	    l: string := stream$getl(inst)
+	    if string$empty(l) then continue end
+	    sz: int := string$size(l)
+	    if l[sz] = ':'
+	       then
+		    current_entry := string$substr(l, 1, sz-1)
+	       else
+		    if nm = string$rest(l, 2) then
+		       found := true
+		       stream$puts(tyo, "\t")
+		       stream$putl(tyo, current_entry)
+		       end
+	       end
+	    end
+	   except when end_of_file:
+		       stream$close (inst)
+		       if found = false then
+			  signal not_found
+			  else return end
+		  others (why: string):
+		       stream$close (inst)
+		       signal not_possible (why)
+		  end
+	end lookup
+
+    add_ent = proc(refs: an)
+
+	% possibly externalize nm
+	% possibly uniquify refs
+	% probably have a more exciting way to specify file name
+	% maybe have option enable/disable switch
+
+	if ~init then setup() end
+
+	% figure name of context, i.e. user of external references
+	nm: string := ""
+	apnm: string := current_apply$get_short_name()
+	if current_type$exists() then
+	   if string$empty(apnm) then
+	      nm := current_type$get_name() || "$own_init_proc"
+	      else
+		   nm := current_type$get_name() || "$" || apnm
+	      end
+	   else
+		nm := apnm
+	   end
+
+	for each_entry: entry in ae$elements(db) do
+	    if each_entry.proc_name ~= nm then continue end
+	    % found entry: have the refs changed?
+	    if an$size(refs) ~= an$size(each_entry.refs) then
+	       each_entry.refs := refs
+	       modified := true
+	       return
+	       end
+	    found: bool := false
+	    for each_ref: name in an$elements(refs) do
+		found := false
+		for old_ref: name in an$elements(each_entry.refs) do
+		    if each_ref = old_ref then
+		       found := true
+		       break
+		       end
+		    end
+		if ~found then break end
+		end
+	    if found then return end
+	    % refs have changed: update entry
+	    each_entry.refs := refs
+	    modified := true
+	    return
+	    end
+	% add entry
+	ae$addh(db, entry${proc_name: nm, refs: refs})
+	modified := true
+	end add_ent
+
+    flush = proc()
+
+	if ~modified then return end
+	ofn: file_name := file_name$parse("pclu.xref")
+
+	% create new output file
+	nfn: file_name := file_name$parse("pclu.xref.new")
+	outst: stream := stream$open(nfn, "write")
+	for each_entry: entry in ae$elements(db) do
+	    stream$puts(outst, each_entry.proc_name)
+	    stream$putl(outst, ":")
+	    for each_nm: name in an$elements(each_entry.refs) do
+		stream$puts(outst, "\t")
+		stream$putl(outst, externalize(each_nm))
+		end
+	    stream$putl(outst, "")
+	    end
+	stream$close(outst)
+
+	% rename files
+	delete_file(ofn)
+	   except others: end
+	rename_file(nfn, ofn)
+	   except others: end
+	modified := false
+	end flush
+
+    end g_xref
+
+externalize = proc(nm: string) returns (string)
+    own sep_size: int := string$size(sep)
+    off: int := string$indexs(sep, nm)
+    if off = 0 then return (nm) end
+    head: string := string$substr(nm,1,off-1)
+    tail: string := string$rest(nm, off+sep_size)
+    return(head || "$" || tail )
+    end externalize
+
+% check for uncaught exceptions and for except statements
+%	that catch non-existent signals
+
+g_check_handlers = proc(e: g_env, stmts: stmtlist)
+    return
+    handlers$init(e)
+    g_check_handlers_main(stmts)
+    handlers$done()
+    end g_check_handlers
+
+g_check_handlers_main = proc(stmts: stmtlist)
+    for s: stmt in stmtlist$elements(stmts) do
+	handlers$set_lineno(s.line)
+	tagcase s.abs
+	   tag declinit(di: declinit):
+	       g_check_handlers_exprs(di.expr)
+	   tag invoke (inv: invoke):
+	       g_check_handlers_exprs(inv.apply)
+               handlers$new_signals(inv.apply)
+	       g_check_handlers_exprlist(inv.args)
+	   tag assn (as: assn):
+	       g_check_handlers_exprlist(as.right)
+	   tag sugarassn (as: sugarassn):
+	       g_check_handlers_exprs(as.right)
+	       g_check_handlers_exprs(as.left)
+	   tag while_ (w: whilestmt):
+	       g_check_handlers_exprs(w.test)
+	       g_check_handlers_main(w.body.stmts)
+	   tag for_ (f: forstmt):
+               handlers$new_signals(f.call.apply)
+	       g_check_handlers_exprs(f.call.apply)	% probably useless
+	       g_check_handlers_exprlist(f.call.args)
+	       g_check_handlers_main(f.body.stmts)
+	   tag if_ (i: ifstmt):
+	       for arm: ifarm in ifarmlist$elements (i.arms) do
+	           g_check_handlers_exprs(arm.test)
+		   g_check_handlers_main (arm.body.stmts)
+		   end % for
+	       tagcase i.else_
+		  tag body (b:body):
+		      g_check_handlers_main(b.stmts)
+		  others:
+		  end
+           tag tag_ (t: tagstmt):
+	       g_check_handlers_exprs(t.obj)
+	       % if t.obj is not a oneof or variant set a flag
+	       %	and save the name of the type of t.obj
+	       % The following is probably not necessary for check_handlers
+	       % ty: typespec :=  t.obj.typespec
+	       % nm: string := ""
+	       % if typeabs$is_cluster_(ty.abs) then
+	       %    nm := typeabs$value_cluster_(ty.abs).gen.common
+	       %   end
+	       for arm: tagarm in tagarmlist$elements(t.arms) do
+		   % if flag set, look at arm.tags which is a namelist
+		   %	and cause type$is_each_name to be an external
+		   % if ~string$empty(nm) then
+		   % for each_nm: name in namelist$elements(arm.tags) do
+		   % addh_if_new[name](nm || sep ||"is_" || each_nm)
+		   % end
+		   % end
+		   g_check_handlers_main(arm.body.stmts)
+		   end % for
+	       tagcase t.others_
+		  tag body (b: body):
+		      g_check_handlers_main(b.stmts)
+		  others:
+		  end
+	   tag return_ (el: exprlist):
+	       g_check_handlers_exprlist(el)
+	   tag yield_ (el: exprlist):
+	       g_check_handlers_exprlist(el)
+	   tag signal_ (c: condition):
+	       g_check_handlers_exprlist(c.args)
+	   tag exit_ (c: condition):
+               handlers$add_signal(c.name, "exit")
+	       g_check_handlers_exprlist(c.args)
+	   tag body (b: body):
+	       g_check_handlers_main(b.stmts)
+	   tag except_ (e: exceptstmt):
+	       handlers$enter()
+	       g_check_handlers_main(stmtlist$fill(1, e.stmt))
+	       handlers$leave_except(e)
+	       for ah: handler in handlerlist$elements(e.arms) do
+		   g_check_handlers_main(ah.body.stmts)
+		   end
+	       tagcase e.others_
+		  tag arm (o: othersarm):
+		      g_check_handlers_main(o.body.stmts)
+		  others:
+		  end
+	       % handlers$leave_except(e)
+	   tag force_ (f: forcestmt):
+	       g_check_handlers_exprs(f.expr)
+	   tag resignal_ (r: resignalstmt):
+	       save_lineno: int := s.line
+	       handlers$enter()
+	       g_check_handlers_main(stmtlist$fill(1, r.stmt))
+	       handlers$leave_resig(r, save_lineno)
+	   tag decl, break_, continue_, bad:
+	   end
+	end % for
+    end g_check_handlers_main
+
+g_check_handlers_exprlist = proc(el: exprlist)
+    for each_expr: expr in exprlist$elements(el) do
+	g_check_handlers_exprs(each_expr)
+	end
+    end g_check_handlers_exprlist
+
+g_check_handlers_exprs = proc(ex:expr)
+    % expr_print(ex, 22)
+    tagcase ex.abs
+       tag any_ (e:expr):
+	   g_check_handlers_exprs(e)
+       tag cand_, cor_ (c:condop):
+	   g_check_handlers_exprs(c.left)
+	   g_check_handlers_exprs(c.right)
+       tag invoke (inv: invoke):
+	   g_check_handlers_exprs(inv.apply)
+	   handlers$new_signals(inv.apply)
+	   g_check_handlers_exprlist(inv.args)
+	   % handlers$new_signals(ex)
+       tag a_cons (ar: arraycons):
+	   if mexpr$is_one(ar.low) then
+	      g_check_handlers_exprs(mexpr$value_one(ar.low)) end
+	   for each_elt: expr in exprlist$elements(ar.elts) do
+	       g_check_handlers_exprs(each_elt)
+	       end
+       tag s_cons (xa: selectcons):
+	   for each_field: field in fieldlist$elements(xa.fields) do
+	       g_check_handlers_exprs(each_field.val)
+	       end
+       tag apply (ct:clutype):
+	   % handlers$new_signals(ex)
+       tag op (cop:clusterop):
+	   % handlers$new_signals(ex)
+       tag type_of_ (e: expr):
+	   g_check_handlers_exprs(e)
+       tag up_ (e: expr):
+	   g_check_handlers_exprs(e)
+       tag down_ (e: expr):
+	   g_check_handlers_exprs(e)
+       others:
+       end
+    end g_check_handlers_exprs
+
+handlers = cluster is init, enter, leave_resig, leave_except, new_signals,
+		      add_signal, set_lineno, done
+
+    rep = entry
+    entry = record[signame: name, procname: name, line: int]
+    ae = array[entry]
+    aae = array[ae]
+    own scopes: aae
+    own current_scope: ae
+    own lineno: int
+    own env: g_env
+
+    init = proc(ge: g_env)
+	env := ge
+	scopes := aae$new()
+	current_scope := ae$new()
+	lineno := 0
+	end init
+
+    set_lineno = proc(l: int)
+	lineno := l
+	end set_lineno
+
+    done = proc()
+	for e: entry in ae$elements(current_scope) do
+	    warn: string := int$unparse(e.line) || ":\tunhandled signal \"" ||
+			    e.signame || "\""
+	    if ~string$empty(e.procname) then
+	       warn := warn || " from " || e.procname end
+	    g_env$warn(env, warn)
+	    end
+	end done
+
+    enter = proc()
+	aae$addh(scopes, current_scope)
+	current_scope := ae$new()
+	end enter
+
+    leave_resig = proc(r: resignalstmt, line: int)
+	handled: ab := ab$fill(1, ae$size(current_scope), false)
+	for each_name: name in namelist$elements(r.resigs) do
+	    found: bool := false
+	    for i: int in ae$indexes(current_scope) do
+		if current_scope[i].signame = each_name then
+		   handled[i] := true
+		   found := true
+		   end
+		end
+	    if ~found cand each_name ~= "failure" then
+	       g_env$warn(env, int$unparse(line) || ":\tsignal \"" || each_name ||
+			       "\" resignalled, but cannot occur")
+	       end
+	    end
+	for i: int in ab$indexes(handled) do
+	    if ~handled[i] then
+	       ae$addh(aae$top(scopes), current_scope[i])
+	       end
+	    end
+	current_scope := aae$remh(scopes)
+	end leave_resig
+
+    leave_except = proc(exc: exceptstmt)
+	handled: ab := ab$fill(1, ae$size(current_scope), false)
+	for each_arm: handler in handlerlist$elements(exc.arms) do
+	    for each_name: name in namelist$elements(each_arm.names) do
+		found: bool := false
+		for i: int in ae$indexes(current_scope) do
+		    if current_scope[i].signame = each_name then
+		       handled[i] := true
+		       found := true
+		       end
+		    end
+		if ~found cand each_name ~= "failure" then 
+		   g_env$warn(env, int$unparse(each_arm.line) ||
+				   ":\tsignal \"" || each_name ||
+				   "\" caught, but cannot occur")
+		   end
+		end
+	    end
+	if mothersarm$is_none(exc.others_) then
+	   for i: int in ab$indexes(handled) do
+	       if ~handled[i] then
+		  ae$addh(aae$top(scopes), current_scope[i])
+		  end
+	       end
+	   end
+	current_scope := aae$remh(scopes)
+	end leave_except
+
+    new_signals = proc(ex: expr)
+	ty: typespec
+	nm: string := ""
+	% logit (991, "handlers debugging info for expr " ||
+	% 	   int$unparse(lineno))
+	% expr_print(ex, 57)
+	tagcase ex.abs
+	   tag apply (ct:clutype):
+	       specs: DUspecs, b: bool := du$read_specs(ct.gen)
+	       if ~DUspecs$is_none(specs) then
+		  tagcase specs
+		     tag apply (ap: applyinfo):
+			 ty := ap.type_
+			 tagcase ty.abs
+			    tag apply (apt: applytype):
+				for each_sig:  exception in exceptionlist$elements(apt.sigs) do
+	                  	    add_signal(each_sig.name, ct.gen.common)
+				    % ae$addh(current_scope, entry${signame: each_sig.name,
+				    % 				  procname: ct.gen.common,
+				    % 				  line: lineno})
+				    end
+			    others:
+				logit (993, "newsignals/ty.abs not dealing with non-applytype")
+			    end
+		     others:
+			 logit (994, "newsignals/apply not dealing with non-applyinfo")
+		     end
+		  end
+	   tag op (cop:clusterop):
+	       nm := cop.name
+	       ty := cop.type_
+	       tagcase ty.abs
+		  tag apply(ap: applytype):
+		      for each_sig:  exception in exceptionlist$elements(ap.sigs) do
+	                  add_signal(each_sig.name, "")
+			  % ae$addh(current_scope, entry${signame: each_sig.name, 							% procname:"",
+			  % line: lineno})
+			  end
+		  tag cluster_(ct:clutype):
+		      specs: DUspecs, b: bool := du$read_specs(ct.gen)
+		      if ~DUspecs$is_none(specs) then
+			 tagcase specs
+			    tag apply (ap: applyinfo):
+				logit (997, "handlers not dealing with applyinfo")
+			    tag cluster_ (tyinfo: typeinfo):
+				sigs: exceptionlist := tinfo_op_sigs(tyinfo, nm)
+				for each_sig:  exception in exceptionlist$elements(sigs) do
+			            add_signal(each_sig.name, ct.gen.common 
+								|| "$" || nm)
+				    % ae$addh(current_scope, entry${signame: each_sig.name, 
+				    % procname:ct.gen.common || "$" || nm,
+					
+				    % 			  line: lineno})
+				    end
+			    tag select, atype (tyinfo: typeinfo):
+				logit (996, "handlers not dealing with some typeinfo")
+			    others:
+				% logit (9980, "newsignals/cluster_ not dealing with specs")
+			    end
+			 else
+			 end
+		  tag select (st: seltype):
+		      specs: DUspecs, b: bool := du$read_specs(st.gen)
+		      if ~DUspecs$is_none(specs) then
+			 tagcase specs
+			    tag apply (ap: applyinfo):
+				logit (997, "handlers/select not dealing with applyinfo")
+			    tag select (tyinfo: typeinfo):
+				nm2: string j: int
+				nm2, j := field_index(nm, st.parms)
+				sigs: exceptionlist := tinfo_op_sigs(tyinfo, nm2)
+				for each_sig:  exception in exceptionlist$elements(sigs) do
+			            add_signal(each_sig.name, st.gen.common 
+								|| "$" || nm)
+				    % ae$addh(current_scope, entry${signame: each_sig.name,
+				    %				  procname:st.gen.common || "$" || nm,
+				    %				  line: lineno})
+				    end
+			    tag cluster_, atype (tyinfo: typeinfo):
+				logit (996, "handlers/select not dealing with some typeinfo")
+			    others:
+				% logit (9981, "newsignals/select not dealing with specs")
+			    end
+			 end
+		  tag idn (id: idn):
+		      ty := ex.typespec
+		      tagcase ty.abs
+			 tag apply (ap:applytype):
+			     for each_sig: exception in exceptionlist$elements(ap.sigs) do
+				 add_signal(each_sig.name, id.str)
+				 % ae$addh(current_scope, entry${signame: each_sig.name,
+				 %			       procname:id.str,
+				 %			       line: lineno})
+				 end
+			 others:
+				% logit (9982, "newsignals/idn not dealing with ty.abs")
+			 end
+		  others:
+		      logit (999, "handlers not dealing with some typespec")
+		      typespec_print(ty)
+		  end
+		  except when not_found: 
+			% logit(1201, "yep")
+			end
+	   tag invoke (inv: invoke):
+	       ty := ex.typespec
+	       tagcase ty.abs
+		  tag apply (ap:applytype):
+		      for each_sig:  exception in exceptionlist$elements(ap.sigs) do
+			  add_signal(each_sig.name, "")
+			  %ae$addh(current_scope, entry${signame: each_sig.name,
+			  %procname:"",
+			  %line: lineno})
+			  end
+		  others:
+		      % logit (9983, "newsignals/invoke not dealing with ty.abs")
+		  end
+	   tag idn (id: idn):
+	       ty := ex.typespec
+	       tagcase ty.abs
+		  tag apply (ap:applytype):
+		      for each_sig:  exception in exceptionlist$elements(ap.sigs) do
+			  add_signal(each_sig.name, id.str)
+			  % ae$addh(current_scope, entry${signame: each_sig.name,
+			  % 				procname:id.str,
+			  % 				line: lineno})
+			  end
+		  others:
+		      % logit (9984, "newsignals/idn not dealing with ty.abs")
+		  end
+	   tag force_ (t:typespec):
+	       ty := ex.typespec
+	       tagcase ty.abs
+		  tag apply (ap:applytype):
+		      for each_sig:  exception in exceptionlist$elements(ap.sigs) do
+			  add_signal(each_sig.name, "force")
+			  end
+		  others:
+		      % logit (9985, "newsignals/force not dealing with ty.abs")
+		  end
+	   others:
+	       logit (990, "handlers not dealing with some expr " ||
+			   int$unparse(lineno))
+	       expr_print(ex, 55)
+	   end
+	end new_signals
+    add_signal = proc(sig: name, procname: string)
+	% logit(11, sig)
+	ae$addh(current_scope, entry${signame: sig,
+				      procname: procname,
+				      line: lineno})
+	end add_signal
+    end handlers
+
+alt_tinfo_op_sigs = proc(op:name) returns(exceptionlist) 
+				signals (not_found)
+    % logit(1202, "alt")
+    % logit(1202, op)
+    if current_type$exists() then
+	ct: typedefn := current_type$get()
+	for each_ap: applydefn in applydefnlist$elements(ct.body) do
+	% logit(1202, "each op")
+	% logit(1202, each_ap.idn.str)
+		if each_ap.idn.str = op then
+			return (each_ap.sigs) end
+		end
+    end
+    signal not_found
+    end alt_tinfo_op_sigs
+
+tinfo_op_sigs = proc(t:typeinfo, op:name) returns(exceptionlist) signals (not_found)
+    % logit(1202, "op")
+    % logit(1202, op)
+    if op[1] = '%' then 
+	return (alt_tinfo_op_sigs(op))
+	end
+	resignal not_found
+    for each_op: opinfo in opinfolist$elements(t.opers) do
+	% logit(1202, "each op")
+	% logit(1202, each_op.name)
+	if op ~= each_op.name then continue end
+	info: applyinfo := each_op.info
+	ty: typespec := info.type_
+	tagcase ty.abs
+	   tag apply (ap: applytype):
+	       return (ap.sigs)
+	   others:
+	       logit (995, "tinfo_op_sigs not dealing with some typespec")
+	       typespec_print(ty)
+	   end
+	end
+    signal not_found
+    end tinfo_op_sigs
+

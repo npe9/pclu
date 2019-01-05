@@ -1,0 +1,436 @@
+% Copyright Massachusetts Institute of Technology 1980, 1989
+
+% A mutable mapping from objects of one arbitrary type to another
+
+table = cluster [key, val: type] is	create, flush, cond_flush, pcond_flush,
+					bind, mbind, alter, lookup, mlookup,
+					get_pair, exists, remove, delete,
+					rehash, elements, count, empty, sizes
+
+htype	= proctype (key, int) returns (int)
+ctype	= proctype (key, key) returns (bool)
+ptype	= proctype (val) returns (bool)
+mz	= _cvt[null, _obj]
+
+rep	= record[size:    int,
+		 hasher:  htype,
+		 comper:  ctype,
+		 lkey:    _obj,
+		 lhash:   int,
+		 lval:    _obj,
+		 buckets: buckets]
+
+buckets	= _vec[_obj]
+
+bucket	= record[key:  key,
+		 val:  val,
+		 next: _obj]
+
+own unique: _obj
+
+% Create a table.  SIZE indicates the number of hashing buckets to use:
+%	1 <= SIZE
+% HASHER is the hashing function:
+%	0 <= HASHER(key, SIZE) <= SIZE - 1
+% for all keys.
+% COMPER is an equivalence relation on keys.  For any K, K' is the key in the
+% table such that COMPER(K, K') holds.  K' exists if and only if it has a
+% value bound to it.
+% For things to work, it must be the case that
+%	COMPER(K, K')  implies  HASHER(K, SIZE) = HASHER(K', SIZE)
+
+create = proc (size: int, hasher: htype, comper: ctype) returns (cvt)
+							signals (bad_size)
+	if size < 1
+	   then signal bad_size end
+	if unique = mz(nil)
+	   then unique := _cvt[_vec[null], _obj](_vec[null]$create(0)) end
+	return(rep${size:    size,
+		    hasher:  hasher,
+		    comper:  comper,
+		    lkey:    unique,
+		    lhash:   0,
+		    lval:    unique,
+		    buckets: buckets$create(size)})
+	end create
+
+% Removes all bindings
+
+flush = proc (t: cvt)
+	t.lkey := unique
+	bucks: buckets := t.buckets
+	for i: int in int$from_to(1, t.size) do
+		bucks[i] := mz(nil)
+		end
+	end flush
+
+% Flushes all (key, val) pairs for which PRED(val) is true
+
+cond_flush = proc (t: cvt, pred: ptype)
+	t.lkey := unique
+	bucks: buckets := t.buckets
+	for i: int in int$from_to(1, t.size) do
+		lbuck: bucket
+		isprev: bool := false
+		mb: _obj := bucks[i]
+		while mb ~= mz(nil) do
+			buck: bucket := _cvt[_obj, bucket](mb)
+			mb := buck.next
+			if pred(buck.val)
+			   then if isprev
+				   then lbuck.next := mb
+				   else bucks[i] := mb
+				   end
+			   else lbuck := buck
+				isprev := true
+			   end
+			end
+		end
+	end cond_flush
+
+% Flushes all (key, val) pairs for which PRED(val, THING) is true
+
+pcond_flush = proc [u: type] (t: cvt, pred: pptype, thing: u)
+	pptype = proctype (val, u) returns (bool)
+	t.lkey := unique
+	bucks: buckets := t.buckets
+	for i: int in int$from_to(1, t.size) do
+		lbuck: bucket
+		isprev: bool := false
+		mb: _obj := bucks[i]
+		while mb ~= mz(nil) do
+			buck: bucket := _cvt[_obj, bucket](mb)
+			mb := buck.next
+			if pred(buck.val, thing)
+			   then if isprev
+				   then lbuck.next := mb
+				   else bucks[i] := mb
+				   end
+			   else lbuck := buck
+				isprev := true
+			   end
+			end
+		end
+	end pcond_flush
+
+% Bind the value V to the key K.  Signal EXISTS if K' exists.
+
+bind = proc (t: cvt, k: key, v: val) signals (exists)
+	if t.lkey ~= _cvt[key, _obj](k)
+	   then t.lhash := t.hasher(k, t.size) + 1
+	elseif t.lval ~= unique
+	   then signal exists end
+	comper: ctype := t.comper
+	xmb: _obj := t.buckets[t.lhash]
+	mb: _obj := xmb
+	while mb ~= mz(nil) do
+		buck: bucket := _cvt[_obj, bucket](mb)
+		if comper(k, buck.key)
+		   then t.lkey := _cvt[key, _obj](buck.key)
+			t.lval := _cvt[val, _obj](buck.val)
+			signal exists
+		   end
+		mb := buck.next
+		end
+	t.lkey := _cvt[key, _obj](k)
+	t.lval := _cvt[val, _obj](v)
+	t.buckets[t.lhash] := _cvt[bucket, _obj](bucket${key:  k,
+							 val:  v,
+							 next: xmb})
+	end bind
+
+% If K' exists, return the value bound to it, else bind V to K and return V.
+
+mbind = proc (t: cvt, k: key, v: val) returns (val)
+	if t.lkey ~= _cvt[key, _obj](k)
+	   then t.lhash := t.hasher(k, t.size) + 1
+	elseif t.lval ~= unique
+	   then return(_cvt[_obj, val](t.lval)) end
+	comper: ctype := t.comper
+	xmb: _obj := t.buckets[t.lhash]
+	mb: _obj := xmb
+	while mb ~= mz(nil) do
+		buck: bucket := _cvt[_obj, bucket](mb)
+		if comper(k, buck.key)
+		   then t.lkey := _cvt[key, _obj](buck.key)
+			t.lval := _cvt[val, _obj](buck.val)
+			return(buck.val)
+		   end
+		mb := buck.next
+		end
+	t.lkey := _cvt[key, _obj](k)
+	t.lval := _cvt[val, _obj](v)
+	t.buckets[t.lhash] := _cvt[bucket, _obj](bucket${key:  k,
+							 val:  v,
+							 next: xmb})
+	return(v)
+	end mbind
+
+% Bind the value V to the key K', if it exists, else to K.
+
+alter = proc (t: cvt, k: key, v: val)
+	if t.lkey ~= _cvt[key, _obj](k)
+	   then t.lhash := t.hasher(k, t.size) + 1 end
+	t.lval := _cvt[val, _obj](v)
+	comper: ctype := t.comper
+	xmb: _obj := t.buckets[t.lhash]
+	mb: _obj := xmb
+	while mb ~= mz(nil) do
+		buck: bucket := _cvt[_obj, bucket](mb)
+		if comper(k, buck.key)
+		   then t.lkey := _cvt[key, _obj](buck.key)
+			buck.val := v
+			return
+		   end
+		mb := buck.next
+		end
+	t.lkey := _cvt[key, _obj](k)
+	t.buckets[t.lhash] := _cvt[bucket, _obj](bucket${key:  k,
+							 val:  v,
+							 next: xmb})
+	end alter
+
+% Get the value bound to K'.  Signal NOT_FOUND if K' does not exist.
+
+lookup = proc (t: cvt, k: key) returns (val) signals (not_found)
+	if t.lkey = _cvt[key, _obj](k)
+	   then if t.lval = unique
+		   then signal not_found end
+		return(_cvt[_obj, val](t.lval))
+	   end
+	t.lhash := t.hasher(k, t.size) + 1
+	comper: ctype := t.comper
+	mb: _obj := t.buckets[t.lhash]
+	while mb ~= mz(nil) do
+		buck: bucket := _cvt[_obj, bucket](mb)
+		if comper(k, buck.key)
+		   then t.lkey := _cvt[key, _obj](buck.key)
+			t.lval := _cvt[val, _obj](buck.val)
+			return(buck.val)
+		   end
+		mb := buck.next
+		end
+	t.lkey := _cvt[key, _obj](k)
+	t.lval := unique
+	signal not_found
+	end lookup
+
+% Get the value bound to K'.  Return DEFV if K' does not exist.
+
+mlookup = proc (t: cvt, k: key, defv: val) returns (val)
+	if t.lkey = _cvt[key, _obj](k)
+	   then if t.lval ~= unique
+		   then defv := _cvt[_obj, val](t.lval) end
+		return(defv)
+	   end
+	t.lhash := t.hasher(k, t.size) + 1
+	comper: ctype := t.comper
+	mb: _obj := t.buckets[t.lhash]
+	while mb ~= mz(nil) do
+		buck: bucket := _cvt[_obj, bucket](mb)
+		if comper(k, buck.key)
+		   then t.lkey := _cvt[key, _obj](buck.key)
+			t.lval := _cvt[val, _obj](buck.val)
+			return(buck.val)
+		   end
+		mb := buck.next
+		end
+	t.lkey := _cvt[key, _obj](k)
+	t.lval := unique
+	return(defv)
+	end mlookup
+
+% Get the value bound to K', and return both K' and the value.
+% Signal NOT_FOUND if K' does not exist.
+
+get_pair = proc (t: cvt, k: key) returns (key, val) signals (not_found)
+	if t.lkey = _cvt[key, _obj](k)
+	   then if t.lval = unique
+		   then signal not_found end
+		return(k, _cvt[_obj, val](t.lval))
+	   end
+	t.lhash := t.hasher(k, t.size) + 1
+	comper: ctype := t.comper
+	mb: _obj := t.buckets[t.lhash]
+	while mb ~= mz(nil) do
+		buck: bucket := _cvt[_obj, bucket](mb)
+		if comper(k, buck.key)
+		   then t.lkey := _cvt[key, _obj](buck.key)
+			t.lval := _cvt[val, _obj](buck.val)
+			return(buck.key, buck.val)
+		   end
+		mb := buck.next
+		end
+	t.lkey := _cvt[key, _obj](k)
+	t.lval := unique
+	signal not_found
+	end get_pair
+
+% Test if the key K' exists.
+
+exists = proc (t: cvt, k: key) returns (bool)
+	if t.lkey = _cvt[key, _obj](k)
+	   then return(t.lval ~= unique) end
+	t.lhash := t.hasher(k, t.size) + 1
+	comper: ctype := t.comper
+	mb: _obj := t.buckets[t.lhash]
+	while mb ~= mz(nil) do
+		buck: bucket := _cvt[_obj, bucket](mb)
+		if comper(k, buck.key)
+		   then t.lkey := _cvt[key, _obj](buck.key)
+			t.lval := _cvt[val, _obj](buck.val)
+			return(true)
+		   end
+		mb := buck.next
+		end
+	t.lkey := _cvt[key, _obj](k)
+	t.lval := unique
+	return(false)
+	end exists
+
+% Remove the value bound to key K' and return it.  Signal NOT_FOUND if K' does
+% not exist.  Afterwards K' does not exist.
+
+remove = proc (t: cvt, k: key) returns (val) signals (not_found)
+	comper: ctype := t.comper
+	i: int := t.hasher(k, t.size) + 1
+	mb: _obj := t.buckets[i]
+	lbuck: bucket
+	isprev: bool := false
+	while mb ~= mz(nil) do
+		buck: bucket := _cvt[_obj, bucket](mb)
+		mb := buck.next
+		if comper(k, buck.key)
+		   then if isprev
+			   then lbuck.next := mb
+			   else t.buckets[i] := mb
+			   end
+			t.lkey := unique
+			return(buck.val)
+		   end
+		lbuck := buck
+		isprev := true
+		end
+	signal not_found
+	end remove
+
+% Remove the value bound to key K', if any.  Afterwards K' does not exist.
+
+delete = proc (t: cvt, k: key)
+	comper: ctype := t.comper
+	i: int := t.hasher(k, t.size) + 1
+	mb: _obj := t.buckets[i]
+	lbuck: bucket
+	isprev: bool := false
+	while mb ~= mz(nil) do
+		buck: bucket := _cvt[_obj, bucket](mb)
+		mb := buck.next
+		if comper(k, buck.key)
+		   then if isprev
+			   then lbuck.next := mb
+			   else t.buckets[i] := mb
+			   end
+			t.lkey := unique
+			return
+		   end
+		lbuck := buck
+		isprev := true
+		end
+	end delete
+
+% Rebuild the hash table with a new HASHER.
+
+rehash = proc (t: cvt, hasher: htype)
+	t.hasher := hasher
+	t.lkey := unique
+	bucks: buckets := t.buckets
+	size: int := t.size
+	chain: _obj := mz(nil)
+	for i: int in int$from_to(1, size) do
+		nchain: _obj := bucks[i]
+		if nchain = mz(nil)
+		   then continue end
+		bucks[i] := mz(nil)
+		buck: bucket := _cvt[_obj, bucket](nchain)
+		while buck.next ~= mz(nil) do
+			buck := _cvt[_obj, bucket](buck.next)
+			end
+		buck.next := chain
+		chain := nchain
+		end
+	while chain ~= mz(nil) do
+		buck: bucket := _cvt[_obj, bucket](chain)
+		nchain: _obj := buck.next
+		hash: int := hasher(buck.key, size) + 1
+		buck.next := bucks[hash]
+		bucks[hash] := chain
+		chain := nchain
+		end
+	end rehash
+
+% Yield all (key, value) pairs in the table in random order
+
+elements = iter (t: cvt) yields (key, val)
+	bucks: buckets := t.buckets
+	for i: int in int$from_to(1, t.size) do
+		mb: _obj := bucks[i]
+		while mb ~= mz(nil) do
+			buck: bucket := _cvt[_obj, bucket](mb)
+			yield(buck.key, buck.val)
+			mb := buck.next
+			end
+		end
+	end elements
+
+% Return the total number of (key, value) pairs
+
+count = proc (t: cvt) returns (int)
+	cnt: int := 0
+	bucks: buckets := t.buckets
+	for i: int in int$from_to(1, t.size) do
+		mb: _obj := bucks[i]
+		while mb ~= mz(nil) do
+			cnt := cnt + 1
+			mb := _cvt[_obj, bucket](mb).next
+			end
+		end
+	return(cnt)
+	end count
+
+% Test if table is empty
+
+empty = proc (t: cvt) returns (bool)
+	bucks: buckets := t.buckets
+	for i: int in int$from_to(1, t.size) do
+		if bucks[i] ~= mz(nil)
+		   then return(false) end
+		end
+	return(true)
+	end empty
+
+% Return an array of integers with element i being the number of buckets with i
+% (key, val) pairs
+
+sizes = proc (t: cvt) returns (ai)
+	ai = array[int]
+	z: ai := ai$create(0)
+	bucks: buckets := t.buckets
+	for i: int in int$from_to(1, t.size) do
+		cnt: int := 0
+		mb: _obj := bucks[i]
+		while mb ~= mz(nil) do
+			cnt := cnt + 1
+			mb := _cvt[_obj, bucket](mb).next
+			end
+		z[cnt] := z[cnt] + 1
+		    except when bounds:
+				 while ai$size(z) < cnt do
+					 ai$addh(z, 0)
+					 end
+				 ai$addh(z, 1)
+			   end
+		end
+	return(z)
+	end sizes
+
+end table

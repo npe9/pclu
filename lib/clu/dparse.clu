@@ -1,0 +1,189 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%
+% Date parser
+%
+
+% The argument has the form "date time" with date or time optional.
+%
+% Accepts (at least) the following date formats, all with the year optional:
+%	day month year			month is >= 3 chars
+%	month day, year			month is >= 3 chars
+%	day-month-year			month is >= 3 chars
+%	month/day/year			month is an integer
+%
+% Accepts the following (24-hour) time format, with seconds optional:
+%	hours:minutes:seconds
+
+date_parse = proc(s: string) returns (date)
+	signals (invalid_format)
+    ast = array[string]
+    months = "jan feb mar apr may jun jul aug sep oct nov dec "
+
+    as: ast := ast$new()	% array of tokens
+    pos: int := 1		% position in string
+
+    while true do
+	% accumulate tokens into the array
+	c: char := s[pos]
+	if c = ' ' cor c = '\t' then
+	       pos := pos + 1
+	       continue
+	   end
+	acc: string := ""
+	while (c >= '0' cand c <= '9') do
+	    acc := string$append(acc, c)
+	    pos := pos + 1
+	    c := s[pos]
+	    end except others: end
+	if ~string$empty(acc) then
+	       ast$addh(as, acc)
+	       continue
+	   end
+	while (c >= 'A' cand c <= 'Z') cor (c >= 'a' cand c <= 'z') do
+	    if c <= 'Z' then c := char$i2c(char$c2i(c)+32) end
+	    acc := string$append(acc, c)
+	    pos := pos + 1
+	    c := s[pos]
+	    end except others: end
+	if string$empty(acc)
+	   then acc := string$c2s(c)
+		pos := pos + 1
+	   end
+	ast$addh(as, acc)
+	end except others: end
+
+    if ast$size(as) < 2 then signal invalid_format end
+    day, month, year: int
+    day, month, year := 0, 0, 0
+    if as[2] = ":" then
+	   % we have no date, use the current one
+	   d: date := now()
+	   day := d.day
+	   month := d.month
+	   year := d.year
+       else
+	   % we have a date in one of several formats
+	   ms: string := ast$reml(as)
+	   day := int$parse(ms)
+	       except others: end
+	   expect: string
+	   if day = 0 then
+		  % could have month first, I suppose
+		  ms := string$substr(ms, 1, 3)
+		  if string$size(ms) ~= 3 then signal invalid_format end
+		  month := (string$indexs(ms, months)+3)/4
+		  day := int$parse(ast$reml(as))
+		  expect := ","
+	      elseif ast$bottom(as) = "/" then
+		  % it must be in month/day/year format
+		  month := day
+		  ast$reml(as)
+		  day := int$parse(ast$reml(as))
+		  expect := "/"
+	      else
+		  if ast$bottom(as) = "-"
+		     then ast$reml(as)
+			  expect := "-"
+		     else expect := ","
+		     end
+		  ms := string$substr(ast$reml(as),1,3)
+		  if string$size(ms) ~= 3 then signal invalid_format end
+		  month := (string$indexs(ms, months)+3)/4
+	      end
+	   if ast$empty(as)
+	      then % year is missing
+		  year := now().year
+	      elseif ast$bottom(as) = expect
+	      then % year must be present
+		  ast$reml(as)
+		  year := int$parse(ast$reml(as))
+	      elseif expect = ","
+	      then % year may be present
+		  year := int$parse(ast$bottom(as))
+		  if year > 23
+		     then % yes, it is a year
+			 ast$reml(as)
+		     else % well, check for following numeric
+			 next_char: char := as[ast$low(as)+1][1]
+			 if next_char >= '1' cand next_char <= '9'
+				then % year is present
+					ast$reml(as)
+				else % year is absent
+					year := now().year
+				end
+		     end
+	      else year := now().year % year is missing
+	      end
+	   if year < 100 then year := year + 1900 end
+	   ast$set_low(as, 1)
+       end except others: signal invalid_format end
+    % now try for the time, if any
+    hr, min, sec: int
+    hr, min, sec := 0, 0, 0
+    if ~ast$empty(as) then
+	   hr := int$parse(ast$reml(as))
+	   if ast$reml(as) ~= ":" then signal invalid_format end
+	   min := int$parse(ast$reml(as))
+	   if ~ast$empty(as) then
+		  if ast$reml(as) ~= ":" then signal invalid_format end
+		  sec := int$parse(ast$reml(as))
+	      end
+       end except others: signal invalid_format end
+    if ast$empty(as) then
+	   return (date$create(day, month, year, hr, min, sec))
+       end
+	except others: end
+    signal invalid_format
+    end date_parse
+
+date_sub = proc (d: date, days, months, years: int) returns (date)
+	signals (year_too_small, overflow)
+    at = array[int]
+    m2d: at := at$[1: 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    lm2d: at := at$[1: 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    adj: at := m2d
+
+    day, month, year, hour, min, sec: int := date$get_all(d)
+
+    day := day - days
+	except when overflow: signal overflow end
+    while true do % try to make date legal
+	if day < 1 then % move to last month first
+	       month := month - 1
+	       if month = 0 then
+		      month := 12
+		      year := year - 1
+		  end
+	   end
+	adj := m2d
+	if year//4 ~= 0 cor year//100 ~= 0 then adj := lm2d end
+	dim: int := adj[month]
+	if day < 1 then % adjust for # of days in month
+	       day := day + dim
+	       if day < 1 then continue end
+	   end
+	if day > dim then
+	       day := day - dim
+	       month := month + 1
+	       if month > 12 then
+		      month := 1
+		      year := year + 1
+		  end
+	       continue
+	   end
+	% day is legal for this month!
+	month := month - 1 - months
+	year := year - years + month / 12
+	month := month // 12 + 1
+	if months = 0 then
+	       return (date$create(day, month, year, hour, min, sec))
+	   end
+	months := 0
+	years := 0
+	end except when overflow: signal overflow end
+    end date_sub
+
+ago = proc (days, months, years: int) returns (string)
+    return (date$unparse(date_sub(now(), days, months, years)))
+    end ago
+

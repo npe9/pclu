@@ -1,0 +1,313 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	SYNTAX CLU
+%
+%	CLU Compiler: TYPESPEC, EQUATE, STMT, EXPR
+
+%	TYPESPEC		canonicalized via a CE
+%
+% Typespecs are mutable. There is nothing particularly bad about this,
+% because they are not actual type objects. Typespecs are canonicalized
+% to minimize the work the loader must do. As equates are expanded,
+% typespecs are allowed to change for efficiency reasons. Also, the
+% parser does not distinguish between parameterless abstract types
+% and type parameters (both idns), so mutability is also used when
+% disambiguating these.
+
+typespec = cluster is	create,		% typeabs, int -> typespec
+			is_unknown,	% typespec -> bool
+			get_abs,	% typespec -> typeabs
+			set_abs,	% typespec, typeabs ->
+			get_id,		% typespec -> int
+			set_id,		% typespec, int ->
+			copy,		% same object
+			equal,		% equal ids
+			similar,	% equal ids
+			mismatch,	% typespec, typespec -> bool => anyize
+			mismatch2,	% typespec, typespec -> bool
+			_gcd
+
+rep = record[type_: typeabs,
+	     id:    int]
+
+create = proc (ta: typeabs, id: int) returns (cvt)
+	return(rep${type_: ta,
+		    id:    id})
+	end create
+
+is_unknown = proc (t: cvt) returns (bool)
+	return(typeabs$is_unknown(t.type_))
+	end is_unknown
+
+get_abs = proc (t: cvt) returns (typeabs)
+	return(t.type_)
+	end get_abs
+
+set_abs = proc (t: cvt, abs: typeabs)
+	t.type_ := abs
+	end set_abs
+
+get_id = proc (t: cvt) returns (int)
+	return(t.id)
+	end get_id
+
+set_id = proc (t: cvt, id: int)
+	t.id := id
+	end set_id
+
+copy = proc (t: typespec) returns (typespec)
+	return(t)
+	end copy
+
+equal = proc (t1: cvt, t2: cvt) returns (bool)
+	return(t1.id = t2.id)
+	end equal
+
+similar = proc (t1: cvt, t2: cvt) returns (bool)
+	return(t1.id = t2.id)
+	end similar
+
+% Mismatch checks if the first type does not include the second.  All types are included
+% in the type any. The unknown type includes and is included in all types.
+% There is no attempt to say that array[unknown] includes array[int], etc.
+% If inclusion involving othertype types is not decideable, no mismatch occurs.
+% If the first type is ANY, and the second is not, we signal "anyize".
+
+mismatch = proc (t1: cvt, t2: cvt) returns (bool) signals (anyize)
+	if t1.id = t2.id			% A quick check for equality
+	   then return(false) end
+	ta2: typeabs := t2.type_
+	tagcase t1.type_
+	   tag unknown:
+		return(false)			% Unknown includes all
+	   tag any_:
+		tagcase t2.type_
+		   tag unknown:
+			return(false)
+		   others:
+			signal anyize
+		   end
+	   tag other (ot: othertype):
+		tagcase ot			% Other requires some work
+		   tag return_:
+			return(false)
+		   others:
+			tagcase ta2
+			   tag unknown, apply, other:
+				return(false)
+			   tag type_:
+				return(othertype$is_op(ot))
+			   others:
+				return(true)
+			   end
+		   end
+	   tag apply (xa1: applytype):
+		tagcase ta2
+		   tag apply (xa2: applytype):
+			exl = exceptionlist
+			if ~(xa1.gen = xa2.gen  cand
+			     xa1.args = xa2.args  cand
+			     xa1.vals = xa2.vals)
+			   then return(true) end
+			for x: exception in exl$elements(xa2.sigs) do
+				begin
+				for y: exception in exl$elements(xa1.sigs) do
+					if exception$similar(x, y)
+					   then exit ok end
+					end
+				return(true)
+				end except when ok: end
+				end
+			return(false)
+		   tag unknown, other:
+			return(false)
+		   others:
+			return(true)
+		   end
+	   others:
+		tagcase ta2
+		   tag unknown:
+			return(false)
+		   tag other (ot: othertype):
+			tagcase ot
+			   tag return_: return(false)
+			   tag du:	return(~typeabs$is_type_(t1.type_))
+			   others:      return(true)
+			   end
+		   others:
+			return(true)
+		   end
+	   end
+	end mismatch
+
+mismatch2 = proc (t1: typespec, t2: typespec) returns (bool)
+	return(mismatch(t1, t2) cor mismatch(t2, t1))
+	   except when anyize: return(true) end
+	end mismatch2
+
+_gcd = proc (t: cvt, tab: gcd_tab) returns (int)
+	return(rep$_gcd(t, tab))
+	end _gcd
+
+end typespec
+
+%	EQUATE
+
+equate = cluster is	create,		% idn, equateval, int -> equate
+			is_rep,		% equate -> bool
+			get_idn,	% equate -> idn
+			get_val,	% equate -> equateval
+			get_line,	% equate -> int
+			copy,		% same object
+			equal,		% same object
+			similar,	% similar mod lineno
+			_gcd
+
+rep = record[idn:  idn,
+	     val:  equateval,
+	     line: int]
+
+create = proc (id: idn, val: equateval, line: int) returns (cvt)
+	return(rep${idn:  id,
+		    val:  val,
+		    line: line})
+	end create
+
+is_rep = proc (e: cvt) returns (bool)
+	return("REP" = idn$get_str(e.idn))
+	end is_rep
+
+get_idn = proc (e: cvt) returns (idn)
+	return(e.idn)
+	end get_idn
+
+get_val = proc (e: cvt) returns (equateval)
+	return(e.val)
+	end get_val
+
+get_line = proc (e: cvt) returns (int)
+	return(e.line)
+	end get_line
+
+copy = proc (e: equate) returns (equate)
+	return(e)
+	end copy
+
+equal = proc (e1: cvt, e2: cvt) returns (bool)
+	return(e1 = e2)
+	end equal
+
+similar = proc (e1: cvt, e2: cvt) returns (bool)
+	if e1.idn = e2.idn
+	   then return(equateval$similar(e1.val, e2.val))
+	   else return(false)
+	   end
+	end similar
+
+_gcd = proc (e: cvt, tab: gcd_tab) returns (int)
+	return(rep$_gcd(e, tab))
+	end _gcd
+
+end equate
+
+%	STMT
+
+stmt = cluster is	create,		% stmtabs, int -> stmt
+			get_abs,	% stmt -> stmtabs
+			set_abs,	% stmt, abs ->
+			get_line,	% stmt -> int
+			copy,		% same object
+			equal,		% same object
+			similar,	% stmtabs$similar
+			_gcd
+
+rep = record[stmt: stmtabs,
+	     line: int]
+
+create = proc (s: stmtabs, l: int) returns (cvt)
+	return(rep${stmt: s,
+		    line: l})
+	end create
+
+get_abs = proc (s: cvt) returns (stmtabs)
+	return(s.stmt)
+	end get_abs
+
+set_abs = proc (s: cvt, a: stmtabs)
+	s.stmt := a
+	end set_abs
+
+get_line = proc (s: cvt) returns (int)
+	return(s.line)
+	end get_line
+
+copy = proc (s: stmt) returns (stmt)
+	return(s)
+	end copy
+
+equal = proc (s1: cvt, s2: cvt) returns (bool)
+	return(s1 = s2)
+	end equal
+
+similar = proc (s1: cvt, s2: cvt) returns (bool)
+	return(stmtabs$similar(s1.stmt, s2.stmt))
+	end similar
+
+_gcd = proc (s: cvt, tab: gcd_tab) returns (int)
+	return(rep$_gcd(s, tab))
+	end _gcd
+
+end stmt
+
+%	EXPR
+
+expr = cluster is	create,		% exprabs, typespec -> expr
+			get_abs,	% expr -> exprabs
+			set_abs,	% expr, exprabs ->
+			get_typespec,	% expr -> typespec
+			set_typespec,	% expr, typespec ->
+			copy,		% rep$copy
+			equal,		% same object
+			similar,	% exprabs$similar
+			_gcd
+
+rep = record [expr:  exprabs,
+	      type_: typespec]
+
+create = proc (x: exprabs, t: typespec) returns (cvt)
+	return(rep${expr: x,
+		    type_: t})
+	end create
+
+get_abs = proc (x: cvt) returns (exprabs)
+	return(x.expr)
+	end get_abs
+
+set_abs = proc (x: cvt, a: exprabs)
+	x.expr := a
+	end set_abs
+
+get_typespec = proc (x: cvt) returns (typespec)
+	return(x.type_)
+	end get_typespec
+
+set_typespec = proc (x: cvt, t: typespec)
+	x.type_ := t
+	end set_typespec
+
+copy = proc (x: cvt) returns (cvt)
+	return(rep$copy(x))
+	end copy
+
+equal = proc (x1: cvt, x2: cvt) returns (bool)
+	return(x1 = x2)
+	end equal
+
+similar = proc (x1: cvt, x2: cvt) returns (bool)
+	return(exprabs$similar(x1.expr, x2.expr))
+	end similar
+
+_gcd = proc (x: cvt, tab: gcd_tab) returns (int)
+	return(rep$_gcd(x, tab))
+	end _gcd
+
+end expr

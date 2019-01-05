@@ -1,0 +1,78 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	INIT CLU
+%
+%	CLU Compiler: initialization routines
+
+initialize_compiler = proc () returns (bool)
+    cmpvar$set_version(str$append(get_compiler_version(), 'X'))
+    cmpvar$set_date(date$unparse(now()))
+    XLIB$init()
+    comp: CE := CE$create()
+    fn: fname := fname$parse(nul_dev())
+    inst: stream := stream$open(fn, "read")
+    outst: stream := stream$open(fn, "write")
+    ep: p_env := p_env$create(comp, inst, outst)
+    ec: c_env := c_env$create(comp, outst)
+    stream$close(inst)
+    stream$close(outst)
+    exts: xref := xref$create()
+    undefs: xref := xref$create()
+    e: stuff := stuff${ce:          comp,
+		       ce_reset:    true,
+		       ce_empty:    true,
+		       penv:        ep,
+		       cenv:        ec,
+		       genv:        maybe_g_env$make_none(nil),
+		       mode:        parse_,
+		       inst:        inst,
+		       outst:       outst,
+		       genst:       outst,
+		       names:       as$new(),
+		       exts:        exts,
+		       undefs:      undefs}
+    cmpvar$set_stuffs(e)
+    initialize_specs()
+    e.genv := maybe_g_env$make_one(g_env$create(comp, outst, fn))
+    save_compiler()
+    return(true)
+    end initialize_compiler
+
+initialize_specs = proc ()
+    fn: fname := basic_name()
+    if ~file_exists(fn) then
+       signal failure ("Can't find basic.types: please setenv CLUHOME to an appropriate value") end
+    ofn: fname := fname$make_output(fn, "junk")
+    jcl: str := "#specs " || fname$unparse(fn) || "^" || fname$unparse(ofn)
+    process_commands(str$s2ac(jcl), fake_stream(), command_line_)
+    ce$keep(cmpvar$stuffs().ce)
+    DU$keep()
+    end initialize_specs
+
+save_compiler = proc ()
+    reset_compiler()
+    vers: str := cmpvar$version()
+    z: int := str$size(vers)
+    if vers[z] = 'X'
+       then vers := str$substr(vers, 1, z - 1)
+	    cmpvar$set_version(vers)
+       end
+    dump_compiler(vers)
+    end save_compiler
+
+reset_compiler = proc ()
+    e: stuff := cmpvar$stuffs()
+    fn: fname := fname$parse(nul_dev())
+    inst: stream := stream$open(fn, "read")
+    outst: stream := stream$open(fn, "write")
+    comp: CE := e.ce
+    CE$reset(comp)
+    e.ce_reset := true
+    p_env$reset(e.penv, comp, inst, outst)
+    c_env$reset(e.cenv, comp, outst)
+    g_env$reset(maybe_g_env$value_one(e.genv), comp, outst, fn)
+    stream$close(inst)
+    stream$close(outst)
+    xref$flush(e.exts)
+    xref$flush(e.undefs)
+    as$trim(e.names, 1, 0)
+    end reset_compiler

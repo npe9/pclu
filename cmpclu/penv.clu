@@ -1,0 +1,897 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	PENV	CLU
+%
+%	CLU Compiler:  parser environment
+
+char_kind = oneof[eol,
+		  blank,
+		  quote1,
+		  quote2,
+		  escape,
+		  funny,
+		  illegal,
+		  comment:	null,
+		  mtoken,			% may only be part of token
+		  token:	token,
+		  letter,
+		  digit:	char]
+klist = sequence[char_kind]
+mm = char_kind$make_mtoken
+mt = char_kind$make_token
+mo = token$make_op
+md = char_kind$make_digit
+ml = char_kind$make_letter
+illegal = char_kind$make_illegal(nil)
+blank = char_kind$make_blank(nil)
+funny = char_kind$make_funny(nil)
+
+chrvecdef = klist$[illegal, illegal, illegal, illegal,
+		illegal, illegal, illegal, illegal,
+		blank,
+		char_kind$make_eol(nil),
+		blank,
+		blank,
+		blank,
+		illegal, illegal, illegal, illegal, illegal, illegal,
+		illegal, illegal, illegal, illegal, illegal, illegal,
+		illegal, illegal, illegal, illegal, illegal, illegal,
+		blank,
+		funny,
+		char_kind$make_quote2(nil),
+		mt(token$make_sharp(nil)),
+		mt(token$make_dollar(nil)),
+		char_kind$make_comment(nil),
+		mt(mo(infixop${prec: 2,
+			       op:   "and",
+			       neg:  false})),
+		char_kind$make_quote1(nil),
+		mt(token$make_l_paren(nil)),
+		mt(token$make_r_paren(nil)),
+		mm(mo(infixop${prec: 5,
+			       op:   "mul",
+			       neg:  false})),
+		mt(mo(infixop${prec: 4,
+			       op:   "add",
+			       neg:  false})),
+		mt(token$make_comma(nil)),
+		mt(mo(infixop${prec: 4,
+			       op:   "sub",
+			       neg:  false})),
+		mm(token$make_period(nil)),
+		mm(mo(infixop${prec: 5,
+			       op:   "div",
+			       neg:  false})),
+		md('0'), md('1'), md('2'), md('3'), md('4'),
+		md('5'), md('6'), md('7'), md('8'), md('9'),
+		mm(token$make_colon(nil)),
+		mt(token$make_semi(nil)),
+		mm(mo(infixop${prec: 3,
+			       op:   "lt",
+			       neg:  false})),
+		mt(token$make_equal(infixop${prec: 3,
+					     op:   "equal",
+					     neg:  false})),
+		mm(mo(infixop${prec: 3,
+			       op:   "gt",
+			       neg:  false})),
+		funny,
+		funny,
+		ml('a'), ml('b'), ml('c'), ml('d'), ml('e'), ml('f'),
+		ml('g'), ml('h'), ml('i'), ml('j'), ml('k'), ml('l'),
+		ml('m'), ml('n'), ml('o'), ml('p'), ml('q'), ml('r'),
+		ml('s'), ml('t'), ml('u'), ml('v'), ml('w'), ml('x'),
+		ml('y'), ml('z'),
+		mt(token$make_l_bkt(nil)),
+		char_kind$make_escape(nil),
+		mt(token$make_r_bkt(nil)),
+		funny,
+		ml('_'),
+		funny,
+		ml('a'), ml('b'), ml('c'), ml('d'), ml('e'), ml('f'),
+		ml('g'), ml('h'), ml('i'), ml('j'), ml('k'), ml('l'),
+		ml('m'), ml('n'), ml('o'), ml('p'), ml('q'), ml('r'),
+		ml('s'), ml('t'), ml('u'), ml('v'), ml('w'), ml('x'),
+		ml('y'), ml('z'),
+		mt(token$make_l_curly(nil)),
+		mm(mo(infixop${prec: 1,
+			       op:   "or",
+			       neg:  false})),
+		mt(token$make_r_curly(nil)),
+		mm(token$make_not(nil)),
+		illegal]
+
+p_env = cluster is	create,			% CE, stream, stream -> p_env
+			new_env,		% p_env, stream ->
+			push,			% p_env, stream -> p_env
+			pop,			% p_env -> p_env
+			reset,			% p_env, CE, stream, stream ->
+			hack,			% p_env ->
+			unhack,			% p_env ->
+			is_hacked,		% p_env -> bool
+			add_token,		% p_env, string, token ->
+			get_peek1,		% p_env -> token
+			peek,			% p_env, int -> token
+			next_token,		% p_env -> token
+			get_line,		% p_env -> int
+			get_peekline,		% p_env -> int
+			begin_body,		% p_env, bodykind ->
+			end_body,		% p_env ->
+			in_body,		% p_env, bodykind -> bool
+			get_unknown_type,	% p_env -> typespec
+			get_bad_expr,		% p_env -> expr
+			assume,			% p_env, str ->
+			get_err,		% p_env -> parerr
+			set_err,		% p_env, parerr ->
+			reset_err,		% p_env ->
+			err,			% p_env, str, parerr ->
+			set_deftype,		% p_env, DU, bool ->
+			in_proc,		% p_env -> bool
+			specd_vals,		% p_env -> bool
+			get_clustr,		% p_env -> str
+			get_applystr,		% p_env -> str
+			set_clustr,		% p_env, str ->
+			set_applystr		% p_env, str ->
+
+ac = array[char]
+abk = array[bodykind]
+tokenlist = array[token]
+ai = array[int]
+
+rep = record[ce:       CE,		% compilation environment
+	     reset:    bool,		% everything reset?
+	     tokens:   tokentab,	% token table
+	     hacked:   bool,
+	     errst:    stream,		% output stream for errors
+	     err:      parerr,
+	     inst:     stream,		% input stream
+	     fname:    str,		% input file name (~"" iff include file)
+	     line:     int,		% current line number of input
+	     peek1:    token,		% first lookahead
+	     line1:    int,		% line number of first lookahead
+	     peeks:    tokenlist,	% remaining lookaheads
+	     lines:    ai,		% line numbers of remaining lookaheads
+	     iline:    int,		% internal line number for scanning ahead
+	     past:     tokenlist,	% tokens seen on current line
+	     procdef:  bool,		% are we in a procedure?
+	     specvals: bool,		% are there return/yield values?
+	     clustr:   str,		% current cluster name
+	     applystr: str,		% current procedure or iterator name
+	     bodies:   abk,		% stack of bodykinds
+	     temp:     ac,		% for hacking strings
+	     unktype:  typespec]	% the unknown type
+
+own chrvec:klist := chrvecdef
+own saved_env: rep
+
+create = proc (comp: CE, inst: stream, errst: stream) returns (cvt)
+	e: rep := rep${ce:       comp,
+		       reset:    true,
+		       tokens:   tokentab$create(comp),
+		       hacked:   false,
+		       errst:    errst,
+		       err:      none,
+		       inst:     inst,
+		       fname:    "",
+		       line:     1,
+		       peek1:    token$make_eof(nil),
+		       line1:    1,
+		       peeks:    tokenlist$predict(1, 50),
+		       lines:    ai$predict(1, 50),
+		       iline:    0,
+		       past:     tokenlist$predict(1, 50),
+		       procdef:  false,
+		       specvals: false,
+		       clustr:   "",
+		       applystr: "",
+		       bodies:   abk$predict(1, 10),
+		       temp:     ac$predict(1, 50),
+		       unktype:  comp.unknown_type}
+	next_token(up(e))
+	tagcase e.peek1
+	   tag eof:
+	   others:  e.reset := false
+	   end
+	tokenlist$trim(e.past, 1, 0)
+	return(e)
+	end create
+
+new_env = proc (e: cvt, inst: stream) returns (cvt)
+	e.reset := false
+	e1: rep := rep$copy1(e)
+	e1.inst := inst
+	e1.fname := "(" || fname$unparse(inst.name) || ") "
+	e1.line1 := 1
+	e1.iline := 0
+	e1.peeks := tokenlist$predict(1, 50)
+	e1.lines := ai$predict(1, 50)
+	e1.past := tokenlist$predict(1, 50)
+	next_token(up(e1))
+	tokenlist$trim(e1.past, 1, 0)
+	return(e1)
+	end new_env
+
+push = proc(e:cvt, inst: stream) returns (cvt)
+	saved_env := e
+	e.reset := false
+	e1: rep := rep$copy1(e)
+	e1.inst := inst
+%	e1.fname := "(" || fname$unparse(inst.name) || ") "
+	e1.line1 := 1
+	e1.iline := 0
+	e1.peeks := tokenlist$predict(1, 50)
+	e1.lines := ai$predict(1, 50)
+	e1.past := tokenlist$predict(1, 50)
+	next_token(up(e1))
+	tokenlist$trim(e1.past, 1, 0)
+	return(e1)
+	end push
+
+pop = proc(e: cvt) returns (cvt)
+	return(saved_env)
+	end pop
+
+reset = proc (e: cvt, comp: CE, inst: stream, errst: stream)
+	e.ce := comp
+	e.errst := errst
+	e.err := none
+	e.inst := inst
+	e.line1 := 1
+	e.iline := 0
+	if ~e.reset
+	   then tokentab$reset(e.tokens, comp)
+		e.hacked := false
+		e.peeks.low := 1
+		tokenlist$trim(e.peeks, 1, 0)
+		e.lines.low := 1
+		ai$trim(e.lines, 1, 0)
+		abk$trim(e.bodies, 1, 0)
+		e.unktype := comp.unknown_type
+	   end
+	next_token(up(e))
+	tagcase e.peek1
+	   tag eof: e.reset := true
+	   others:  e.reset := false
+	   end
+	tokenlist$trim(e.past, 1, 0)
+	end reset
+
+hack = proc (e: cvt)
+	if ~e.hacked
+	   then e.hacked := true
+		tokentab$hack(e.tokens)
+		e.reset := false
+	   end
+	end hack
+
+unhack = proc (e: cvt)
+	if e.hacked
+	   then e.hacked := false
+		tokentab$unhack(e.tokens)
+	   end
+	end unhack
+
+is_hacked = proc (e: cvt) returns (bool)
+	return(e.hacked)
+	end is_hacked
+
+add_token = proc (e: cvt, n: string, k: token)
+	tokentab$add_token(e.tokens, n, k)
+	end add_token
+
+get_peek1 = proc (e: cvt) returns (token)
+	return(e.peek1)
+	end get_peek1
+
+% num=1 in peek corresponds to looking at the first token
+
+peek = proc (e: cvt, num: int) returns (token)
+	if num = 1
+	   then return(e.peek1) end
+	num := num - 2
+	sp: tokenlist := e.peeks
+	while tokenlist$size(sp) <= num do	% Scan until enough tokens seen
+		scanline(e)
+		end
+	return(sp[tokenlist$low(sp) + num])
+	end peek
+
+next_token = proc (e: cvt) returns (token)
+	sp: tokenlist := e.peeks
+	if tokenlist$empty(sp)
+	   then scanline(e)		% Scan until a token seen
+	   end
+	lnum: int := e.line1
+	if lnum > e.line
+	   then tokenlist$trim(e.past, 1, 0) end
+	e.line := lnum
+	k: token := e.peek1
+	tokenlist$addh(e.past, k)
+	e.peek1 := tokenlist$reml(sp)
+	e.line1 := ai$reml(e.lines)
+	return(k)
+	end next_token
+
+get_line = proc (e: cvt) returns (int)
+	return(e.line)
+	end get_line
+
+get_peekline = proc (e: cvt) returns (int)
+	return(e.line1)
+	end get_peekline
+
+begin_body = proc (e: cvt, kind: bodykind)
+	abk$addh(e.bodies, kind)
+	end begin_body
+
+end_body = proc (e: cvt)
+	abk$remh(e.bodies)
+	end end_body
+
+in_body = proc (e: cvt, kind: bodykind) returns (bool)
+	for k: bodykind in abk$elements(e.bodies) do
+		if k = kind then return(true) end
+		end
+	return(false)
+	end in_body
+
+get_unknown_type = proc (e: cvt) returns (typespec)
+	return(e.unktype)
+	end get_unknown_type
+
+get_bad_expr = proc (e: cvt) returns (expr)
+	return(expr$create(exprabs$make_bad(nil), e.unktype))
+	end get_bad_expr
+
+assume = proc (e: cvt, what: str)
+	st: stream := e.errst
+	begin
+	stream$puts(st, int$unparse(e.line))	% Output line number and what happened
+	stream$puts(st, ":\t")
+	stream$puts(st, e.fname)
+	stream$puts(st, "missing ")
+	stream$puts(st, what)
+	stream$puts(st, " - assumed present")
+	end except when not_possible (*): end
+	line(e, minor)
+	end assume
+
+get_err = proc (e: cvt) returns (parerr)
+	return(e.err)
+	end get_err
+
+set_err = proc (e: cvt, deg: parerr)
+	if deg > e.err
+	   then e.err := deg end
+	end set_err
+
+reset_err = proc (e: cvt)
+	e.err := none
+	end reset_err
+
+err = proc (e: cvt, why: str, deg: parerr)
+	st: stream := e.errst
+	begin
+	stream$puts(st, int$unparse(e.line))	% Output line number and what happened
+	stream$puts(st, ":\t")
+	stream$puts(st, e.fname)
+	stream$puts(st, why)
+	end except when not_possible (*): end
+	line(e, deg)
+	end err
+
+line = proc (e: rep, deg: parerr)
+	st: stream := e.errst
+	begin
+	stream$putc(st, '\n')
+	stream$putc(st, '\t')		% Output current line and cursor position
+	for k: token in tokenlist$elements(e.past) do
+		pt_token(k, st)
+		stream$putc(st, ' ')
+		end
+	stream$puts(st, "<!>")
+	if e.line1 > e.line
+	   then stream$puts(st, "\n\t")
+	   else stream$putc(st, ' ')
+	   end
+	pt_token(e.peek1, st)
+	sp: tokenlist := e.peeks
+	lines: ai := e.lines
+	for i: int in ai$indexes(lines) do
+		if lines[i] > e.line1 then break end
+		stream$putc(st, ' ')
+		pt_token(sp[i], st)
+		end
+	stream$putc(st, '\n')
+	end except when not_possible (*): end
+	if deg > e.err then e.err := deg end
+	end line
+
+set_deftype = proc (e: cvt, which: DU, specvals: bool)
+	e.procdef := which = e.ce.proc_
+	e.specvals := specvals
+	end set_deftype
+
+in_proc = proc (e: cvt) returns (bool)
+	return(e.procdef)
+	end in_proc
+
+specd_vals = proc (e: cvt) returns (bool)
+	return(e.specvals)
+	end specd_vals
+
+get_clustr = proc (e: cvt) returns (str)
+	return(e.clustr)
+	end get_clustr
+
+get_applystr = proc (e: cvt) returns (str)
+	return(e.applystr)
+	end get_applystr
+
+set_clustr = proc (e: cvt, s: str)
+	e.clustr := s
+	e.reset := false
+	end set_clustr
+
+set_applystr = proc (e: cvt, s: str)
+	e.applystr := s
+	end set_applystr
+
+% Finds all tokens on next input line (to NL) and adds them to peeks.
+% Continues until some line with a token is finished.
+
+scanline = proc (e: rep)
+	tokens: tokentab := e.tokens
+	st: stream := e.inst
+	sp: tokenlist := e.peeks
+	lines: ai := e.lines
+	z: int := tokenlist$size(sp)
+	e.iline := e.iline + 1
+	while true do
+		cc: char := stream$getc(st)
+		    except when end_of_file:
+				 tokenlist$addh(sp, token$make_eof(nil))
+				 cc := '\n'
+			   end
+		tagcase chrvec[char$c2i(cc)]
+		   tag letter (c: char):
+			idn_or_key(e, c)
+		   tag blank:
+		   tag token (t: token):
+			tokenlist$addh(sp, t)
+		   tag mtoken (t: token):
+			tagcase t
+			   tag colon, op, not:
+				mcharop(e, t, cc)
+			   tag period:
+				begin
+				cc := stream$peekc(st)
+				if cc >= '0'  cand  cc <= '9'
+				   then b: ac := e.temp
+					ac$trim(b, 1, 0)
+					ac$addh(b, '.')
+					reallit(e, b)
+					continue
+				   end
+				end except when end_of_file: end
+				tokenlist$addh(sp, t)
+			   others:
+				tokenlist$addh(sp, t)
+			   end
+		   tag digit:
+			number(e, cc)
+		   tag quote2:
+			strlit(e)
+		   tag quote1:
+			charlit(e)
+		   tag eol:
+			z1: int := tokenlist$size(sp)
+			iline: int := e.iline
+			if z < z1
+			   then for z in int$from_to(z + 1, z1) do
+					ai$addh(lines, iline)
+					end
+				return
+			   else e.iline := iline + 1
+			   end
+		   tag comment:
+			comment(e)
+		   others:
+			bad(e, cprint_form(cc), "Illegal character in text")
+		   end except when bounds:
+					bad(e, cprint_form(cc),
+						"Illegal character in text")
+			      end
+	    end
+	end scanline
+
+% idn, name, keyword => alpha {alpha | digit}
+
+idn_or_key = proc (e: rep, cc: char)
+	st: stream := e.inst
+	t: ac := e.temp
+	ac$trim(t, 1, 0)
+	ac$addh(t, cc)
+	while true do
+		tagcase chrvec[char$c2i(stream$peekc(st))]
+		   tag letter, digit (c: char):
+			ac$addh(t, c)
+			stream$getc(st)
+		   others:
+			break
+		   end
+		end
+	    except when bounds, end_of_file: end
+	tokenlist$addh(e.peeks, tokentab$get_token(e.tokens, str$ac2s(t)))
+	end idn_or_key
+
+% int => digit {digit}
+% real => [int] . int [exp] | int . [int] [exp] | int exp
+% exp => E [+ | -] int | e [+ | -] int | 
+%
+% If in hack mode, and the leading character is '0', then the integer is in octal
+
+number = proc (e: rep, cc: char)
+	st: stream := e.inst
+	b: ac := e.temp
+	ac$trim(b, 1, 0)
+	ac$addh(b, cc)
+	while true do
+		tagcase chrvec[char$c2i(stream$peekc(st))]
+		   tag digit (c: char):
+			ac$addh(b, stream$getc(st))
+			continue
+		   tag letter (c: char):
+			if c = 'e'
+			   then reallit(e, b)
+				return
+			   else break
+			   end
+		   tag mtoken (t: token):
+			tagcase t
+			   tag period:
+				ac$addh(b, stream$getc(st))
+				reallit(e, b)
+				return
+			   others:
+				break
+			   end
+		   others:
+			break
+		   end
+		end
+	    except when bounds, end_of_file: end
+	res: int
+	if cc = '0'  cand  e.hacked
+	   then res := i_oparse(str$ac2s(b))
+	   else res := int$parse(str$ac2s(b))
+	   end except when overflow:
+				bad(e, str$ac2s(b), "Integer value overflowed")
+				res := 131071
+		      when bad_format:
+				bad(e, str$ac2s(b), "Illegal octal literal")
+				res := 0
+		      end
+	tokenlist$addh(e.peeks, token$make_expr(exprabs$make_int_(res)))
+	end number
+
+reallit = proc (e: rep, a: ac)
+	st: stream := e.inst
+	noexp: bool := true
+	while true do
+		tagcase chrvec[char$c2i(stream$peekc(st))]
+		   tag digit (c: char):
+			ac$addh(a, stream$getc(st))
+		   tag letter (c: char):
+			if c = 'e'  cand  noexp
+			   then noexp := false
+				ac$addh(a, stream$getc(st))
+				c := stream$peekc(st)
+				if c = '-'  cor  c = '+'
+				   then ac$addh(a, stream$getc(st)) end
+			   else break
+			   end
+		   others:
+			break
+		   end
+		end
+	    except when bounds, end_of_file: end
+	lit: str := str$ac2s(a)
+	res: real := real$parse(lit)
+	   except when bad_format: bad(e, lit, "Bad format for real literal")
+				   res := 1e38
+		  when overflow:   bad(e, lit, "Real value overflowed")
+				   res := 1e38
+		  when underflow:  bad(e, lit, "Real value underflowed")
+				   res := 1e-38
+		  end
+	tokenlist$addh(e.peeks, token$make_expr(exprabs$make_real_(res)))
+	end reallit
+
+% str => " { printing except "} "
+
+strlit = proc (e: rep)
+	st: stream := e.inst
+	t: ac := e.temp
+	ac$trim(t, 1, 0)
+	while true do
+		tagcase chrvec[char$c2i(stream$peekc(st))]
+		   tag quote2:
+			stream$getc(st)
+			break
+		   tag escape:
+			stream$getc(st)
+			ac$addh(t, escape(e))
+		   tag eol:
+			bad(e, str$ac2s(t), "Unterminated string literal")
+			break
+		   tag illegal, blank:
+			c: char := stream$getc(st)
+			if c ~= ' '
+			   then	bad(e, cprint_form(c),
+					"Illegal character in string literal")
+			   end
+			ac$addh(t, c)
+		   others:
+			ac$addh(t, stream$getc(st))
+		   end
+		   except when bounds:
+				c: char := stream$getc(st)
+				bad(e, cprint_form(c),
+					"Illegal character in string literal")
+				ac$addh(t, c)
+			  when end_of_file:
+				bad(e, str$ac2s(t), "Unterminated string literal")
+				break
+			  end
+		end
+	tokenlist$addh(e.peeks, token$make_expr(exprabs$make_str(str$ac2s(t))))
+	end strlit
+
+% char => ' (printing except ') '
+
+charlit = proc (e: rep)
+	st: stream := e.inst
+	c: char
+	tagcase chrvec[char$c2i(stream$peekc(st))]
+	   tag escape:
+		stream$getc(st)
+		c := escape(e)
+	   tag eol:
+		bad(e, "", "Stray ' at end of line")
+		return
+	   tag quote1:
+		bad(e, "''", "Empty character literal")
+		c := '?'
+	   tag illegal, blank:
+		c := stream$getc(st)
+		if c ~= ' '
+		   then bad(e, cprint_form(c), "Illegal character literal")
+		   end
+	   others:
+		c := stream$getc(st)
+	   end
+	   except when bounds:
+			c := stream$getc(st)
+			bad(e, cprint_form(c), "Illegal character literal")
+		  when end_of_file:
+			bad(e, "", "Stray ' at end of line")
+			return
+		  end
+	tokenlist$addh(e.peeks, token$make_expr(exprabs$make_char_(c)))
+	if stream$peekc(st) = '\''
+	   then stream$getc(st)
+		return
+	   end except when end_of_file: end
+	bad(e, "'" || cprint_form(c), "Unterminated character literal")
+	end charlit
+
+% escape => \' | \" | \\ | \n | \t | \p | \b | \r | \v | \ octal octal octal |
+%	    \^<char>  % char in {@, A-Z, a-z, [, \, ], ^, _, ?}
+
+escape = proc (e: rep) returns (char)
+	st: stream := e.inst
+	k: char_kind := chrvec[char$c2i(stream$peekc(st))]
+	    except when bounds: k := char_kind$make_illegal(nil)
+		   when end_of_file: k := char_kind$make_eol(nil)
+		   end
+	s: str
+	tagcase k
+	   tag eol:
+		bad(e, "", "Stray \\ at end of line")
+		return('?')
+	   others:
+		s := str$c2s(stream$getc(st))
+	   end
+	tagcase k
+	   tag escape:
+		return('\\')
+	   tag quote1:
+		return('\'')
+	   tag quote2:
+		return('"')
+	   tag letter (c: char):
+		if     c = 'n'  then return('\n')
+		elseif c = 't'  then return('\t')
+		elseif c = 'b'  then return('\b')
+		elseif c = 'p'  then return('\p')
+		elseif c = 'r'  then return('\r')
+		elseif c = 'v'  then return('\v') end
+	   tag digit:
+		for i: int in int$from_to_by(2, 3, 1) do
+			tagcase chrvec[char$c2i(stream$peekc(st))]
+			   tag digit:
+				s := str$append(s, stream$getc(st))
+			   others:
+				exit bad_format
+			   end
+			end
+		res: int := i_oparse(s)
+		return(char$i2c(res))
+	   tag funny:
+		if s = "^"
+		   then if ~e.hacked
+			   then bad(e, "", "\\^* escape sequences illegal") end
+			tagcase chrvec[char$c2i(stream$peekc(st))]
+			   tag letter (c: char):
+				stream$getc(st)
+				if c = '_'
+				   then c :=  '\177' end
+				return(char$i2c(char$c2i(c) - 96))
+			   tag eol:
+			   others:
+				c: char := stream$getc(st)
+				if c = '?'
+				   then return('\177')
+				elseif str$indexc(c, "@[\\]^") > 0
+				   then return(char$i2c(char$c2i(c) - 64)) end
+				s := s || str$c2s(c)
+			   end
+		   end
+	   others:
+	   end except when bad_format, illegal_char, bounds, end_of_file: end
+	bad(e, "\\" || s, "Illegal escape sequence")
+	return('?')
+	end escape
+
+% binfixop => | || * ** / // < <= > >= ~ ~< ~<= ~> ~>= ~=
+
+mcharop = proc (e: rep, t: token, c: char)
+	st: stream := e.inst
+	pc: char := stream$peekc(st)
+	    except when end_of_file: pc := '\n' end
+	tagcase t
+	   tag colon:
+		if pc = '='
+		   then	stream$getc(st)
+			t := token$make_assn(nil)
+		   end
+	   tag op:
+		if c = '|'
+		   then if pc = '|'
+			   then stream$getc(st)
+				t := token$make_op(infixop${prec: 4,
+							    op:   "concat",
+							    neg:  false})
+			   end
+		elseif c = '*'
+		   then if pc = '*'
+			   then stream$getc(st)
+				t := token$make_op(infixop${prec: 6,
+							    op:   "power",
+							    neg:  false})
+			   end
+		elseif c = '/'
+		   then if pc = '/'
+			   then stream$getc(st)
+				t := token$make_op(infixop${prec: 5,
+							    op:   "mod",
+							    neg:  false})
+			   end
+		elseif c = '<'
+		   then if pc = '='
+			   then stream$getc(st)
+				t := token$make_op(infixop${prec: 3,
+							    op:   "le",
+							    neg:  false})
+			   end
+		elseif c = '>'
+		   then if pc = '='
+			   then stream$getc(st)
+				t := token$make_op(infixop${prec: 3,
+							    op:   "ge",
+							    neg:  false})
+			   end
+		end
+	   tag not:
+		if pc = '<'
+		   then	t := token$make_op(infixop${prec: 3,
+						    op:   "lt",
+						    neg:  true})
+			stream$getc(st)
+			if stream$peekc(st) = '='
+			   then stream$getc(st)
+				t := token$make_op(infixop${prec: 3,
+							    op:   "le",
+							    neg:  true})
+			   end
+		elseif pc = '>'
+		   then t := token$make_op(infixop${prec: 3,
+						    op:   "gt",
+						    neg:  true})
+			stream$getc(st)
+			if stream$peekc(st) = '='
+			   then stream$getc(st)
+				t := token$make_op(infixop${prec: 3,
+							    op:   "ge",
+							    neg:  true})
+			   end
+		elseif pc = '='
+		   then stream$getc(st)
+			t := token$make_op(infixop${prec: 3,
+						    op:   "equal",
+						    neg:  true})
+		   end
+	   others:
+	   end except when end_of_file: end
+	tokenlist$addh(e.peeks, t)
+	end mcharop
+
+% comment => % <> {printing | HT} NL
+
+comment = proc (e: rep)
+	st: stream := e.inst
+	while true do
+		tagcase chrvec[char$c2i(stream$peekc(st))]
+		   tag illegal, blank:
+			c: char := stream$getc(st)
+			if c = '\p'  cand  stream$peekc(st) = '\n'
+			   then return
+			elseif ~(c = ' '  cor  c = '\t')
+			   then bad(e, cprint_form(c),
+						"Illegal character in comment")
+			end except when end_of_file: return end
+		   tag eol:
+			return
+		   others:
+			stream$getc(st)
+		   end
+		   except when bounds:
+				bad(e, cprint_form(stream$getc(st)),
+					"Illegal character in comment")
+			  when end_of_file:
+				return
+			  end
+		end
+	end comment
+
+bad = proc (e: rep, text: str, why: str)
+	st: stream := e.errst
+	begin
+	stream$puts(st, int$unparse(e.iline))
+	stream$puts(st, ":\t")
+	stream$puts(st, e.fname)
+	stream$puts(st, why)
+	if ~str$empty(text)
+	   then	stream$puts(st, ": ")
+		stream$puts(st, text)
+	   end
+	stream$putc(st, '\n')
+	end except when not_possible (*): end
+	if minor > e.err then e.err := minor end
+	end bad
+
+end p_env
+
+cprint_form = proc (c: char) returns (str)
+	if c < ' '
+	   then return(str$append("^", char$i2c(char$c2i(c) + 64)))
+	elseif c < '\177'
+	   then return(str$c2s(c))
+	elseif c = '\177'
+	   then return("^?") end
+	i: int := char$c2i(c)
+	if i < 160  cor  i = 255
+	   then return(str$append("!", char$i2c((i - 64) // 128)))
+	   else return(str$append("&", char$i2c(i - 128)))
+	   end
+	end cprint_form

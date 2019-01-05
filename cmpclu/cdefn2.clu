@@ -1,0 +1,337 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	CDEFN2 CLU
+%
+%	CLU Compiler Version 3: definition checker
+
+c_typedefn = proc (e: c_env, def: typedefn, kind: int)
+	e.line := def.line
+	i: idn := def.idn
+	want: int
+	if decllist$empty(def.parms)
+	   then want := want_type
+	   else want := want_gen
+	   end
+	mod: DU, specs: mspecs := c_new_module(e, i, want)
+	if mod.unique ~= i.str
+	   then i := idn$create(mod.unique, i.kind)
+		def.idn := i
+	   end
+	c_env$begin_scope(e)
+	c_setup_opers(e, def)
+	info: typeinfo, extsize: int := c_type_specs(e, def, mod)
+	ninfo: typeinfo := b_typeinfo(e, info)
+	nspecs: DUspecs
+	if kind = cluster_
+	   then nspecs := DUspecs$make_cluster_(ninfo)
+	elseif kind = selector_
+	   then nspecs := DUspecs$make_select(ninfo)
+	else nspecs := DUspecs$make_atype(ninfo) end
+	fixup_new_module(e, i, mod, nspecs)
+	c_type_main(e, def, info)
+	c_env$end_scope(e)
+	ninfo.opers := opinfolist$subseq(ninfo.opers, 1, extsize)
+	end c_typedefn
+
+c_setup_opers = proc (e: c_env, def: typedefn)
+	extops: idnlist := def.ops
+	uk: idnkind := idnkind$make_unknown(nil)
+	for i: idn in idnlist$elements(extops) do
+		c_env$declare(e, i, uk)
+		end
+	for op: applydefn in applydefnlist$elements(def.body) do
+		e.line := op.line
+		i: idn := op.idn
+		n: name := i.str
+		if c_member(i, extops)
+		   then if idnkind$is_unknown(i.kind)
+			   then i.kind := idnkind$make_opgen(n)
+			   else c_env$err(e, qs$["redeclaration of '", i.str,
+						 "'"])
+			   end
+		   else	n := "%" || n
+			c_env$declare(e, i, idnkind$make_opgen(n))
+			op.idn := idn$create(n, uk)
+		   end
+		end
+	e.line := def.line
+	for i: idn in idnlist$elements(extops) do
+		if idnkind$is_unknown(i.kind)
+		   then	c_env$err(e, qs$["operation '", i.str, "' not defined"])
+			i.kind := idnkind$make_opgen(i.str)
+		   end
+		end
+	end c_setup_opers
+
+c_member = proc (i: idn, idns: idnlist) returns (bool)
+	for id: idn in idnlist$elements(idns) do
+		if i = id then return(true) end
+		end
+	return(false)
+	end c_member
+
+c_type_specs = proc (e: c_env, def: typedefn, mod: DU) returns (typeinfo, int)
+	dparms: decllist := def.parms
+	reqs: restrictlist := def.where_
+	equates: equatelist := def.equates
+	opers: applydefnlist := def.body
+	c_env$begin_specs(e)
+	c_env$eval_parms(e, dparms, equates)
+	nparms: idnlist := c_parameters(e, dparms)
+	def.up_ := c_up_type(e, mod, nparms)
+	e.up_type := def.up_
+	c_env$eval_equates(e)
+	def.down_ := c_down_type(e, equates)
+	e.down_type := def.down_
+	c_restrictlist(e, reqs)
+	c_add_restricts(e, reqs)
+	extinfo: opinfolist := opinfolist$new()
+	intinfo: opinfolist := opinfolist$new()
+	for op: applydefn in applydefnlist$elements(opers) do
+		inf: opinfo := c_oper_specs(e, op)
+		if inf.name[1] = '%'
+		   then intinfo := opinfolist$addh(intinfo, inf)
+		   else extinfo := opinfolist$addh(extinfo, inf)
+		   end
+		end
+	c_env$end_specs(e)
+	return(typeinfo${parms: nparms,
+			 opers: extinfo || intinfo},
+	       opinfolist$size(extinfo))
+	end c_type_specs
+
+c_type_main = proc (e: c_env, def: typedefn, info: typeinfo)
+	e.line := def.line
+	c_env$begin_scope(e)
+	c_push_parms(e, def.parms, info.parms)
+	c_env$begin_recheck(e, ~idnlist$empty(info.parms))
+	c_env$equates(e, def.equates)
+	c_restrictlist(e, def.where_)
+	c_env$end_recheck(e,  ~idnlist$empty(info.parms))
+	c_initlist(e, def.init)
+	opers: opinfolist := info.opers
+	for op: applydefn in applydefnlist$elements(def.body) do
+		c_oper_main(e, op, opers)
+		end
+	c_env$end_scope(e)
+	end c_type_main
+
+c_up_type = proc (e: c_env, gen: DU, parms: idnlist) returns (typespec)
+	exprs: exprlist := exprlist$new()
+	tt: typespec := e.type_type
+	for i: idn in idnlist$elements(parms) do
+		tagcase i.kind
+		   tag tparm:
+			ta: typeabs := typeabs$make_idn(i)
+			xa: exprabs := exprabs$make_type_(c_env$get_type(e, ta))
+			exprs := exprlist$addh(exprs, expr$create(xa, tt))
+		   tag vparm (k: typespec):
+			exprs := exprlist$addh(exprs,
+					       expr$create(exprabs$make_idn(i), k))
+		   others:
+		   end
+		end
+	return(c_env$get_type(e, typeabs$make_cluster_(clutype${gen:   gen,
+								parms: exprs})))
+	end c_up_type
+
+c_down_type = proc (e: c_env, eqs: equatelist) returns (typespec)
+	for eq: equate in equatelist$elements(eqs) do
+		if equate$is_rep(eq)
+		   then	e.line := eq.line
+			tagcase eq.idn.kind
+			   tag expr (k: expr):
+				tagcase k.abs
+				   tag type_ (xa: typespec):
+					return(xa)
+				   tag apply (xa: clutype):
+					if typeabs$is_other(k.typespec.abs)
+					   then ta: typeabs := typeabs$make_cluster_(xa)
+						t: typespec := c_env$get_type(e, ta)
+						k.abs := exprabs$make_type_(t)
+						k.typespec := e.type_type
+						return(t)
+					   end
+				   others:
+				   end
+			   others:
+			   end
+			c_env$err1(e, "REP not equated to a type")
+			return(e.unknown_type)
+		   end
+		end
+	c_env$err1(e, "REP undefined")
+	return(e.unknown_type)
+	end c_down_type
+
+c_oper_specs = proc (e: c_env, def: applydefn) returns (opinfo)
+	e.line := def.line
+	e.varlist := def.vars
+	dparms: decllist := def.parms
+	reqs: restrictlist := def.where_
+	c_env$begin_scope(e)
+	c_env$eval_parms(e, dparms, def.equates)
+	nparms: idnlist := c_parameters(e, dparms)
+	c_env$eval_equates(e)
+	args: typelist := c_decllist1(e, def.args)
+	vals, ivals: typelist := c_typelist1(e, def.vals)
+	def.vals := ivals
+	sigs: exceptionlist := c_exceptionlist1(e, def.sigs)
+	c_restrictlist(e, reqs)
+	c_env$end_scope(e)
+	at: applytype := applytype${gen:  def.gen,
+				    args: args,
+				    vals: vals,
+				    sigs: sigs}
+	xreqs: typesetlist := c_oper_requires(e, def.where_, nparms)
+	t: typespec := c_env$get_type(e, typeabs$make_apply(at))
+	def.type_ := t
+	n: name := def.idn.str
+	return(opinfo${name:   n,
+		       where_: xreqs,
+		       info:   applyinfo${parms: nparms,
+					  type_: t}})
+	end c_oper_specs
+
+c_oper_main = proc (e: c_env, def: applydefn, infos: opinfolist)
+	n: name := def.idn.str
+	for info: opinfo in opinfolist$elements(infos) do
+		if n = info.name
+		   then	reqs: typesetlist := info.where_
+			c_add_requires(e, reqs)
+			c_apply_main1(e, def, info.info.parms)
+			c_rem_requires(e, reqs)
+			return
+		   end
+		end
+	end c_oper_main
+
+c_apply_main1 = proc (e: c_env, def: applydefn, nparms: idnlist)
+	e.line := def.line
+	e.varlist := def.vars
+	c_env$begin_scope(e)
+	c_push_parms(e, def.parms, nparms)
+	c_env$begin_recheck(e,  ~idnlist$empty(nparms))
+	args: typelist := c_decllist1(e, def.args)
+	vals, ivals: typelist := c_typelist1(e, def.vals)
+	def.vals := ivals
+	sigs: exceptionlist := c_exceptionlist1(e, def.sigs)
+	c_restrictlist(e, def.where_)
+	c_env$equates(e, def.equates)
+	e.line := def.line
+	def.type_ := c_type(e, def.type_)
+	c_env$new_apply(e, applytype${gen:  def.gen,
+				      args: args,
+				      vals: vals,
+				      sigs: sigs})
+	c_env$end_recheck(e,  ~idnlist$empty(nparms))
+	c_initlist(e, def.init)
+	idnrow$trim(def.vars, 1, 0)
+	for s: stmt in stmtlist$elements(def.body) do
+		c_stmt(e, s)
+		end
+	c_env$end_scope(e)
+	end c_apply_main1
+
+c_add_requires = proc (e: c_env, reqs: typesetlist)
+	for req: typeset in typesetlist$elements(reqs) do
+		tagcase req.parm.kind
+		   tag tparm (k: opspeclist):
+			req.parm.kind := idnkind$make_tparm(k || req.opers)
+		   others:
+		   end
+		end
+	end c_add_requires
+
+c_rem_requires = proc (e: c_env, reqs: typesetlist)
+	for req: typeset in typesetlist$elements(reqs) do
+		tagcase req.parm.kind
+		   tag tparm (k: opspeclist):
+			k := opspeclist$subseq(k, 1, opspeclist$size(k) -
+						     opspeclist$size(req.opers))
+			req.parm.kind := idnkind$make_tparm(k)
+		   others:
+		   end
+		end
+	end c_rem_requires
+
+c_decllist1 = proc (e: c_env, decls: decllist) returns (typelist)
+	types: typelist := typelist$new()
+	cvt_: typespec := e.cvt_type
+	down_: typespec := e.down_type
+	nt: typespec
+	if c_env$building_specs(e)
+	   then nt := e.up_type
+	   else nt := cvt_
+	   end
+	for d: decl in decllist$elements(decls) do
+		dt: typespec := d.type_
+		at: typespec
+		if dt = cvt_
+		   then	dt := down_
+			at := nt
+		   else	dt := c_type(e, dt)
+			d.type_ := dt
+			at := dt
+		   end
+		for i: idn in idnlist$elements(d.idns) do
+			c_env$add_var(e, i, dt)
+			types := typelist$addh(types, at)
+			end
+		end
+	return(types)
+	end c_decllist1
+
+c_typelist1 = proc (e: c_env, types: typelist) returns (typelist, typelist)
+	cvt_: typespec := e.cvt_type
+	nt: typespec
+	if c_env$building_specs(e)
+	   then nt := e.up_type
+	   else nt := cvt_
+	   end
+	xtypes: typelist := typelist$new()
+	itypes: typelist := typelist$new()
+	for i: int in typelist$indexes(types) do
+		t: typespec := types[i]
+		xt: typespec
+		if t = cvt_
+		   then xt := nt
+		   else t := c_type(e, t)
+			xt := t
+		   end
+		xtypes := typelist$addh(xtypes, xt)
+		itypes := typelist$addh(itypes, t)
+		end
+	return(xtypes, itypes)
+	end c_typelist1
+
+c_exceptionlist1 = proc (e: c_env, sigs: exceptionlist) returns (exceptionlist)
+	nsigs: exceptionlist := exceptionlist$new()
+	for sig: exception in exceptionlist$elements(sigs) do
+		types, itypes: typelist := c_typelist1(e, sig.types)
+		sig.types := itypes
+		nsigs := exceptionlist$addh(nsigs, exception${name:  sig.name,
+							      types: types})
+		end
+	return(nsigs)
+	end c_exceptionlist1
+
+c_oper_requires = proc (e: c_env, reqs: restrictlist, parms: idnlist)
+							returns (typesetlist)
+	xreqs: typesetlist := typesetlist$new()
+	for req: restrict in restrictlist$elements(reqs) do
+		i: idn := req.idn
+		tagcase req.kind
+		   tag has_ (rk: operdecllist):
+			if c_member(i, parms)
+			   then c_add_opspecs(e, i, rk)
+			   else	opers: opspeclist :=
+					c_new_requires(opspeclist$new(), rk)
+				xreqs := typesetlist$addh(xreqs,
+							  typeset${parm:  i,
+								   opers: opers})
+			   end
+		   others:
+		   end
+		end
+	return(xreqs)
+	end c_oper_requires

@@ -1,0 +1,18 @@
+
+Installation instructions for this directory:
+(aka how to rebuild the keys file)
+
+1) fix the path name in setup.el
+
+2) add to ~/.emacs
+	(load-file " .../setup.el")
+   fill in ... with the right path
+
+3) crank up emacs
+
+4) Mx load-file clu-doc.el
+
+5) Mx clu-doc-snarf-file
+
+6) Testing: Mx load-file clu-doc.el
+	ctrl-h d oneof$make_

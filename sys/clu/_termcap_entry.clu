@@ -1,0 +1,68 @@
+% Copyright Massachusetts Institute of Technology 1983, 1989
+
+_termcap_entry = proc (fs, term: string) returns (string) signals (not_found)
+	ent: string := ""
+	c: _chan
+	b: _bytevec := _bytevec$create(128)
+	while true do
+		c := _chan$open(file_name$parse(fs), "read", 0)
+		   except when bad_format, not_possible (*): signal not_found
+			  end
+		idx: int := string$size(term) + 1
+		bterm: _bytevec := _cvt[string, _bytevec](term)
+		max: int := _chan$getb(c, b)
+		% LINUX changes: skip over blank lines and look at first entry
+		while true do
+			% search for an entry (skip comments and blank lines)
+			while b[1] = '#' cor b[1] = '\n' do
+				max := _skip_fill(b, max, c, '\n')
+				end
+			% search within an entry
+			fin: char := '|'
+			first: bool := true
+			while true do
+				if first then first := false
+				else max := _skip_fill(b, max, c, fin) end
+				if _bytevec$indexv(bterm, b, 1) = 1  cand
+				   (b[idx] = '|'  cor  b[idx] = ':')
+				   then exit found end
+				if fin = ':'
+				   then break end
+				i1: int := _bytevec$indexc(':', b, 1)
+				if i1 > 0
+				   then i2: int := _bytevec$indexc('|', b, 1)
+					if i2 = 0  cor  i1 < i2
+					   then fin := ':' end
+				   end
+				end
+			max := _skip_fill(b, max, c, '\n')
+			end except when found: end
+		s: string
+		more: bool := true
+		while more do
+			s, idx, max := _chan$get(c, b, idx, max, "\n", false)
+			if idx <= max
+			   then idx := idx + 1 end
+			z: int := string$size(s)
+			if s[z] ~= '\\'
+			   then more := false
+				z := z + 1
+			   end
+			i: int := string$indexc(':', s)
+			if ~string$empty(ent)
+			   then i := i + 1 end
+			ent := ent || string$substr(s, i, z - i)
+			end
+		_chan$close(c)
+		i: int := string$indexs(":tc=", ent)
+		if i = 0
+		   then return(ent) end
+		term := string$substr(ent, i + 4, string$size(ent) - i - 4)
+		ent := string$substr(ent, 1, i)
+		end
+	    except when not_possible (*):
+		   when bounds, end_of_file:
+		   end
+	_chan$close(c)
+	signal not_found
+	end _termcap_entry

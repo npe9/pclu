@@ -1,0 +1,80 @@
+% Copyright Massachusetts Institute of Technology 1983, 1989
+
+msgs = sequence[string]$[
+	   "not owner",						%  1
+	   "no such file or directory",				%  2
+	   "no such process",					%  3
+	   "interrupted system call",				%  4
+	   "i/o error",						%  5
+	   "no such device or address",				%  6
+	   "arg list too long",					%  7
+	   "exec format error",					%  8
+	   "bad file number",					%  9
+	   "no children",					% 10
+	   "no more processes",					% 11
+	   "not enough core",					% 12
+	   "permission denied",					% 13
+	   "bad address",					% 14
+	   "block device required",				% 15
+	   "mount device busy",					% 16
+	   "file exists",					% 17
+	   "cross-device link",					% 18
+	   "no such device",					% 19
+	   "not a directory",					% 20
+	   "is a directory",					% 21
+	   "invalid argument",					% 22
+	   "file table overflow",				% 23
+	   "too many open files",				% 24
+	   "not a typewriter",					% 25
+	   "text file busy",					% 26
+	   "file too large",					% 27
+	   "no space left on device",				% 28
+	   "illegal seek",					% 29
+	   "read-only file system",				% 30
+	   "too many links",					% 31
+	   "broken pipe",					% 32
+	   "math argument",					% 33
+	   "result too large",					% 34
+	   "operation would block",				% 35
+	   "operation now in progress",				% 36
+	   "operation already in progress",			% 37
+	   "socket operation on non-socket",			% 38
+	   "destination address required",			% 39
+	   "message too long",					% 40
+	   "protocol wrong type for socket",			% 41
+	   "bad protocol option",				% 42
+	   "protocol not supported",				% 43
+	   "socket type not supported",				% 44
+	   "operation not supported on socket",			% 45
+	   "protocol family not supported",			% 46
+	   "address family not supported by protocol family",	% 47
+	   "address already in use",				% 48
+	   "cannot assign requested address",			% 49
+	   "network is down",					% 50
+	   "network is unreachable",				% 51
+	   "network dropped connection on reset",		% 52
+	   "software caused connection abort",			% 53
+	   "connection reset by peer",				% 54
+	   "no buffer space available",				% 55
+	   "socket is already connected",			% 56
+	   "socket is not connected",				% 57
+	   "cannot send after socket shutdown",			% 58
+	   "error 59",						% 59
+	   "connection timed out",				% 60
+	   "connection refused",				% 61
+	   "too many levels of symbols links",			% 62
+	   "file name too long",				% 63
+	   "directory not empty"]				% 64
+
+_erstr = proc (num: int) returns (string)
+    return(msgs[num])
+       except when bounds: end
+    return("error " || int$unparse(num))
+    end _erstr
+
+_ernum = proc (msg: string) returns (int) signals(not_found)
+    for i: int in sequence[string]$indexes(msgs) do
+	if msg = msgs[i] then return (i) end
+	end
+    signal not_found
+    end _ernum

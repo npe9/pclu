@@ -1,0 +1,316 @@
+%	DTCHAN	CLU
+% Copyright Massachusetts Institute of Technology 1982, 1989
+%	CLU Compiler Version 3: template data channel
+
+# extend
+
+data_chan = cluster is open, store_str, store_vec, store_avec, store_cell,
+		       oneof2, add_close, close
+
+rep	= record[chan:   _chan,
+		 addr:   int,
+		 page:   _wordvec,
+		 index:  int,
+		 closed: bool,
+		 err:	 bool,
+		 why:	 str]
+
+pagesz	= 2048
+pagesz2	= pagesz - 2
+bpagesz	= 4 * pagesz
+
+_userlo	= 0100
+_d_evec	= 16			% empty vec
+_d_ntyp	= 20			% not-a-type type desc
+_d_next	= 28			% start of next object
+
+_bvechd	= 020000		% _bytevec header
+_cellhd = 040000		% _tagcell header
+
+own isfree: bool := false
+own free: _wordvec
+
+open = proc (fn: fname) returns (cvt, mref) signals (not_possible(str))
+	c: _chan
+	if fn.dir = "/dev"  cand  fn.name = "null"
+	   then c := _chan$nul()
+	   else c := _chan$open(fn, "write", 0)
+	   end resignal not_possible
+	p: _wordvec
+	if isfree
+	   then p := free
+		isfree := false
+	   else p := _wordvec$create(pagesz)
+	   end
+	dc: rep := rep${chan:   c,
+			addr:   _d_next,
+			page:   p,
+			index:  10,
+			closed: false,
+			err:    false,
+			why:    ""}
+	return(dc, mref$make_ref(_d_ntyp))
+	end open
+
+store_str = proc (dc: cvt, s: str) returns (mref)
+	v: mref := mref$make_ref(dc.addr)
+	z: int := str$size(s)
+	dc.addr := dc.addr + ((z + 7) / 4) * 4
+	p: _wordvec := dc.page
+	index: int := dc.index
+	if index = pagesz
+	   then if ~dc.err
+		   then _chan$putw(dc.chan, p, 1, bpagesz, false)
+			   except when not_possible (why: str):
+					dc.err := true
+					dc.why := why
+				  end
+		   end
+		index := 0
+	   end
+	index := index + 1
+	_wordvec$store2(p, index, _bvechd, z)
+	chars: _bytevec := _cvt[str, _bytevec](s)
+	i: int := 1
+	while z > 0 do
+		if index = pagesz
+		   then if ~dc.err
+			   then _chan$putw(dc.chan, p, 1, bpagesz, false)
+				   except when not_possible (why: str):
+						dc.err := true
+						dc.why := why
+					  end
+			   end
+			index := 0
+		   end
+		cnt: int := pagesz - index
+		moved: int := cnt * 4
+		if moved > z
+		   then cnt := (z + 3) / 4
+			moved := z
+		   end
+		_wordvec$move_b2w(chars, i, p, index * 4 + 1, moved)
+		z := z - moved
+		i := i + moved
+		index := index + cnt
+		if moved // 4 ~= 0
+		   then i := index * 4
+			if moved // 4 = 3
+			   then _wordvec$bstore(p, i, 0)
+			   else _wordvec$wstore(p, i - 1, 0)
+				if moved // 4 = 1
+				   then _wordvec$bstore(p, i - 2, 0) end
+			   end
+		   end
+		end
+	dc.index := index
+	return(v)
+	end store_str
+
+store_vec = proc (dc: cvt, vec: qv) returns (mref)
+	if qv$empty(vec)
+	   then return(mref$make_ref(_d_evec)) end
+	v: mref := mref$make_ref(dc.addr)
+	z: int := qv$size(vec)
+	dc.addr := dc.addr + 4 * (z + 1)
+	p: _wordvec := dc.page
+	index: int := dc.index
+	if index = pagesz
+	   then if ~dc.err
+		   then _chan$putw(dc.chan, p, 1, bpagesz, false)
+			   except when not_possible (why: str):
+					dc.err := true
+					dc.why := why
+				  end
+		   end
+		index := 0
+	   end
+	index := index + 1
+	p[index] := z
+	for val: mref in qv$elements(vec) do
+		if index = pagesz
+		   then if ~dc.err
+			   then _chan$putw(dc.chan, p, 1, bpagesz, false)
+				   except when not_possible (why: str):
+						dc.err := true
+						dc.why := why
+					  end
+			   end
+			index := 0
+		   end
+		index := index + 1
+		tagcase val
+		   tag ref (loc: int):
+			_wordvec$xstore(p, index, _userlo, loc)
+		   tag val (i: int):
+			p[index] := i
+		   end
+		end
+	dc.index := index
+	return(v)
+	end store_vec
+
+store_avec = proc (dc: cvt, vec: av) returns (mref)
+	if av$empty(vec)
+	   then return(mref$make_ref(_d_evec)) end
+	v: mref := mref$make_ref(dc.addr)
+	z: int := av$size(vec)
+	dc.addr := dc.addr + 4 * (z + 1)
+	p: _wordvec := dc.page
+	index: int := dc.index
+	if index = pagesz
+	   then if ~dc.err
+		   then _chan$putw(dc.chan, p, 1, bpagesz, false)
+			   except when not_possible (why: str):
+					dc.err := true
+					dc.why := why
+				  end
+		   end
+		index := 0
+	   end
+	index := index + 1
+	p[index] := z
+	for val: mref in av$elements(vec) do
+		if index = pagesz
+		   then if ~dc.err
+			   then _chan$putw(dc.chan, p, 1, bpagesz, false)
+				   except when not_possible (why: str):
+						dc.err := true
+						dc.why := why
+					  end
+			   end
+			index := 0
+		   end
+		index := index + 1
+		tagcase val
+		   tag ref (loc: int):
+			_wordvec$xstore(p, index, _userlo, loc)
+		   tag val (i: int):
+			p[index] := i
+		   end
+		end
+	dc.index := index
+	return(v)
+	end store_avec
+
+store_cell = proc (dc: cvt, code: int, val: mref) returns (mref)
+	v: mref := mref$make_ref(dc.addr)
+	dc.addr := dc.addr + 8
+	p: _wordvec := dc.page
+	index: int := dc.index
+	if index > pagesz2
+	   then if ~dc.err
+		   then _chan$putw(dc.chan, p, 1, 4 * index, false)
+			   except when not_possible (why: str):
+					dc.err := true
+					dc.why := why
+				  end
+		   end
+		index := 0
+	   end
+	_wordvec$store2(p, index + 1, _cellhd, code)
+	index := index + 2
+	tagcase val
+	   tag ref (loc: int):
+		_wordvec$xstore(p, index, _userlo, loc)
+	   tag val (i: int):
+		p[index] := i
+	   end
+	dc.index := index
+	return(v)
+	end store_cell
+
+oneof2 = proc (dc: data_chan) returns (mref)
+	return(store_cell(dc, 2, mref$make_val(0)))
+	end oneof2
+
+add_close = proc (dc: cvt, val: mref, cc: code_chan)
+					signals (not_possible(str))
+	if dc.closed
+	   then return end
+	p: _wordvec := dc.page
+	oc: _chan := dc.chan
+	if ~dc.err
+	   then if dc.index > 0
+		   then _chan$putw(oc, p, 1, 4 * dc.index, false)
+		   end
+		cz: int := code_chan$size(cc)
+		ic: _chan := cc.chan
+		ic.access := 0
+		while true do
+			_chan$putw(oc, p, 1, _chan$getw(ic, p), false)
+			end except when end_of_file: end
+		_wordvec$store2(p, 1, 034311, 043300)
+		p[2] := dc.addr
+		_wordvec$xstore(p, 3, _userlo, 0)
+		p[4] := 3
+		tagcase val
+		   tag ref (loc: int):
+			_wordvec$xstore(p, 5, _userlo, loc)
+		   tag val (i: int):
+			p[5] := i
+		   end
+		p[6] := cz
+		p[7] := _bin_id()
+		p[8] := 0
+		_wordvec$store2(p, 9, _cellhd, _tdesc_none)
+		p[10] := 0
+		oc.access := 0
+		_chan$putw(oc, p, 1, 40, false)
+	   end except when not_possible (why: string):
+				dc.err := true
+				dc.why := why
+		      end
+	if dc.err
+	   then _chan$abort(oc)
+	   else _chan$close(oc)
+	   end except when not_possible (why: str):
+				if ~dc.err
+				   then dc.err := true
+					dc.why := why
+				   end
+		      when permanent:
+		      end
+	why: str := dc.why
+	dc.why := "channel is closed"
+	dc.closed := true
+	free := p
+	isfree := true
+	if dc.err
+	   then signal not_possible(why)
+	   else dc.err := true
+	   end
+	end add_close
+
+close = proc (dc: cvt) signals (not_possible(str))
+	if dc.closed
+	   then return end
+	if dc.index > 0  cand  ~dc.err
+	   then _chan$putw(dc.chan, dc.page, 1, 4 * dc.index, false)
+		    except when not_possible (why: str):
+				 dc.err := true
+				 dc.why := why
+			   end
+	   end
+	if dc.err
+	   then _chan$abort(dc.chan)
+	   else _chan$close(dc.chan)
+	   end except when not_possible (why: str):
+				if ~dc.err
+				   then dc.err := true
+					dc.why := why
+				   end
+		      when permanent:
+		      end
+	why: str := dc.why
+	dc.why := "channel is closed"
+	dc.closed := true
+	free := dc.page
+	isfree := true
+	if dc.err
+	   then signal not_possible(why)
+	   else dc.err := true
+	   end
+	end close
+
+end data_chan

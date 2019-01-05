@@ -1,0 +1,265 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	EVAL2 CLU
+%
+%	CLU Compiler Version 3: constant evaluator
+
+e_strop = proc (e: c_env, op: name, args: exprlist)
+			returns (expr) signals  (illegal, bad, error(str))
+	begin
+	if op = "s2ac"  cor  op = "ac2s"  cor  op = "chars"
+	   then signal illegal end
+	a1: expr := args[1]
+	if op = "c2s"
+	   then return(e_s2e(e, str$c2s(e_e2h(a1))))
+	elseif op = "indexc"
+	   then return(e_i2e(e, str$indexc(e_e2h(a1), e_e2s(args[2]))))
+	elseif op = "copy"
+	   then return(a1)
+	elseif op = "sc2s"
+	   then s: str := ""
+		for cx: expr in exprlist$elements(e_e2qc(a1).elts) do
+			s := str$append(s, e_e2h(cx))
+			end
+		return(e_s2e(e, s))
+	end
+	s1: str := e_e2s(a1)
+	if op = "size"
+	   then return(e_i2e(e, str$size(s1)))
+	elseif op = "empty"
+	   then return(e_b2e(e, str$empty(s1)))
+	elseif op = "s2sc"
+	   then elts: exprlist := exprlist$new()
+		for c: char in str$chars(s1) do
+			elts := exprlist$addh(elts, e_h2e(e, c))
+			end
+		x: expr := expr$create(exprabs$make_type_(e.char_type),
+				       e.type_type)
+		clut: clutype := clutype${gen: e.seq_,
+					  parms: exprlist$[x]}
+		t: typespec := c_env$get_type(e, typeabs$make_cluster_(clut))
+		cons: arraycons := arraycons${type_: t,
+					      low:   mexpr$make_none(nil),
+					      elts:  elts}
+		return(expr$create(exprabs$make_a_cons(cons), t))
+	end
+	a2: expr := args[2]
+	if op = "fetch"
+	   then return(e_h2e(e, s1[e_e2i(a2)]))
+	elseif op = "indexs"
+	   then return(e_i2e(e, str$indexs(s1, e_e2s(a2))))
+	elseif op = "append"
+	   then s1 := str$append(s1, e_e2h(a2))
+	elseif op = "rest"
+	   then s1 := str$rest(s1, e_e2i(a2))
+	elseif op = "substr"
+	   then s1 := str$substr(s1, e_e2i(a2), e_e2i(args[3]))
+	elseif op = "concat"
+	   then s1 := s1 || e_e2s(a2)
+	else b: bool
+	     s2: str := e_e2s(a2)
+	     if op = "lt"
+		then b := s1 < s2
+	     elseif op = "le"
+		then b := s1 <= s2
+	     elseif op = "ge"
+		then b := s1 >= s2
+	     elseif op = "gt"
+		then b := s1 > s2
+	     else b := s1 = s2 end
+	     return(e_b2e(e, b))
+	end
+	return(e_s2e(e, s1))
+	end except when bad: signal bad
+		   others (err: str): signal error(err)
+		   end
+	end e_strop
+
+e_oneofop = proc (e: c_env, x: expr, cop: clusterop, args: exprlist)
+			returns (expr) signals (illegal, bad, error(str))
+	op: name := cop.name
+	if op = "o2v"  cor  op = "v2o"
+	   then signal illegal end
+	begin
+	a1: expr := args[1]
+	h: char := op[1]
+	if h = 'c'
+	   then return(a1)
+	elseif h = 'm'
+	   then return(x) end
+	sel: name
+	a1, sel := e_e2o(a1)
+	if h = 'i'
+	   then return(e_b2e(e, sel = name$rest(op, 4)))
+	elseif h = 'v'
+	   then if sel = name$rest(op, 7)
+		   then return(a1)
+		   else signal error("wrong_tag")
+		   end
+	else return(e_b2e(e, expr$similar(a1, args[2]))) end
+	end resignal bad
+	end e_oneofop
+
+e_structop = proc (e: c_env, x: expr, cop: clusterop, args: exprlist)
+			returns (expr) signals (illegal, bad, error(str))
+	op: name := cop.name
+	if op = "s2r"  cor  op = "r2s"
+	   then signal illegal end
+	begin
+	a1: expr := args[1]
+	h: char := op[1]
+	if h = 'c'
+	   then return(a1)
+	elseif h = 'g'
+	   then sel: name := str$rest(op, 5)
+		for f: field in fieldlist$elements(e_e2sc(a1).fields) do
+			for xsel: name in namelist$elements(f.sels) do
+				if sel = xsel
+				   then return(f.val) end
+				end
+			end
+		signal bad
+	elseif h = 'r'
+	   then sel: name := str$rest(op, 9)
+		cons: selectcons := e_e2sc(a1)
+		fields: fieldlist := cons.fields
+		jz: int := fieldlist$size(fields)
+		for j: int in fieldlist$indexes(fields) do
+			sels: namelist := fields[j].sels
+			for i: int in namelist$indexes(sels) do
+				if sel = sels[i]
+				   then iz: int := namelist$size(sels)
+					f: field := field$copy1(fields[j])
+					f.sels := namelist$subseq(sels, 1, i - 1) ||
+						  namelist$subseq(sels, i + 1, iz)
+					fields := fieldlist$subseq(fields, 1, j - 1) ||
+						  fieldlist$subseq(fields, j + 1, jz)
+					fields := fieldlist$addh(fields, f)
+					f := field${sels: namelist$[sel],
+						    val:  args[2],
+						    line: 0}
+					fields := fieldlist$addh(fields, f)
+					cons := selectcons${type_:  cons.type_,
+							    fields: fields}
+					return(expr$create(exprabs$make_s_cons(cons),
+							   a1.typespec))
+				   end
+				end
+			end
+		signal bad
+	else return(e_b2e(e, expr$similar(a1, args[2]))) end
+	end resignal bad
+	end e_structop
+
+e_seqop = proc (e: c_env, x: expr, cop: clusterop, args: exprlist)
+			returns (expr) signals (illegal, bad, error(str))
+	op: name := cop.name
+	if op = "a2s"  cor  op = "s2a"  cor
+	   op = "elements"  cor  op = "indexes"
+	   then signal illegal end
+	begin
+	if op = "new"
+	   then exit recons(exprlist$new()) end
+	a1: expr := args[1]
+	if op = "copy"
+	   then return(a1)
+	elseif op = "e2s"
+	   then exit recons(exprlist$[a1])
+	elseif op = "fill"  cor  op = "fill_copy"
+	   then exit recons(exprlist$fill(e_e2i(a1), args[2]))
+	elseif op = "equal"  cor  op = "similar"
+	   then return(e_b2e(e, expr$similar(a1, args[2]))) end
+	cons: arraycons := e_e2qc(a1)
+	elts: exprlist := cons.elts
+	if op = "size"
+	   then return(e_i2e(e, exprlist$size(elts)))
+	elseif op = "empty"
+	   then return(e_b2e(e, exprlist$empty(elts)))
+	elseif op = "bottom"
+	   then return(exprlist$bottom(elts))
+	elseif op = "top"
+	   then return(exprlist$top(elts))
+	elseif op = "remh"
+	   then exit recons(exprlist$remh(elts))
+	elseif op = "reml"
+	   then exit recons(exprlist$reml(elts)) end
+	a2: expr := args[2]
+	if op = "fetch"
+	   then return(elts[e_e2i(a2)])
+	elseif op = "rest"
+	   then exit recons(exprlist$subseq(elts, e_e2i(a2), exprlist$size(elts)))
+	elseif op = "addh"
+	   then exit recons(exprlist$addh(elts, a2))
+	elseif op = "addl"
+	   then exit recons(exprlist$addl(elts, a2))
+	elseif op = "replace"
+	   then exit recons(exprlist$replace(elts, e_e2i(a2), args[3]))
+	elseif op = "concat"
+	   then exit recons(elts || e_e2qc(a2).elts)
+	else exit recons(exprlist$subseq(elts, e_e2i(a2), e_e2i(args[3])))
+	end
+	end except when bad: signal bad
+		   when recons (elts: exprlist):
+			 cons: arraycons := arraycons${type_: cop.type_,
+						       low:   mexpr$make_none(nil),
+						       elts:  elts}
+			 return(expr$create(exprabs$make_a_cons(cons),
+					    cop.type_))
+		   others (err: str): signal error(err)
+		   end
+	end e_seqop
+
+e_e2n = proc (x: expr) returns (null) signals (bad)
+	return(exprabs$value_null_(x.abs))
+	   except when wrong_tag: signal bad end
+	end e_e2n
+
+e_e2b = proc (x: expr) returns (bool) signals (bad)
+	return(exprabs$value_bool_(x.abs))
+	   except when wrong_tag: signal bad end
+	end e_e2b
+
+e_e2i = proc (x: expr) returns (int) signals (bad)
+	return(exprabs$value_int_(x.abs))
+	   except when wrong_tag: signal bad end
+	end e_e2i
+
+e_e2r = proc (x: expr) returns (real) signals (bad)
+	return(exprabs$value_real_(x.abs))
+	   except when wrong_tag: signal bad end
+	end e_e2r
+
+e_e2h = proc (x: expr) returns (char) signals (bad)
+	return(exprabs$value_char_(x.abs))
+	   except when wrong_tag: signal bad end
+	end e_e2h
+
+e_e2s = proc (x: expr) returns (str) signals (bad)
+	return(exprabs$value_str(x.abs))
+	   except when wrong_tag: signal bad end
+	end e_e2s
+
+e_e2o = proc (x: expr) returns (expr, name) signals (bad)
+	tagcase x.abs
+	   tag invoke (xa: invoke):
+		tagcase xa.apply.abs
+		   tag op (opa: clusterop):
+			if name$indexs("make_", opa.name) = 1
+			   then return(exprlist$bottom(xa.args),
+				       name$rest(opa.name, 6))
+			   end
+		   others:
+		   end
+	   others:
+	   end
+	signal bad
+	end e_e2o
+
+e_e2sc = proc (x: expr) returns (selectcons) signals (bad)
+	return(exprabs$value_s_cons(x.abs))
+	    except when wrong_tag: signal bad end
+	end e_e2sc
+
+e_e2qc = proc (x: expr) returns (arraycons) signals (bad)
+	return(exprabs$value_a_cons(x.abs))
+	    except when wrong_tag: signal bad end
+	end e_e2qc

@@ -1,0 +1,27 @@
+% Copyright Massachusetts Institute of Technology 1983, 1989
+
+_skip_fill = proc (b: _bytevec, max: int, c: _chan, term: char) returns (int)
+	       signals (end_of_file)
+    i: int := 0
+    last: char := ' '
+    while true do
+	i := _bytevec$indexc(term, b, i + 1)
+	if i = 0  cor  i > max
+	   then last := b[max]
+		max := _chan$getb(c, b)
+		   resignal end_of_file
+	 elseif i = 1
+	   then if last ~= '\\'
+		   then break end
+	 elseif b[i - 1] ~= '\\'
+	   then break end
+	end
+    max := max - i
+    _bytevec$move_lr(b, i + 1, b, 1, max)
+    max := max + _chan$getbv(c, b, max + 1, _bytevec$size(b))
+       except when end_of_file:
+		   if max = 0
+		      then signal end_of_file end
+	      end
+    return(max)
+    end _skip_fill

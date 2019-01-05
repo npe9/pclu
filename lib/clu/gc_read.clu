@@ -1,0 +1,476 @@
+% routine to read in object dumped via gc_dump
+
+gc_read = proc[t:type](fn:file_name) returns (t)
+	    signals(not_possible(string))
+
+    wvec = _wordvec
+    b2w = _cvt[bvec, wvec]
+    b2s = _cvt[bvec, string]
+
+    ch: _chan
+    begin
+	gcb$init()
+	gco$init()
+	ch := _chan$open(fn, "read", 0)
+	   except when not_possible(why: string):
+		       signal not_possible(why)
+		  end
+	bv8: bvec := _bytevec$create(2*CLUREFSZ)
+	wv2: wvec := b2w(bv8)
+
+	% read and check header
+	_chan$getb(ch, bv8)
+	%log_bytevec(bv8)
+	  
+	%logit("gc_read: checking header")
+	%logit("  found " || b2s(bv8))
+	if (bv8[1] ~= 'D' cor
+	    bv8[2] ~= 'W' cor
+	    bv8[3] ~= 'C' cor
+	    bv8[4] ~= '1')
+	   then
+		signal not_possible("bad file format")
+	   end
+
+	% if first item is a constant, return it to caller
+	_chan$getb(ch, bv8)
+	%log_bytevec(bv8)
+
+	%logit("gc_read: checking for const")
+	if wv2[1] = GCD_CONST
+	   then
+		%logit("  found const")
+		return(_cvt[int,t](wv2[2]))
+	   end
+
+	% first item should be a reference to 0th object
+	%logit("gc_read: checking for ref")
+	if wv2[1] ~= GCD_REF
+	   then
+		%logit("  found " || int$unparse(wv2[1]) || " instead of ref")
+		signal not_possible("bad file format")
+	   end
+	if wv2[2] ~= 0
+	   then
+		%logit("  found " || int$unparse(wv2[2]) || " instead of 0")
+		signal not_possible("bad file format")
+	   end
+	%logit("  found " || int$unparse(wv2[1]) || ", " || int$unparse(wv2[2]))
+
+	% grovel over file for the 1st time
+	%logit("starting pass 1")
+	gcr$pass1(ch)
+	  resignal not_possible
+	_chan$close(ch)
+
+	% reopen file (could just do a seek)
+	ch := _chan$open(fn, "read", 0)
+	_chan$getb(ch, bv8)
+	_chan$getb(ch, bv8)
+
+	% grovel over file for the 2nd time
+	%logit("starting pass 2")
+	  resignal not_possible
+	gcb$init()
+	gcr$pass2(ch)
+	_chan$close(ch)
+	
+	% return 0th object to caller
+	result: t := _cvt[_obj, t](gco$get_obj(0))
+	gco$reset()
+	return(result)
+	end
+       except others: 
+		   _chan$close(ch)
+		   signal not_possible("bad file format")
+	      end
+    end gc_read
+
+gcr = cluster is pass1, pass2
+
+    rep = null
+
+    pass1 = proc(ch:_chan) signals(not_possible(string))
+
+	while true do
+	    hdr, id: int := gcb$get_next_hdr(ch)
+	       except when none: return end
+	    if debug then
+	       %logit("pass1: hdr " || int$unparse(hdr) || ", id "|| int$unparse(id))
+	       end
+	    o: _obj
+	    if hdr = _bvechd
+	       then
+		    if debug then
+		       %logit("  found bvec")
+		       end
+		    o := make_bvec1(ch)
+	     elseif hdr = _seqhd
+	       then
+		    if debug then
+		       %logit("  found _vec")
+		       end
+		    o := make_vec1(ch)
+	     elseif hdr = _cellhd
+	       then
+		    if debug then
+		       %logit("  found cell")
+		       end
+		    o := make_cell1(ch)
+	     elseif hdr = _advhd
+	       then
+		    if debug then
+
+		       %logit("  found _adv")
+		       o := make_adv1(ch)
+		       end
+	     else
+		  signal not_possible("bad file format")
+	     end
+	    gco$save_new_obj(id, o)
+	    end
+
+	end pass1
+
+    make_bvec1 = proc(ch:_chan) returns (_obj)
+	size: int := gcb$get_size(ch)
+	%logit("  make_bvec1: size = " || int$unparse(size))
+	bv: bvec := bvec$create(size)
+	begin
+ 	  gcb$getb(ch, bv)
+	  for i: int in int$from_to(1, size) do
+	    %logit("    " || int$unparse(i) || ":" || int$unparse(char$c2i(bv[i])))
+	  end
+	  except when end_of_file:
+	            %logit("  gcb$getb signals end_of_file")
+	          when not_possible(why: string):
+	            %logit("  gcb$getb signals not_possible: " || why)
+	    end
+	end
+	return(_cvt[bvec,_obj](bv))
+	end make_bvec1
+
+    make_vec1 = proc(ch:_chan) returns (_obj)
+	size: int := gcb$get_size(ch)
+	v: _vec[_obj] := _vec[_obj]$create(size)
+	gcb$skip_obj(ch, size)
+	return(_cvt[_vec[_obj],_obj](v))
+	end make_vec1
+
+    make_cell1 = proc(ch:_chan) returns (_obj)
+	t:_tagcell[_obj] := _tagcell[_obj]$create(0,_cvt[int,_obj](0))
+	gcb$geti(ch)
+	gcb$skip_obj(ch, 1)
+	return(_cvt[_tagcell[_obj],_obj](t))
+	end make_cell1
+
+    make_adv1 = proc(ch:_chan) returns (_obj)
+	size: int := gcb$get_size(ch)
+	ext_size, ext_low, int_low, int_size : int := gcb$get_array_info(ch)
+	a:array[_obj] := array[_obj]$predict(ext_low, int_size)
+	gcb$skip_obj(ch, 1)
+	return(_cvt[array[_obj],_obj](a))
+	end make_adv1
+
+    pass2 = proc(ch:_chan) signals (not_possible(string))
+
+	while true do
+	    hdr, id: int := gcb$get_next_hdr(ch)
+	       except when none: return end
+	    %logit("pass2: hdr " || int$unparse(hdr) || " id "|| int$unparse(id))
+	    o: _obj := gco$get_obj(id)
+	    if hdr = _bvechd
+	       then
+		    %logit("found bvec")
+		    make_bvec2(ch, o)
+	     elseif hdr = _seqhd
+	       then
+		    make_vec2(ch, o)
+	     elseif hdr = _cellhd
+	       then
+		    make_cell2(ch, o)
+	     elseif hdr = _advhd
+	       then
+		    make_adv2(ch, o)
+	     else
+		  signal not_possible("bad file format")
+	     end
+	    end
+
+	end pass2
+
+    make_bvec2 = proc(ch:_chan, o:_obj)
+	size: int := gcb$get_size(ch)
+	gcb$skip(ch, ((size+CLUREFSZ)/CLUREFSZ))
+	end make_bvec2
+
+    make_vec2 = proc(ch:_chan, o:_obj)
+	size: int := gcb$get_size(ch)
+	v: _vec[_obj] := _cvt[_obj,_vec[_obj]](o)
+	for i: int in int$from_to(1, size) do
+	    v[i] := gcb$get_next_obj(ch)
+	    end %for
+	end make_vec2
+
+    make_cell2 = proc(ch:_chan, o:_obj)
+	t:_tagcell[_obj] := _cvt[_obj,_tagcell[_obj]](o)
+	tg: int := gcb$geti(ch)
+	_tagcell[_obj]$set(t, tg, gcb$get_next_obj(ch))
+	end make_cell2
+
+    make_adv2 = proc(ch:_chan, o:_obj)
+	size: int := gcb$get_size(ch) - 2*CLUREFSZ
+	%logit("Embedded size " || int$unparse(size) || "\n")
+	a:_adv[_obj] := _cvt[_obj,_adv[_obj]](o)
+	j1,j2,j3,j4: int := gcb$get_array_info(ch)
+	%logit("after get_array_info")
+	%logit("size " || int$unparse(j1))
+	%logit(int$unparse(j2))
+	%logit("start " || int$unparse(j3))
+	%logit(int$unparse(j4))
+	v:_vec[_obj] := _cvt[_obj, _vec[_obj]](gcb$get_next_obj(ch))
+	%logit("after get_next_obj")
+	_adv[_obj]$set_vector(a, v)
+	%logit("after set_vector")
+	_adv[_obj]$set_start(a, j3)
+	_adv[_obj]$set_size(a, j1)
+	end make_adv2
+
+    end gcr
+
+gcb = cluster is init, get_next_hdr, get_size, get_array_info, getb, 
+		 get_next_obj, geti, skip, skip_obj
+
+    rep = null
+
+    own lookahead: wvec := wvec$create(bpagesz)
+    own look_index: int := 0
+    own look_count: int := 0
+    own scratch: bvec := bvec$create(bpagesz)
+    own obj_addr: int := 0
+    own wv1: wvec := wvec$create(1)	% temp storage for ints
+
+    init = proc()
+	obj_addr := 0
+	look_index := 0
+	look_count := 0
+	end init
+
+    get_next_hdr = proc(ch:_chan) returns (int, int)
+		     signals(none)
+	this_addr: int := obj_addr
+	hdr: int := geti(ch)
+	   except when end_of_file: signal none end
+	return (hdr, this_addr)
+	end get_next_hdr
+
+    get_size = proc(ch:_chan) returns (int)
+	size: int := geti(ch)
+	return (size)
+	end get_size
+
+    get_array_info = proc(ch:_chan) returns (int, int, int, int)
+	size: int := geti(ch)
+	low: int := geti(ch)
+	start: int := geti(ch)
+	predict: int := geti(ch)
+	return(size, low, start, predict)
+	end get_array_info
+
+    get_next_obj = proc(ch:_chan) returns (_obj)
+		     signals(not_possible(string), none)
+	while true do
+	    ty, val : int
+	    ty := geti(ch)
+	       except when end_of_file: signal none end
+	    val := geti(ch)
+	       except when end_of_file: 
+			   signal not_possible ("bad format file") end
+	    if ty = GCD_CONST
+	       then
+		    return (_cvt[int, _obj](val))
+	     elseif ty = GCD_REF
+	       then
+		    return (gco$get_obj(val))
+	     else
+		  signal not_possible ("bad format file")
+	     end
+	    end
+	end get_next_obj
+
+    skip_obj = proc(ch: _chan, count: int) signals (not_possible(string), none)
+	if count = 0 then return end
+	for i:int in int$from_to(1, count) do
+	    ty: int :=  geti(ch)
+	       except when end_of_file: signal none end
+	    val: int :=  geti(ch)
+	       except when end_of_file: 
+			   signal not_possible("bad format file") end
+	    if ty ~= GCD_CONST cand ty ~= GCD_REF
+	       then
+		    signal not_possible ("bad format file")
+	       end
+	    end
+	end skip_obj
+
+    geti = proc(ch:_chan) returns (int) 
+	     signals (end_of_file, not_possible(string))
+	if look_count = 0 then
+	   look_count := _chan$getw(ch, lookahead)
+	      resignal end_of_file
+	   look_index := 1
+	   end
+	ans: int := lookahead[look_index]
+	look_count := look_count - CLUREFSZ
+	look_index := look_index + 1
+	obj_addr := obj_addr + CLUREFSZ
+	return (ans)
+	end geti
+
+    getb = proc(ch:_chan, b:bvec)
+	     signals (end_of_file, not_possible(string))
+        copied: int := 0
+	data_count: int := bvec$size(b)
+	pad_count: int := ((data_count + CLUREFSZ)/CLUREFSZ)*CLUREFSZ - data_count
+	b_index : int := 1
+	while copied < data_count do
+	    if look_count = 0 then
+	       look_count := _chan$getw(ch, lookahead)
+		  resignal end_of_file
+	       look_index := 1
+	       end
+	    count: int := int$min(data_count - b_index + 1, look_count)
+	    wvec$move_w2b(lookahead, ((look_index-1)*CLUREFSZ)+1, b, b_index, count)
+	    look_count := look_count - count
+	    look_index := look_index + count/CLUREFSZ
+	    b_index := b_index + count
+	    copied := copied + count
+	    end
+	if look_count = 0 then
+	   look_count := _chan$getw(ch, lookahead)
+	      resignal end_of_file
+	   look_index := 1
+	   end
+	look_count := look_count - pad_count
+	if pad_count ~= 0 then look_index := look_index + 1 end
+	obj_addr := obj_addr + data_count + pad_count
+	end getb
+
+    skip = proc(ch: _chan, i: int)   % i is number of words to skip
+	     signals (end_of_file, not_possible(string))
+	i4: int := i*CLUREFSZ
+	skipped: int := 0
+	while skipped < i4 do
+	    if look_count = 0 then
+	       look_count := _chan$getw(ch, lookahead)
+		  resignal end_of_file
+	       look_index := 1
+	       end
+	    count: int := int$min(i4 - skipped, look_count)
+	    look_count := look_count - count
+	    look_index := look_index + count/CLUREFSZ
+	    skipped := skipped + count
+	    end
+	obj_addr := obj_addr + i4
+	end skip
+
+    end gcb
+
+gco = cluster is init, save_new_obj, get_obj, reset
+
+    rep = null
+    NBUCKETS = 50000
+    bucket = record[key: int, val: _obj, next: _obj]
+    cn2o = _cvt[null, _obj]
+    cn2b = _cvt[null, bucket]
+    cb2o = _cvt[bucket, _obj]
+    co2b = _cvt[_obj, bucket]
+    own obj_store: array[bucket]
+
+    init = proc()
+	no_bucket: bucket := cn2b(nil)
+	obj_store := array[bucket]$fill(1, NBUCKETS, no_bucket)
+	end init
+
+    get_obj = proc(i:int) returns (_obj)
+		signals(not_found)
+	k: int := hash_int(i, NBUCKETS) + 1
+	this_buck: bucket := obj_store[k]
+	while cb2o(this_buck) ~= cn2o(nil) cand this_buck.key ~= i do
+	    this_buck := co2b(this_buck.next)
+	    end
+	if cb2o(this_buck) = cn2o(nil) then signal not_found end
+	return (this_buck.val)
+	end get_obj
+
+    save_new_obj = proc(i: int, o:_obj)
+	k: int := hash_int(i, NBUCKETS) + 1
+	this_buck: bucket := obj_store[k]
+	obj_store[k] := bucket${key: i, val: o, next: cb2o(this_buck)}
+	end save_new_obj
+
+    reset = proc()
+	obj_store := array[bucket]$new()    % let this stuff get gc'd
+	end reset
+
+    end gco
+
+%gco = cluster is init, save_new_obj, get_obj
+%
+%    rep = table[int, _obj]
+%    own obj_store: rep
+%
+%    init = proc()
+%	obj_store := rep$create(50000, hash_int, int$equal)
+%	end init
+%
+%    get_obj = proc(i:int) returns (_obj)
+%		signals(not_found)
+%	o: _obj := rep$lookup(obj_store, i)
+%	resignal not_found
+%	return (o)
+%	end get_obj
+%
+%    save_new_obj = proc(i: int, o:_obj)
+%	rep$bind(obj_store, i, o)
+%	end save_new_obj
+%
+%    end gco
+%
+%gco = cluster is init, save_new_obj, get_obj
+%
+%    rep = null
+%    obj_entry = record[id:int, entry:_obj]
+%    aoe = array[obj_entry]
+%    own obj_store: aoe := aoe$new()
+%
+%    init = proc()
+%	obj_store := aoe$new()
+%	end init
+%
+%    get_obj = proc(i:int) returns (_obj)
+%		signals(not_found)
+%	for oe:obj_entry in aoe$elements(obj_store)do
+%	    %%logit("i = " || int$unparse(i) ||
+%		 % " oe.id = " || int$unparse(oe.id))
+%	    if oe.id = i then return (oe.entry) end
+%	    end % for
+%	signal not_found
+%	end get_obj
+%
+%    save_new_obj = proc(i: int, o:_obj)
+%	aoe$addh(obj_store, obj_entry${id:i, entry:o})
+%	end save_new_obj
+%
+%    end gco
+%
+
+log_bytevec = proc(bv: _bytevec)
+    logit("gc_read: next _bytevec")
+    for i: int in int$from_to(1, _bytevec$size(bv)) do
+      c: char := bv[i]
+      s : string := "  " || int$unparse(i) || ": " || int$unparse(char$c2i(c))
+      if ' ' <= c cand c <= 'z' then s := s ||  ", '" ||  string$c2s(c) || "'" end
+      logit(s)
+    end
+end log_bytevec

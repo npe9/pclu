@@ -1,0 +1,447 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	CSTMT2 CLU
+%
+%	CLU Compiler Version 3: statement checker
+
+c_tagcase = proc (e: c_env, ts: tagstmt)
+	at: typespec := c_expr(e, ts.obj)
+	specs: fieldspeclist := c_oneof_specs(e, at)
+	    except when abstract: c_tag_sugar(e, at, ts)
+				  return
+		   end
+	used: flaglist := c_tagarms(e, ts.arms, specs)
+	all_used: bool := true
+	for all_used in flaglist$elements(used) do
+		if ~all_used then break end
+		end
+	tagcase ts.others_
+	   tag body (mb: body):
+		 if all_used  cand  ~fieldspeclist$empty(specs)
+		    then c_env$err1(e, "others arm not allowed - all selectors present")
+		    end
+		 c_body(e, mb)
+	   tag none:
+		 if ~all_used
+		    then c_env$err1(e, "others arm required - selectors missing")
+		    end
+	   end
+	end c_tagcase
+
+c_oneof_specs = proc (e: c_env, t: typespec) returns (fieldspeclist)
+					     signals (abstract)
+	tagcase t.abs
+	   tag select (ta: seltype):
+		if ta.gen = e.oneof_  cor  ta.gen = e.variant_
+		   then return(ta.parms)
+		elseif ta.gen ~= e.record_  cand  ta.gen ~= e.struct_
+		   then signal abstract end
+	   tag other (ta: othertype):
+		tagcase ta
+		   tag return_: signal abstract
+		   others:      
+		   end
+	   tag unknown:
+		return(fieldspeclist$new())
+	   others:
+		if c_env$is_hacked(e)
+		   then signal abstract end
+	   end
+	c_env$err(e, qs$["tagcase expression not a oneof/variant: ",
+			 get_type_print(t)])
+	return(fieldspeclist$new())
+	end c_oneof_specs
+
+c_tagarms = proc(e: c_env, arms: tagarmlist, specs: fieldspeclist) returns (flaglist)
+	used: flaglist := flaglist$fill(1, fieldspeclist$size(specs), false)
+	for arm: tagarm in tagarmlist$elements(arms) do
+		c_env$begin_scope(e)
+		e.line := arm.line
+		t: typespec := c_mdecl(e, arm.var)
+		for n: name in namelist$elements(arm.tags) do
+			nt: typespec := c_sel(e, specs, used, n)
+			if typespec$mismatch2(t, nt)
+			   then c_env$errt(e, qs$["value for tag '", n, "'"],
+						t, nt)
+			   end
+			end
+		c_body(e, arm.body)
+		c_env$end_scope(e)
+		end
+	return(used)
+	end c_tagarms
+
+c_tag_sugar = proc (e: c_env, at: typespec, ts: tagstmt)
+	anames = array[name]
+	names: anames := anames$new()
+	for arm: tagarm in tagarmlist$elements(ts.arms) do
+		c_env$begin_scope(e)
+		e.line := arm.line
+		vt: typespec := c_mdecl(e, arm.var)
+		for n: name in namelist$elements(arm.tags) do
+			c_tag_name(e, n, at, vt, names)
+			end
+		c_body(e, arm.body)
+		c_env$end_scope(e)
+		end
+	tagcase ts.others_
+	   tag body (mb: body):
+		 c_body(e, mb)
+	   tag none:
+	   end
+	end c_tag_sugar
+
+c_tag_name = proc (e: c_env, n: name, at, vt: typespec, names: anames)
+	anames = array[name]
+	for on: name in anames$elements(names) do
+		if n = on
+		   then c_env$err(e, qs$["duplicate selector '" || n || "'"])
+			break
+		   end
+		end
+	anames$addh(names, n)
+	cop: clusterop := clusterop${type_: at,
+				     name:  "is_" || n,
+				     parms: exprlist$new()}
+	c_tag_op(e, cop, at, e.bool_type)
+	if typeabs$is_unknown(vt.abs)
+	   then return end
+	cop.name := "value_" || n
+	c_tag_op(e, cop, at, vt)
+	end c_tag_name
+
+c_tag_op = proc (e: c_env, cop: clusterop, at, vt: typespec)
+	pt: typespec := c_clusterop1(e, cop)
+	pta: applytype
+	tagcase pt.abs
+	   tag apply (xpta: applytype):
+		if xpta.gen ~= e.proc_
+		   then c_env$err(e, qs$["invocation of non-procedure: ",
+					 get_clusterop_print(cop)])
+			return
+		   end
+		pta := xpta
+	   tag unknown:
+		return
+	   others:
+		return
+	   end
+	if typelist$size(pta.args) ~= 1
+	   then c_env$err(e, qs$[int$unparse(typelist$size(pta.args)),
+				 " arguments to '",
+				 get_clusterop_print(cop), "', 1 expected"])
+	elseif typespec$mismatch(pta.args[1], at)
+	   then c_env$errt(e, qs$["argument 1 to '",
+				 get_clusterop_print(cop), "'"],
+				pta.args[1], at)
+	end
+	if typelist$size(pta.vals) ~= 1
+	   then c_env$err(e, qs$[int$unparse(typelist$size(pta.vals)),
+				 " results from '",
+				 get_clusterop_print(cop), "', 1 expected"])
+	elseif typespec$mismatch(pta.vals[1], vt)
+	   then c_env$errt(e, qs$["result 1 from '",
+				  get_clusterop_print(cop), "'"],
+				  pta.vals[1], vt)
+	end
+	for sig: exception in exceptionlist$elements(pta.sigs) do
+		c_env$add_cond(e, sig, signal_)
+		end
+	end c_tag_op
+
+c_mdecl = proc (e: c_env, md: mdecl) returns (typespec)
+	tagcase md
+	   tag decl (d: decl):
+		 c_decl(e, d)
+		 return(d.type_)
+	   tag none:
+		return(e.unknown_type)
+	   end
+	end c_mdecl
+
+c_return = proc (e: c_env, exprs: exprlist) returns (exprlist)
+	for x: expr in exprlist$elements(exprs) do
+		c_expr(e, x)
+		end
+	if c_env$in_proc(e)
+	   then exprs := c_values(e, e.values, exprs, "return")
+	elseif ~exprlist$empty(exprs)
+	   then c_env$err1(e, "iterator cannot return values") end
+	return(exprs)
+	end c_return
+
+c_yield = proc (e: c_env, exprs: exprlist) returns (exprlist)
+	for x: expr in exprlist$elements(exprs) do
+		c_expr(e, x)
+		end
+	if c_env$in_proc(e)
+	   then c_env$err1(e, "yield statement within procedure")
+	   else exprs := c_values(e, e.values, exprs, "yield")
+	   end
+	return(exprs)
+	end c_yield
+
+c_signal = proc (e: c_env, sig: condition)
+	for x: expr in exprlist$elements(sig.args) do
+		c_expr(e, x)
+		end
+	n: name := sig.name
+	for xsig: exception in exceptionlist$elements(e.xsignals) do
+		if n = xsig.name
+		   then	sig.args := c_values(e, xsig.types, sig.args, "signal")
+			return
+		   end
+		end
+	if n = "failure"
+	   then t: typespec := e.str_type
+		sig.args := c_values(e, typelist$e2s(t), sig.args, "signal")
+		return
+	   end
+	c_env$err(e, qs$["signal '", n, "' not listed in header"])
+	end c_signal
+
+c_values = proc (e: c_env, types: typelist, exprs: exprlist, st: str)
+							returns (exprlist)
+	if exprlist$size(exprs) ~= typelist$size(types)
+	   then	c_env$err(e, qs$[int$unparse(exprlist$size(exprs)),
+				 " expressions in ", st, " statement, ",
+				 int$unparse(typelist$size(types)),
+				 " expected"])
+		return(exprs)
+	   end
+	cvt_: typespec := e.cvt_type
+	for i: int in exprlist$indexes(exprs) do
+		t: typespec := types[i]
+		x: expr := exprs[i]
+		is_cvt_: bool
+		if t = cvt_
+		   then	t := e.down_type
+			is_cvt_ := true
+		   else is_cvt_ := false
+		   end
+		if typespec$mismatch(t, x.typespec)
+		   then c_env$errt(e, qs$["expression ", int$unparse(i),
+					  " of ", st, " statement"],
+					t, x.typespec)
+		   end
+		   except when anyize: x := expr$create(exprabs$make_any_(x),
+							e.any_type)
+				       exprs := exprlist$replace(exprs, i, x)
+			  end
+		if is_cvt_
+		   then x := expr$create(exprabs$make_up_(x), e.up_type)
+			exprs := exprlist$replace(exprs, i, x)
+		   end
+		end
+	return(exprs)
+	end c_values
+
+c_exit = proc (e: c_env, cond: condition)
+	types: typelist := c_exprlist(e, cond.args)
+	ex: exception := exception${name:  cond.name,
+				    types: types}
+	c_env$add_cond(e, ex, exit_)
+	end c_exit
+
+c_except = proc (e: c_env, xs: exceptstmt)
+	c_when_decls(e, xs)
+	c_env$push_handlers(e, xs)
+	c_stmt(e, xs.stmt)
+	c_env$pop_handlers(e)
+	c_whenarms(e, xs.arms)
+	tagcase xs.others_
+	   tag arm (marm: othersarm):
+		 e.line := marm.line
+		 c_env$begin_scope(e)
+		 nt: typespec := c_mdecl(e, marm.decl)
+		 if typespec$mismatch(e.str_type, nt)
+		    then c_env$errt(e, qs$["others arms variable"],
+					e.str_type, nt)
+		    end
+		 c_body(e, marm.body)
+		 c_env$end_scope(e)
+	   others:
+	   end
+	end c_except
+
+c_when_decls = proc (e: c_env, xs: exceptstmt)
+	arms: handlerlist := xs.arms
+	for arm: handler in handlerlist$elements(arms) do
+		e.line := arm.line
+		tagcase arm.vars
+		   tag decls (decls: decllist):
+			for d: decl in decllist$elements(decls) do
+				d.type_ := c_type(e, d.type_)
+				end
+		   others:
+		   end
+		end
+	end c_when_decls
+
+c_whenarms = proc (e: c_env, arms: handlerlist)
+	ah: int := handlerlist$size(arms)
+	for i: int in handlerlist$indexes(arms) do
+		arm: handler := arms[i]
+		e.line := arm.line
+		names: namelist := arm.names
+		nh: int := namelist$size(names)
+		for j: int in namelist$indexes(arm.names) do
+			n: name := names[j]
+			for k: int in int$from_to(j + 1, nh) do
+				if n = names[k]
+				   then c_env$err(e, qs$["condition '", n,
+							 "' listed twice"])
+				   end
+				end
+			for k: int in int$from_to(i + 1, ah) do
+				for n1: name in namelist$elements(arms[k].names) do
+					if n = n1
+					   then c_env$err(e, qs$[
+						    "multiple handlers for condition '",
+								n, "'"])
+					   end
+					end
+				end
+			end
+		c_env$begin_scope(e)
+		tagcase arm.vars
+		   tag decls (decls: decllist):
+			c_decllist(e, decls)
+		   others:
+		   end
+		c_body(e, arm.body)
+		c_env$end_scope(e)
+		end
+	end c_whenarms
+
+c_when_assn = proc (e: c_env, vars: whendecl, cond: exception, is_exit: bool)
+	which: str := "exception"
+	if is_exit
+	   then which := "exit" end
+	types: typelist := cond.types
+	decls: decllist
+	tagcase vars
+	   tag star:
+		if is_exit
+		   then c_env$err(e, qs$["exit '", cond.name,
+					"' caught by handler with (*) declaration"])
+		   end
+		return
+	   tag none:
+		if ~typelist$empty(types)
+		   then c_env$err(e, qs$[int$unparse(typelist$size(types)),
+					 " values accompany ", which,
+					 " '", cond.name, "', 0 expected"])
+		   end
+		return
+	   tag decls (dl: decllist):
+		decls := dl
+	   end
+	j: int := 1
+	h: int := typelist$size(types)
+	for d: decl in decllist$elements(decls) do
+	    t: typespec := d.type_
+	    for i: idn in idnlist$elements(d.idns) do
+		if j > h
+		   then	c_env$err(e, qs$["not enough values (", int$unparse(h),
+					 ") accompany ", which,
+					 " '", cond.name, "'"])
+			return
+		   end
+		if typespec$mismatch2(t, types[j])
+		   then c_env$errt(e, qs$["value assigned to '", i.str,
+					  "' by ", which, " '",
+					  cond.name, "'"],
+					t, types[j])
+		   end
+		j := j + 1
+		end
+	    end
+	if j <= h
+	   then c_env$err(e, qs$["too many values (", int$unparse(h),
+				 ") accompany ", which,
+				 " '", cond.name, "'"])
+	   end
+	end c_when_assn
+
+c_resignal = proc (e: c_env, rs: resignalstmt)
+	c_env$push_resigs(e, rs.resigs)
+	c_stmt(e, rs.stmt)
+	c_env$pop_handlers(e)
+	for resig: name in namelist$elements(rs.resigs) do
+		cnt: int := 0
+		for sig: name in namelist$elements(rs.resigs) do
+			if resig = sig
+			   then cnt := cnt + 1 end
+			end
+		if cnt > 1
+		   then c_env$err(e, qs$["duplicate resignal '", resig, "'"])
+		   end
+		for xsig: exception in exceptionlist$elements(e.xsignals) do
+			if resig = xsig.name
+			   then exit ok end
+			end except when ok: continue end
+		if resig ~= "failure"
+		   then c_env$err(e, qs$["resignal '", resig,
+					 "' not listed in header"])
+		   end
+		end
+	end c_resignal
+
+c_resig_catch = proc (e: c_env, cond: exception, is_exit: bool)
+	which: str := "exception"
+	if is_exit
+	   then c_env$err(e, qs$["exit '", cond.name,
+				 "' caught by resignal statement"])
+		which := "exit"
+	   end
+	n: name := cond.name
+	args: typelist := cond.types
+	types: typelist
+	begin
+	for xsig: exception in exceptionlist$elements(e.xsignals) do
+		if n = xsig.name
+		   then types := xsig.types
+			exit ok
+		   end
+		end
+	return
+	end except when ok: end
+	if typelist$size(args) ~= typelist$size(types)
+	   then c_env$err(e, qs$[int$unparse(typelist$size(args)),
+				 " values accompany ", which,
+				 " '", n, "', ",
+				 int$unparse(typelist$size(types)),
+				 " expected"])
+		return
+	   end
+	cvt_: typespec := e.cvt_type
+	for i: int in typelist$indexes(types) do
+		t: typespec := types[i]
+		if t = cvt_
+		   then t := e.down_type end
+		if typespec$mismatch2(t, args[i])
+		   then c_env$errt(e, qs$["value ", int$unparse(i),
+					  " accompanying ", which,
+					  " '", n, "'"],
+					t, args[i])
+		   end
+		end
+	end c_resig_catch
+
+c_forcestmt = proc (e: c_env, fs: forcestmt)
+	t: typespec := c_expr(e, fs.expr)
+	if typespec$mismatch(t, e.any_type)
+	   then c_env$errt(e, qs$["FORCE expression"], e.any_type, t) end
+	i: idn := fs.type_
+	ni: idn := idn$create(i.str, idnkind$make_tconst(opspeclist$new()))
+	nt: typespec := c_env$get_type(e, typeabs$make_idn(ni))
+	x: expr := expr$create(exprabs$make_type_(nt), e.type_type)
+	c_env$declare(e, i, idnkind$make_expr(x))
+	reqs: restrictlist := fs.where_
+	c_env$begin_specs(e)
+	c_restrictlist(e, reqs)
+	c_env$end_specs(e)
+	c_add_restricts(e, reqs)
+	c_restrictlist(e, reqs)
+	c_env$add_var(e, fs.val, nt)
+	end c_forcestmt

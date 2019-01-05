@@ -1,0 +1,18 @@
+% Copyright Massachusetts Institute of Technology 1980, 1989
+
+g_form = proc (x: real, i, f: int) returns (string)
+			signals (illegal_field_width, insufficient_field_width)
+	m1 = -1
+	if i < 0  cor  f < 0  cor  (i = 0  cand  f = 0)
+	   then signal illegal_field_width end
+	expon: int := real$exponent(x)
+	    except when undefined: end
+	if x = 0.0  cor  (expon >= m1  cand  expon < i)
+	   then return(f_form(x, i, f))
+		    except when insufficient_field_width: end
+	   end
+	i := i + f - 5
+	if i >= 0
+	   then return(e_form(x, 1, i)) end
+	signal insufficient_field_width
+	end g_form

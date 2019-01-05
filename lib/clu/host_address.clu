@@ -1,0 +1,8 @@
+% Copyright Massachusetts Institute of Technology 1985, 1989
+
+host_address = proc (host: string) returns (int, int)
+		 signals (not_found, bad_address)
+    l, r: int := _host_address(host)
+	resignal not_found, bad_address
+    return(l, r)
+    end host_address

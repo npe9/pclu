@@ -1,0 +1,233 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	PDEFN2	CLU
+%
+%	CLU Compiler:  parsing routines for definitions
+
+% where => empty | WHERE restrictlist
+% restrictlist => restrict | restrict , restrictlist
+
+p_where = proc (e: p_env) returns (restrictlist)
+	tagcase e.peek1
+	   tag where_: p_env$next_token(e)
+		return(p_clist[restrict](e, p_restrict, "restriction"))
+	   others:
+		return(restrictlist$new())
+	   end
+	end p_where
+
+% restrict => idn IN idn | idn IN typeset | idn HAS operdecllist
+
+p_restrict = proc (e: p_env) returns (restrict) signals (none, bad)
+	id: idn := p_idn(e)
+	    resignal none
+	line: int := e.line
+	kind: restrictkind
+	tagcase e.peek1
+	   tag in_:
+		p_env$next_token(e)
+		tagcase e.peek1
+		   tag idn (k: idn):
+			p_env$next_token(e)
+			kind := restrictkind$make_idn(k)
+		   tag l_curly:
+			p_env$next_token(e)
+			kind := restrictkind$make_set(p_typeset(e))
+			    resignal bad
+		   others:
+			p_env$assume(e, "typeset after IN")
+			signal bad
+		   end
+	   tag has_:
+		p_env$next_token(e)
+		kind := restrictkind$make_has_(p_operdecllist(e))
+	   others:
+		p_env$assume(e, "IN or HAS restriction after idn in WHERE clause")
+		signal bad
+	   end
+	return(restrict${idn:  id,
+			 kind: kind,
+			 line: line})
+	end p_restrict
+
+% typeset => { <> idn | idn HAS operdecllist sc equatelist }
+
+p_typeset = proc (e: p_env) returns (xtypeset) signals (bad)
+	id: idn := p_idn(e)
+	    except when none: p_env$assume(e, "idn after {")
+			      signal bad
+		   end
+	id2: idn := id
+	tagcase e.peek1
+	   tag op (k: infixop):
+		if "or" = k.op  cand  ~k.neg
+		   then	p_env$next_token(e)
+			id2 := p_idn(e)
+			    except when none: p_env$assume(e,
+						"idn after | in {idn | idn ...}")
+				   end
+		   else	p_env$assume(e, "| idn in {idn | idn ...}")
+		   end
+	   others:
+		p_env$assume(e, "| idn in {idn | ...}")
+	   end
+	if id.str ~= id2.str
+	   then p_env$assume(e, "idns do not match in {idn | idn ...}") end
+	ops: operdecllist
+	tagcase e.peek1
+	   tag has_: p_env$next_token(e)
+		     ops := p_operdecllist(e)
+	   others:   p_env$assume(e, "HAS restriction in typeset")
+		     ops := operdecllist$new()
+	   end
+	equates: equatelist := p_slist[equate](e, p_equate)
+	set: xtypeset := xtypeset${idn:     id,
+				   ops:     ops,
+				   equates: equates}
+	tagcase e.peek1
+	   tag r_curly: p_env$next_token(e)
+	   others:      p_env$assume(e, "} in {idn | ...}")
+	   end
+	return(set)
+	end p_typeset
+
+% operdecllist => operdecl | operdecl , operdecllist
+% operdecl => opnamelist : type
+
+p_operdecllist = proc (e: p_env) returns (operdecllist)
+	list: operdecllist := operdecllist$new()
+	while true do
+		line: int := e.peekline
+		opers: opspeclist := p_clist[opspec](e, p_opname, "opname")
+		typ: typespec
+		tagcase e.peek1
+		   tag colon: p_env$next_token(e)
+			      typ := p_type1(e)
+		   others:    p_env$assume(e,
+			  ": type of operation declaration in type restriction")
+			      typ := e.unknown_type
+		   end
+		for op: opspec in opspeclist$elements(opers) do
+			op.type_ := typ
+			end
+		list := operdecllist$addh(list, operdecl${opers: opers,
+							  line:  line})
+		tagcase e.peek1		% Don't gobble start of next restriction
+		   tag comma:	tagcase p_env$peek(e, 3)
+				   tag has_, in_: return(list)
+				   others:	  p_env$next_token(e)
+				   end
+		   others:	return(list)
+		   end
+		end
+	end p_operdecllist
+
+% opnamelist => opname | opname , opnamelist
+
+% opname => name constlist
+
+p_opname = proc (e: p_env) returns (opspec) signals (none, bad)
+	n: name := p_name(e)
+	    resignal none
+	parms: exprlist := p_blist[expr](e, p_expr, _none_ok, "constant")
+	return(opspec${name:  n,
+		       parms: parms,
+		       type_: e.unknown_type})
+	end p_opname
+
+% pathname => string
+
+p_pathname = proc (e: p_env) returns (pathname) signals (bad)
+	begin
+	s: str := exprabs$value_str(token$value_expr(e.peek1))
+	p_env$next_token(e)
+	return(s)
+	end except when wrong_tag: end
+	p_env$assume(e, "pathname in idn = PATHNAME pathname")
+	signal bad
+	end p_pathname
+
+% Check for "END idn", with idn matching the definition name
+
+p_defn_end = proc (e: p_env, id: str)
+	tagcase e.peek1
+	   tag end_: 
+	   others:   p_env$assume(e, "END and trailing idn of module " || id)
+		     return
+	   end
+	begin
+	s: str := token$value_idn(p_env$peek(e, 2)).str
+	if id = s
+	   then	p_env$next_token(e)
+		p_env$next_token(e)
+	elseif s = e.clustr
+	   then	p_env$assume(e, "END and trailing idn of module " || id)
+	else p_env$next_token(e)
+	     tagcase p_env$peek(e, 2)		% handle nonmatching idn
+		tag semi, end_, idn, eof:
+		     p_env$next_token(e)
+		     p_env$err(e, "trailing idn does not match " || id, minor)
+		others:
+		     p_env$assume(e, "trailing idn of module " || id)
+		end
+	end
+	end except when wrong_tag:
+			   p_env$next_token(e)
+			   p_env$assume(e, "trailing idn of module " || id)
+		   end
+	p_semi(e)
+	end p_defn_end
+
+% sc => empty | ;
+
+p_semi = proc (e: p_env)
+	i: int := 0
+	while true do
+		tagcase e.peek1
+		   tag semi:
+			p_env$next_token(e)
+			i := i + 1
+		   others:
+			if i > 1
+			   then p_env$err(e, "more than one ; in a row", minor)
+			   end
+			return
+		   end
+		end
+	end p_semi
+
+% Flush until we find something of the form	idn =
+% Stop at an END if looking for an operation.
+
+p_find_a_defn = proc (e: p_env, want_oper: bool) returns (bool)
+	flushed: bool := false
+	found: bool := false
+	while true do
+		tagcase e.peek1
+		   tag idn:
+			tagcase p_env$peek(e, 2)
+			   tag equal: found := true
+				      break
+			   others:
+			   end
+		   tag end_:
+			if want_oper then break end
+		   tag eof:
+			break
+		   others:
+		   end
+		if ~flushed
+		   then	if want_oper
+			   then p_env$err(e, "looking for an operation", serious)
+			   else p_env$err(e, "looking for a module", serious)
+			   end
+			flushed := true
+		   end
+		line: int := e.peekline
+		while e.peekline = line do
+			p_env$next_token(e)
+			end
+		end
+	if flushed
+	   then p_env$err(e, "resuming parse at this point", none) end
+	return(found)
+	end p_find_a_defn

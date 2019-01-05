@@ -1,0 +1,10 @@
+%% Copyright Massachusetts Institute of Technology 1982, 1989
+
+%% cos(x)
+
+%% cos(x) = sin (x + pi/2)
+
+Cos = proc (x: real) returns (real);
+    HalfPI = 3.1415926536 / 2.
+    return (Sin(X + HalfPI));
+    end Cos;

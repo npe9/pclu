@@ -1,0 +1,89 @@
+% this data type is similar to oneof[exists: t, none: null]
+% but it doesn't require any additional storage
+% however, its operations also aren't optimized by the compiler
+
+% Furthermore, maybe[t]$make(x) fails if the primitive type used to represent
+% t is int and the value of x is maybe_none.
+
+maybe = cluster [t: type] is none, make, exists, value, equal, similar, copy,
+                             _gcd
+
+rep = int
+
+maybe_none = -2147483647 -1	% <integer value used to represent tag none,
+				%  usually the smallest integer.>
+
+% -2147483648 = - 2 ** 31
+% For Vax, use - 2 ** 30, but check that this can't point into the heap.
+% Alas, the PCLU compiler refuses to accept -2147483648
+
+none = proc () returns (cvt)
+    % return the object with the NONE tag
+
+    return(maybe_none)
+    end none
+
+make = proc (x: t) returns (cvt)
+    % return a maybe with tag EXISTS and value X
+
+    if _cvt[t,int](x) = maybe_none
+       then signal failure("Bad value for maybe$make.")
+       end
+    return(_cvt[t,int](x))
+    end make
+
+exists = proc (m: cvt) returns (bool)
+    % test if M has tag EXISTS
+    return(m ~= maybe_none)
+    end exists
+
+value = proc (m: cvt) returns (t) signals (wrong_tag)
+    % return the value of M if the tag is EXISTS, else signal wrong_tag
+
+    if m = maybe_none
+       then signal wrong_tag
+       end
+    return(_cvt[int,t](m))
+    end value
+
+equal = proc (m1, m2: cvt) returns (bool)
+	    where t has equal: proctype (t, t) returns (bool)
+    % true if both have tag NONE or
+    % both have tag EXISTS and the values are t$equal
+
+    if m1 = maybe_none then
+       if m2 = maybe_none then return(true) else return(false) end
+       end
+    if m2 = maybe_none then return(false) end
+    return(_cvt[int,t](m1) = _cvt[int,t](m2))
+    end equal
+
+similar = proc (m1, m2: cvt) returns (bool)
+	    where t has similar: proctype (t, t) returns (bool)
+    % true if both have tag NONE or
+    % both have tag EXISTS and the values are t$similar
+
+    if m1 = maybe_none then
+       if m2 = maybe_none then return(true) else return(false) end
+       end
+    if m2 = maybe_none then return(false) end
+    return(t$similar(_cvt[int,t](m1), _cvt[int,t](m2)))
+    end similar
+
+copy = proc (m: cvt) returns (cvt)
+	    where t has copy: proctype (t) returns (t)
+    % if M has tag NONE, return it
+    % else return a maybe with tag EXISTS and value t$copy(value(m))
+
+    if m = maybe_none then return(m) end
+    return(_cvt[t,int](t$copy(_cvt[int,t](m))))
+    end copy
+
+_gcd = proc (m: cvt, tab: gcd_tab) returns (int)
+	    where t has _gcd: proctype (t, gcd_tab) returns (int)
+
+    if m = maybe_none then return(int$_gcd(m, tab)) end
+    return(t$_gcd(_cvt[int,t](m), tab))
+    end _gcd
+
+end maybe

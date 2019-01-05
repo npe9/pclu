@@ -1,0 +1,30 @@
+% Copyright Massachusetts Institute of Technology 1982, 1989
+
+_working_dir = proc (s: string, update: bool) returns (string)
+					      signals (bad_format)
+	own wrkdir: string := ""
+	if ~update
+	   then return(wrkdir) end
+	if string$empty(s)
+	   then wrkdir := s
+		return(s)
+	   end
+	if s[1] = '~'
+	   then z: int := string$indexc('/', s)
+		if z = 0
+		   then s := _home_dir(string$rest(s, 2))
+		   else s := _home_dir(string$substr(s, 2, z - 2)) ||
+			     string$rest(s, z)
+		   end except when not_found: signal bad_format end
+	elseif s[1] ~= '/'
+	   then if string$empty(wrkdir)
+		   then s := connected_dir() || s
+		   else s := wrkdir || s
+		   end
+	end
+	wrkdir := file_name$unparse
+		      (_fixup_file_name
+			   (file_name$create(s, "", "", ""), false))
+	   resignal bad_format
+	return(wrkdir)
+	end _working_dir

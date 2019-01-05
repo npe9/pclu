@@ -1,0 +1,40 @@
+% Copyright Massachusetts Institute of Technology 1982, 1989
+
+sigs = sequence[string]$["hangup",
+			 "interrupt",
+			 "quit",
+			 "illegal instruction",
+			 "trace trap/BPT",
+			 "IOT instruction",
+			 "EMT instruction",
+			 "floating point exception",
+			 "killed",
+			 "bus error",
+			 "segmentation violation",
+			 "bad argument to system call",
+			 "broken pipe",
+			 "alarm clock",
+			 "software termination",
+			 "urgent condition",
+			 "stop",
+			 "stop (tty)",
+			 "continue",
+			 "child termination",
+			 "stop (tty input)",
+			 "stop (tty output)",
+			 "i/o possible",
+			 "cpu time limit",
+			 "file size limit",
+			 "virtual time alarm",
+			 "profiling timer alarm",
+			 "signal 28",
+			 "signal 29",
+			 "signal 30",
+			 "signal 31",
+			 "signal 32"]
+
+_signal_type = proc (sig: int) returns (string) signals (illegal_signal)
+	return(sigs[sig])
+	   except when bounds: end
+	signal illegal_signal
+	end _signal_type

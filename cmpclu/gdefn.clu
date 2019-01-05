@@ -1,0 +1,1311 @@
+
+%  Copyright    Massachusetts Institute of Technology     1990,1991
+
+%
+%	Code Generator for PCLU
+%		adapted from clut by sharon perl
+%			clut generated clu from clu for the t/scheme language
+%
+
+an = array[name]
+
+g_definition = proc (e: g_env, def: definition)
+    tagcase def
+       tag apply (d: applydefn):
+    	   g_env$newdefn(e)
+           g_applydefn(e, d, "")
+       tag cluster_ (d: typedefn):
+    	   g_env$newdefn(e)
+           g_typedefn(e, d)
+       tag equates:
+       others:
+	   g_env$error(e, "g_definition: others")
+       end
+    end g_definition
+
+g_applydefn = proc (e: g_env, a: applydefn, cname: str)
+    % cname is name of enclosing cluster, if any (without the "$").
+
+    % if a.gen.unique = "itertype" then
+    %% a.idn.str = ITER [ a.parms ] ( a.args ) YIELDS ( a.vals )
+    % else
+    %% a.idn.str = PROC [ a.parms ] ( a.args ) RETURNS ( a.vals ) 
+    %%			SIGNALS ( a.sigs) WHERE a.where_
+    %%	    a.init	% own vars
+    %%      a.body
+    %% END a.idn.str
+    % might consider adding code to detect no return values when some expected
+
+    %%  if iter add locals argument
+    %%  add results to arglist
+
+    iterp: bool := false
+
+    % set iterp if this is an iterator
+
+    if a.gen.unique = "itertype" 
+       then
+	    iterp := true
+       end
+
+    begin
+	ex$init()           % initialize exception handling cluster
+	ib$init()           % initialize list of iterator bodies
+	loop_context$init() % initialize while loop counter, etc.
+	current_apply$set(a)% remember current definition for later reference
+	parm$enter(a.parms) % remember parameters
+	if ~current_type$exists() cand ~current_apply$parmd() then
+		dbg_info$add_ilist(a.init) end
+	dbg_info$start(e, a, cname, iterp)  % prime debugger information generation
+
+	% generate REQS structures for parameter block building
+	reqs$parms(a.idn, a.parms)
+	reqs$more(e, a.idn, a.where_)
+
+	% generate extern stmts for iterator bodies and declare owns
+   
+	all_stmts: stmtlist
+	% omitted type owninit from all_stmts 1/18/91 dwc
+	%    if current_type$exists()
+	%       then
+	%	    all_stmts := initlist_to_stmtlist(current_type$get().init)
+	%       else
+	all_stmts := stmtlist$new()
+	%       end
+	more_stmts: stmtlist := initlist_to_stmtlist(a.init)
+	all_stmts := seq_extend[stmt](all_stmts, more_stmts)
+	all_stmts := seq_extend[stmt](all_stmts, a.body)
+	ext_names: an := an$predict(1, 40)
+	g_expr_proc_names(ext_names, all_stmts)
+    	g_xref$add_ent(ext_names)
+	g_externs(e, ext_names, all_stmts)
+	g_check_handlers(e, all_stmts)
+	g_tbl$find_tables(e, all_stmts, definition$make_apply(a))
+	g_const$find_consts(e, all_stmts)
+	owns$save(a.init)
+	if ~current_apply$parmd() cand
+	   (~current_type$exists() cor ~current_type$parmd()) then
+	   g_ownvars(e, a.init, 1)
+	 elseif current_apply$parmd() then
+	   g_pownvars(e, a.init, 1)
+	 else % unparmed proc/iter in parmd type: do nothing on pass 1
+	 end
+
+	ib$reset()
+
+	% generate signature
+
+
+	g_env$blankline(e)
+	g_env$puts(e, "/**** BEGIN ")
+	if iterp then g_env$puts(e, "ITERATOR ")
+	   else g_env$puts(e, "PROCEDURE ") end
+	nm: string := a.idn.str
+	if nm[1] = '%' then
+	   nm := string$rest(nm, 2) end
+	g_env$putl(e, nm || " ****/")
+	g_env$blankline(e)
+
+	if iterp
+	   then
+		g_iter_signature(e, a, cname)
+	   else
+		g_proc_signature(e, a, cname)
+	   end
+
+	% declare parameter blocks, and locals
+	g_env$newline(e)
+	g_env$indent(e)
+	g_env$puts(e, "{")
+	g_localvars(e, a, iterp)
+	g_env$newline(e)
+
+	% initialize owns, build parameter blocks
+  
+	if ~current_apply$parmd() cand
+	   (~current_type$exists() cor ~current_type$parmd())
+	   then
+		g_ownvars(e, a.init, 2)
+	   else
+		g_pownvars(e, a.init, 2)
+	   end
+
+	g_env$putl(e, "enter_proc(" || int$unparse(a.line) || ");")
+	% generate statements
+	for s: stmt in stmtlist$elements(a.body) do
+	    g_stmt(e, s)
+	    end
+
+	% generate default exception handler
+
+	g_env$putl(e, "goto "||ex$get_current_end_label()||";")
+	g_env$putl(e, ex$get_current_ex_label()||":")
+	g_env$indent(e)
+	g_env$puts(e, "{")
+	g_env$indent(e)
+	g_env$newline(e)
+	g_env$puts(e, "if (")
+	g_err(e)
+	g_env$putl(e, " == ERR_failure) {signal(ERR_failure);}")
+	g_env$puts(e, "elist[0] = _pclu_erstr(")
+	g_err(e)
+	g_env$putl(e, ");")
+	g_env$putl(e, "{signal(ERR_failure);}")
+	g_env$outdent(e)
+	g_env$putl(e, "}")
+	g_env$newline(e)
+	g_env$outdent(e)
+	if typelist$size(current_apply$get().vals) = 0 cor iterp then
+	   g_env$puts(e, ex$get_current_end_label() || ": {signal(ERR_ok);}")
+	   else
+		g_env$putl(e, ex$get_current_end_label() ||
+			      ": elist[0].str = no_return_values_STRING;")
+		g_env$indent(e)
+		g_env$putl(e, "{signal(ERR_failure);}")
+		g_env$outdent(e)
+	   end
+	g_env$ensure_newline(e)
+
+	% finish up
+	g_env$putl(e, "}")
+	g_env$blankline(e)
+	g_env$outdent(e)
+	g_env$puts(e, "/**** END ")
+	if iterp then g_env$puts(e, "ITERATOR ")
+	   else g_env$puts(e, "PROCEDURE ") end
+	g_env$puts(e, nm)
+	g_env$putl(e, " ****/")
+	g_env$blankline(e)
+
+	dbg_info$emit_decls(e)
+
+	% generate iterator bodies
+	%ib$reset()
+	ib$gen_bodies(e, a.idn)
+	end
+       except when failure(s: string):
+		   if s ~= "unhandled exception: specs_missing"
+			cand s ~= "specs_missing"
+		      then signal failure(s) end end
+    parm$leave()
+    current_apply$reset()
+    tv$reset()
+    owns$forget()
+    typ$undo_local_idn_types()
+    ib$init()
+    if ~current_type$exists() then dbg_info$reset() end
+
+    end g_applydefn
+
+g_proc_signature = proc(e:g_env, a:applydefn, cname:str)
+
+    g_env$puts(e, "errcode ")
+    if cname ~= "" then g_env$puts(e, cname|| sep) end
+    nm: string := a.idn.str
+    if nm[1] = '%' then nm := string$rest(nm, 2) end
+    if cname = "" then g_env$puts(e, escape_ckeyword(nm))
+    	else g_env$puts(e, nm) end
+    g_env$puts(e, "(")
+    g_arglist(e, a.args)
+    g_retlist(e, a.vals, decllist$size(a.args))
+    % if decllist$size(a.args) > 0 cor typelist$size(a.vals) > 0
+    % then g_env$puts(e, ", ")
+    % end
+    g_env$putl(e, ")")
+    % generate types for arglist
+
+    g_argdecllist(e, a.args)
+    g_retdecllist(e, a.vals)
+
+    end g_proc_signature
+
+g_iter_signature = proc(e:g_env, a:applydefn, cname:str)
+
+    g_env$puts(e, "errcode ")
+    if cname ~= "" then g_env$puts(e, cname|| sep) end
+    nm: string := a.idn.str
+    if nm[1] = '%' then nm := string$rest(nm, 2) end
+    g_env$puts(e, nm)
+    g_env$puts(e, "(")
+    g_arglist(e, a.args)
+    if decllist$size(a.args) > 0
+       then
+	    g_env$puts(e, ", ")
+       end
+    g_env$putl(e, "proc, user_locals, iecode)")
+    % generate types for arglist
+
+    g_argdecllist(e, a.args)
+    g_env$putl(e, "errcode (*proc)();")
+    g_env$putl(e, "char **user_locals;")
+    g_env$putl(e, "errcode *iecode;")
+
+    end g_iter_signature
+
+g_parmlist = proc(e: g_env, parms: decllist)
+    for each_d:decl in decllist$elements(parms) do
+	for each_idn: idn in idnlist$elements(each_d.idns) do
+	    g_idnlit(e, each_idn)
+	    g_env$puts(e, "_ops")
+	    g_env$puts(e, ", ")
+	    end % for
+	end % for
+    end g_parmlist
+
+g_parm_types = proc(e: g_env, parms: decllist)
+    %    for each_d:decl in decllist$elements(parms) do
+    %	for each_idn: idn in idnlist$elements(each_d.idns) do
+    %	    if g_env$add_typedef(each_idn) then
+    %	       g_env$puts(e, "typedef int ")
+    %	       g_idnlit(e, each_idn)
+    %	       g_env$putl(e, ";")
+    %	       end
+    %	    end % for
+    %	end % for
+    end g_parm_types
+
+g_parmdecls = proc(e: g_env, a: applydefn)
+    for each_d:decl in decllist$elements(a.parms) do
+	for each_idn:idn in idnlist$elements(each_d.idns) do
+	    g_env$putl(e, "struct{")
+	    g_env$putl(e, "long count;")
+	    for each_r:restrict in restrictlist$elements(a.where_) do
+		if ~idn$similar(each_r.idn, each_idn) then continue end
+		ops: operdecllist
+		tagcase each_r.kind
+		   tag has_ (h: operdecllist):
+		       ops := h
+		   tag idn:
+		   tag set (s: xtypeset):
+		       ops := s.ops
+		   end % tag
+		for each_opd: operdecl in operdecllist$elements(ops) do
+		    for each_op: opspec in opspeclist$elements(each_opd.opers) do
+			g_env$putl(e, "errcode (*" || each_op.name || ")();")
+			end % for
+		    end % for
+		end % for
+	    g_env$puts(e, "} *")
+	    g_idnlit(e, each_idn)
+	    g_env$puts(e, "_ops")
+	    g_env$putl(e, ";")
+	    end % for
+	end % for
+    end g_parmdecls
+
+% generate typedef for own vars for a parameterized cluster
+%	includes owns for unparameterized ops
+
+g_ptypeownvars = proc(e: g_env, ti: initlist, aps: applydefnlist)
+    g_env$blankline(e)
+    g_env$putl(e, "OWN_ptr " || current_type$get_name() || "_own_init; /* dummy */")
+    g_env$putl(e, "typedef struct {")
+    g_env$indent(e)
+    g_env$putl(e, "long " || current_type$get_name() || "_own_init;")
+    own_count : int := 0
+    dbg_info$add_ilist(ti)
+    for i: init in initlist$elements(ti) do
+	g_pown(e, i, 1) 
+	g_env$newline(e)
+	end
+    own_count := own_count + own_counter(ti)
+    for a: applydefn in applydefnlist$elements(aps) do
+	if decllist$size(a.parms) ~= 0 then continue end
+	n: string := a.idn.str
+	if n[1] = '%' then n := string$rest(n, 2) end
+	g_env$putl(e, "long " || n || "_own_init;")
+	%	dbg_info$add_own(n || "_own_init")
+	dbg_info$add_ilist(a.init)
+	for i: init in initlist$elements(a.init) do
+	    g_pown(e, i, 1)
+	    g_env$newline(e)
+	    end
+	own_count := own_count + own_counter(a.init)
+	end % for
+    g_parm_decls(e, parm$get_base(), decllist$new())
+    own_defn$start()
+    g_tbl$g_field_tables(e, dynamic)
+    g_env$outdent(e)
+    g_env$putl(e, "} " || current_type$get_name() || "_OWN_DEFN;")
+    own_defn$stop()
+    g_env$blankline(e)
+    g_env$putl(e, "OWN_req " || current_type$get_name() || "_ownreqs"
+		    || " = {sizeof(" || current_type$get_name() || "_OWN_DEFN), "
+    		    || int$unparse(own_count) || "};")
+    g_env$blankline(e)
+    end g_ptypeownvars
+
+% generate a routine to initialize own variables belonging to
+%	a parameterized type
+
+g_powninit = proc (e: g_env, ilist:initlist)
+    g_env$putl(e, "errcode " || current_type$get_name()
+		    || "_own_init_proc()")
+    g_env$putl(e, "{")
+    if dbg_info$active() then
+       g_env$putl(e, "struct {")
+       end
+    g_tbl$build_tables(e, 0)
+    g_env$putl(e, "errcode err;")
+    if dbg_info$active() then
+       g_env$puts(e, current_type$get_name() || "_OWN_DEFN *type_own_ptr;")
+       g_env$putl(e, "} locals;")
+       end
+    if dbg_info$active()
+       then
+	    g_env$puts(e, "locals.type_own_ptr = (")
+	    g_env$puts(e, current_type$get_name() || "_OWN_DEFN")
+	    g_env$putl(e, " *) CUR_PROC_VAR.proc->type_owns;")
+       else
+	    g_env$puts(e, current_type$get_name() || "_OWN_DEFN *type_own_ptr = (")
+	    g_env$puts(e, current_type$get_name() || "_OWN_DEFN")
+	    g_env$putl(e, " *) CUR_PROC_VAR.proc->type_owns;")
+       end
+    g_env$blankline(e)
+    g_env$indent(e)
+    g_env$outdent(e)
+    g_env$putl(e, "enter_own_init_proc();")
+    g_pownvars(e, ilist, 2)
+    g_env$putl(e, "}")
+    g_env$blankline(e)
+    end g_powninit
+
+% generate a routine to initialize own variables belonging to
+%	unparameterized type
+
+g_owninit = proc (e: g_env, ilist:initlist) returns (bool)
+    if g_tbl$exist() cor g_const$exist() cor own_init(ilist) then
+       g_env$putl(e, "errcode " || current_apply$get_name()
+		       || "_own_init_proc()")
+       g_env$putl(e, "{")
+       if dbg_info$active() then
+	  g_env$putl(e, "struct {")
+	  end
+       g_tbl$build_tables(e, 0)
+       g_env$indent(e)
+       g_env$putl(e, "errcode err;")
+       if dbg_info$active() then
+	  g_env$putl(e, "} locals;")
+	  end
+       g_env$putl(e, "enter_own_init_proc();")
+       g_ownvars(e, ilist, 2)
+       g_env$putl(e, "}")
+       g_env$outdent(e)
+       g_env$blankline(e)
+       return (true)
+       end
+    return (false)
+    end g_owninit
+
+% see if any of the owns in ilist need to be initialized => return true
+%	no owns need initialization => false
+
+own_init = proc(ilist: initlist) returns (bool)
+    for each_init: init in initlist$elements(ilist) do
+	tagcase each_init.stmt
+	   tag decl:
+	   tag init: return (true)
+	   end
+	end
+    return(false)
+    end own_init
+
+% generate statements to 
+%   pass 1: generate typedefs
+%   pass 2: initialize own variables belonging to
+%	parameterized type, parameterized proc/iter
+
+g_pownvars = proc (e: g_env, ilist: initlist, pass:int)
+
+    generic_name = "generic_CLU_proc"
+    ptr: string := "op_own_ptr"
+    if current_type$exists() cand ~current_apply$parmd() then
+       ptr := "type_own_ptr"
+       end
+    ref: string := current_apply$get_short_name()
+    % revamped 5/22/90: 2 lines omitted, one added
+    %    if (current_type$exists() cand ~current_apply$parmd()) 
+    %	 cor ref = ""
+    if ref = ""
+       then
+	    ref := current_type$get_name() end
+    if pass = 1 then
+       g_env$blankline(e)
+       g_env$putl(e, "typedef struct {")
+       g_env$indent(e)
+       g_env$putl(e, "long " || ref || "_own_init;")
+       end
+    if pass = 2 then
+       g_env$indent(e)
+
+       % if 1st time in this apply, then build constant tables
+       if g_tbl$exist() cor g_const$exist() then
+	  g_env$putl(e, "if (" || s_locals() || ptr || "->" || 
+			ref ||"_own_init == 0) {")
+	  g_tbl$build_tables(e, 1)
+	  g_const$g_consts(e, 1)
+	  % build dynamic table
+	  g_tbl$build_tables(e, 2)
+	  g_const$g_consts(e, 2)
+          g_env$putl(e, "}")
+	  end
+
+
+       % build type owns if appropriate
+       if current_type$exists()
+	    cand current_apply$get_name() ~= current_type$get_name()
+	    cand initlist$size(current_type$get().init) ~= 0
+	  %	    cand current_type$own_init_proc_exists()
+	  then
+	       if current_type$parmd()
+		  then
+		       g_env$indent(e)
+		       g_env$putl(e, "if (" || s_locals() ||
+				     "type_own_ptr->" || current_type$get_name() ||
+				     "_own_init == 0) {")
+		       g_env$putl(e, generic_name||".type_owns = (OWNPTR)" || s_locals() || "type_own_ptr;")
+		       g_env$putl(e, generic_name||".op_owns = 0;")
+		       g_env$putl(e, generic_name || ".proc = " || current_type$get_name() || "_own_init_proc;")
+		       g_env$putl(e, s_locals() || "err = "||generic_name||".proc();")
+		       g_env$putl(e, "if (" || s_locals() || "err != ERR_ok) goto ex_0;")
+		       g_env$putl(e, "}")
+		       g_env$outdent(e)
+		  else
+		       % catching of err added 8/24/90
+		       g_env$putl(e, "if (" ||  current_type$get_name() ||
+				     "_own_init == 0) {")
+		       g_env$indent(e)
+		       g_env$putl(e, s_locals() || "err = " || current_type$get_name() ||
+				     "_own_init_proc();")
+		       g_env$putl(e, "if (" || s_locals() || "err != ERR_ok) goto ex_0;")
+		       g_env$putl(e, "}")
+		       g_env$outdent(e)
+		  end
+	  end
+
+       % if 1st time in this apply, then build do apply's own init
+       g_env$putl(e, "if (" || s_locals() || ptr || "->" || ref 
+		       ||"_own_init == 0) {")
+       g_env$putl(e, s_locals() || ptr || "->" || ref
+		       || "_own_init = 1;")
+       end
+    for i: init in initlist$elements(ilist) do
+	g_pown(e, i, pass)
+	g_env$newline(e)
+	end
+    if pass = 2 then
+       g_env$outdent(e)
+       if current_type$exists()
+	    cand current_apply$get_name() = current_type$get_name() then
+	  g_env$indent(e)
+	  g_env$putl(e, "{signal(ERR_ok);}") %return->signal 5/22/90
+	  % unhandled 8/24/90
+	  g_env$putl(e, "ex_0: pclu_unhandled(" || s_locals() || "err); {signal(ERR_failure);}")
+	  g_env$outdent(e)
+	  end
+       g_env$putl(e, "}")
+       end
+    if pass = 1 then
+       g_parm_decls(e, decllist$new(), current_apply$get().parms)
+       own_defn$start()
+       g_tbl$g_field_tables(e, dynamic)
+       defn_name: string := op_own_name()
+       g_env$putl(e, "} " || defn_name || "_OWN_DEFN;")
+       own_defn$stop()
+       g_env$outdent(e)
+       g_env$putl(e, "OWN_req " || defn_name || "_ownreqs"
+		       || " = {sizeof(" || defn_name || "_OWN_DEFN), "
+       		       || int$unparse(own_counter(ilist)) || "};")
+       g_env$blankline(e)
+       end
+    end g_pownvars
+
+% generate statements to initialize own variables belonging to
+%	unparameterized type, unparameterized proc/iter
+
+g_ownvars = proc (e: g_env, ilist: initlist, pass:int)
+
+    %% ilist[1]
+    %%  :
+    %% ilist[n]
+    owns: bool := g_tbl$exist() cor g_const$exist() cor own_init(ilist)
+    if pass = 1 then
+       if owns
+	  then
+	       g_env$putl(e, "static int " || current_apply$get_name()
+			       || "_own_init = 0;")
+	elseif current_type$exists() cand
+	       current_apply$get_name() = current_type$get_name() then
+	  g_env$putl(e, "static int " || current_apply$get_name()
+			  || "_own_init = 1;")
+	end
+       if current_type$exists() then
+	  nm: string := current_type$get_name() || "_ownreqs"
+	  if g_env$add_global(nm) then
+	     g_env$putl(e, "OWN_req " || nm || " = {0,0};")
+	     end
+	  end
+       end
+    if pass = 2 then
+       g_env$indent(e)
+       if owns then
+	  g_env$putl(e, "if (" || current_apply$get_name() ||"_own_init == 0) {")
+          end
+       if owns cand 
+	  (~current_type$exists() cor (current_apply$get_name() =
+				       current_type$get_name()))
+	  then
+	       g_tbl$build_tables(e, 1)
+	       g_tbl$build_tables(e, 2)
+	       g_const$g_consts(e, 1)
+	       g_const$g_consts(e, 2)
+	  end
+       if current_type$exists()
+	    cand current_apply$get_name() ~= current_type$get_name() 
+	    cand current_type$own_init_proc_exists()
+	  then
+	       % catching of err added 8/24/90
+	       g_env$putl(e, "if (" || current_type$get_name() ||
+			     "_own_init == 0) {")
+	       g_env$indent(e)
+	       g_env$putl(e, s_locals() || "err = " || current_type$get_name() ||
+			     "_own_init_proc();")
+	       g_env$putl(e, "if (" || s_locals() || "err != ERR_ok) goto ex_0;")
+	       g_env$putl(e, "}")
+	       g_env$outdent(e)
+	  end
+       if owns then
+	  g_env$putl(e, current_apply$get_name() || "_own_init = 1;")
+	  end
+       end
+    for i: init in initlist$elements(ilist) do
+	g_own(e, i, pass) 
+	g_env$newline(e)
+	end
+    if pass = 2 then
+       g_env$outdent(e)
+       if current_type$exists()
+	    cand current_apply$get_name() = current_type$get_name()
+	  then
+	       g_env$indent(e)
+	       g_env$putl(e, "{signal(ERR_ok);}") % return to signal & unhandled 8/24/90 
+	       g_env$outdent(e)
+	       g_env$putl(e, "ex_0: pclu_unhandled(" || s_locals() || "err); {signal(ERR_failure);}")
+	       g_env$indent(e)
+	       g_env$putl(e, "}")
+	       g_env$outdent(e)
+	  else
+       	       if owns then 
+		  g_env$putl(e, "}")
+		  end
+	  end
+       end
+    end g_ownvars
+
+g_pown = proc (e: g_env, i: init, pass:int)
+
+    if pass = 1 then
+       tagcase i.stmt
+	  tag decl (d: decl):
+	      typ$fix_own_type(d)
+	      g_decl(e, d)
+	  tag init (d: declinit):
+	      typ$fix_own_typelist(d.decls)
+	      g_decllist(e, d.decls)
+	  end
+       else
+	    % the following typ$fixes are usually unnecessary
+	    % except when a local variable in a routine has
+	    %	the same name as an own variable in a later routine
+	    % this code fixes the type for the own variable
+	    tagcase i.stmt
+	       tag decl (d: decl):
+		   typ$fix_own_type(d)
+		   if dbg_info$active() then
+		      g_decl_debug(e, d)
+		      end
+	       tag init (d: declinit):
+		   typ$fix_own_typelist(d.decls)
+		   g_declinit(e, d)
+	       end
+       end
+    end g_pown           
+
+g_own = proc (e: g_env, i: init, pass:int)
+
+    if pass = 1 then
+       % g_env$puts(e, "static ")
+       tagcase i.stmt
+	  tag decl (d: decl):
+	      typ$fix_own_type(d)
+	      g_decl(e, d)
+	  tag init (d: declinit):
+	      typ$fix_own_typelist(d.decls)
+	      g_decllist(e, d.decls)
+	  end
+       else
+	    tagcase i.stmt
+	       tag decl (d: decl):
+		   if dbg_info$active() then
+		      g_decl_debug(e, d)
+		      end
+	       tag init (d: declinit):
+		   g_declinit(e, d)
+	       end
+       end
+    end g_own           
+
+own_counter = proc(i: initlist) returns (int)
+
+    own_count : int := 1 	% for init flag
+    for each_i: init in initlist$elements(i) do
+	tagcase each_i.stmt
+	   tag decl (d: decl):
+	       own_count := own_count + idnlist$size(d.idns)
+	   tag init (d: declinit):
+	       for each_d: decl in decllist$elements(d.decls) do
+		   own_count := own_count + idnlist$size(each_d.idns)
+		   end
+	   end
+	end
+    return (own_count)
+    end own_counter
+
+g_localvars = proc (e: g_env, ap:applydefn, iterp: bool)
+
+    bod: stmtlist := ap.body
+    args: decllist := ap.args
+    parms: decllist := parm$get_base()
+
+    % pick up decls, declinits, tag, for except decls
+    % recurse on bodies of if, tag, body, while, for, except, beginend
+
+    locals: array[decl] := array[decl]$new()
+    g_lvs_stmts(locals, bod)
+    locals := g_lvs_uniq(locals)
+    current_locals$set(locals)
+    g_env$newline(e)
+
+    % build struct: CLUREFs for args, usual locals, and program's locals
+
+    if (iterp) then g_env$putl(e, "errcode ecode;") end
+    g_tbl$build_tables(e, 0)
+    if ib$exist() cor dbg_info$active() then 
+       g_env$putl(e, "struct {")
+       g_env$indent(e)
+       dbg_info$emit_local_entry(e)
+       if (iterp) then 
+	  dbg_info$add_local("user_locals")
+	  g_env$putl(e, "char **user_locals;") end
+       if (iterp) then 
+	  dbg_info$add_local("proc")
+	  g_env$putl(e, "errcode (*proc)();") end
+       end
+    dbg_info$add_local("err")
+    g_env$putl(e, "errcode err;")
+    dbg_info$add_local("ecode2")
+    g_env$putl(e, "errcode ecode2;")
+    if iterp then 
+       dbg_info$add_local("body_ctrl_req")
+       g_env$putl(e, "bool body_ctrl_req;") end
+    if current_type$exists() cand current_type$parmd() then
+       dbg_info$add_local("type_own_ptr")
+       g_env$putl(e, current_type$get_name() || "_OWN_DEFN *type_own_ptr;")
+       end
+    if current_apply$parmd() then
+       defn_name: string := op_own_name()
+       dbg_info$add_local("op_own_ptr")
+       g_env$putl(e, defn_name || "_OWN_DEFN *op_own_ptr;") end
+    dbg_info$add_locals(locals)
+    for lv: decl in array[decl]$elements(locals) do
+	ts: typespec := lv.type_
+	for id: idn in idnlist$elements(lv.idns) do
+	    g_decl_typespec(e, ts, idnlit(id))
+	    end
+	end
+    typ$fix_typelist(sequence[decl]$a2s(locals))
+    if ib$exist() cor dbg_info$active() then
+       for a: decl in decllist$elements(args) do
+	   dbg_info$extend_locals(a)
+	   ts: typespec := a.type_
+	   for id: idn in idnlist$elements(a.idns) do
+	       g_decl_typespec(e, ts, idnlit(id))
+	       end
+	   end
+       end
+    typ$fix_typelist(args)
+
+    %%%%%%%%%%%%%%%%%%%%%%  building of parms in locals removed 6/11/90
+    if ib$exist() cor dbg_info$active() then 
+       g_env$putl(e, "} locals;")
+       g_env$outdent(e)
+       end
+
+    if dbg_info$active() then
+       for lv: decl in array[decl]$elements(locals) do
+	   ts: typespec := lv.type_
+	   for id: idn in idnlist$elements(lv.idns) do
+	       g_idn_plain(e, id)
+	       g_env$putl(e, ".num = UNINIT;")
+	       end
+	   end
+       end
+
+    dbg_info$init_local_entry(e)
+    if ib$exist() cor dbg_info$active() then
+       for a: decl in decllist$elements(args) do
+	   ts: typespec := a.type_
+	   for id: idn in idnlist$elements(a.idns) do
+	       g_locals(e)
+	       g_idnlit(e, id)
+	       g_env$puts(e, " = ")
+	       g_idnlit(e, id)
+	       g_env$putl(e, ";")
+	       end
+	   end
+       if iterp then
+	  g_locals(e)
+	  g_env$putl(e, "proc = proc;")
+	  g_locals(e)
+	  g_env$putl(e, "user_locals = user_locals;")
+	  end
+       end
+    if current_type$exists() cand current_type$parmd() then
+       g_env$puts(e, s_locals() || "type_own_ptr = (")
+       g_env$puts(e, current_type$get_name() || "_OWN_DEFN")
+       g_env$putl(e, " *) CUR_PROC_VAR.proc->type_owns;")
+       end
+    if current_apply$parmd() then
+       defn_name: string := op_own_name()
+       g_env$putl(e, s_locals() || "op_own_ptr = ("|| defn_name || "_OWN_DEFN*) CUR_PROC_VAR.proc->op_owns;")
+       end
+    if ib$exist() then
+       if (iterp) then g_env$putl(e, s_locals() || "user_locals = user_locals;") end
+       if (iterp) then g_env$putl(e, s_locals() || "proc = proc;") end
+       end
+
+    end g_localvars
+
+g_parm_decls = proc(e: g_env, tparms: decllist, aparms: decllist)
+    typ$fix_parm_typelist(tparms)
+    typ$fix_parm_typelist(aparms)
+    for each_d:decl in decllist$elements(tparms) do
+	tagcase each_d.type_.abs
+	   tag cluster_, type_(ct:clutype):
+	       if ct.gen.common = "null" cor
+		  ct.gen.common = "int" cor
+		  ct.gen.common = "real" cor
+		  ct.gen.common = "bool" cor
+		  ct.gen.common = "char" cor
+		  ct.gen.common =  "string"
+		  then
+		       for each_idn: idn in idnlist$elements(each_d.idns) do
+			   g_env$putl(e, "CLUREF " || each_idn.str || ";")
+			   % logit(98, "1 " || each_idn.str)
+			   dbg_info$add_own(each_idn.str)
+			   end
+		  else
+		       for each_idn: idn in idnlist$elements(each_d.idns) do
+			   nm: string := each_idn.str || "_ops"
+			   g_env$putl(e, reqs$get_tid() || "_of_" ||
+					 each_idn.str || "_OPS *" || nm || ";")
+			   % logit(98, "2 " || each_idn.str)
+			   dbg_info$add_own(nm)
+			   end
+		  end
+	   others:
+	       logit(300, "g_localvars: parm not type or cluster")
+	       typespec_print(each_d.type_)
+	   end
+	end
+
+    for each_d:decl in decllist$elements(aparms) do
+	tagcase each_d.type_.abs
+	   tag cluster_, type_(ct:clutype):
+	       if ct.gen.common = "null" cor
+		  ct.gen.common = "int" cor
+		  ct.gen.common = "real" cor
+		  ct.gen.common = "bool" cor
+		  ct.gen.common = "char" cor
+		  ct.gen.common =  "string"
+		  then
+		       for each_idn: idn in idnlist$elements(each_d.idns) do
+			   g_env$putl(e, "CLUREF " || each_idn.str || ";")
+			   % logit(98, "3 " || each_idn.str)
+			   dbg_info$add_own(each_idn.str)
+			   end
+		  else
+		       for each_idn: idn in idnlist$elements(each_d.idns) do
+			   nm: string := each_idn.str || "_ops"
+			   g_env$putl(e, reqs$get_id() || "_of_" ||
+					 each_idn.str || "_OPS *" || nm || ";")
+			   % logit(98, "4 " || each_idn.str)
+			   dbg_info$add_own(nm)
+			   end
+		  end
+	   others:
+	       logit(301, "g_localvars: parm not type or cluster")
+	       typespec_print(each_d.type_)
+	   end
+	end
+
+    end g_parm_decls
+
+restricted_parm = proc(parm: idn, w: restrictlist) returns (bool)
+
+    for each_r: restrict in restrictlist$elements(w) do
+	if idn$similar(parm, each_r.idn) then
+	   return(true) end
+	end % for
+    return(false)
+    end restricted_parm
+
+type_own_name = proc() returns (string)
+    defn_name: string := current_type$get_name()
+    %    if current_type$parmd()
+    %     then defn_name := defn_name || "_of"
+    %	    defn_name := defn_name || current_type$get_formals_string()
+    %     end
+    return (defn_name)
+    end type_own_name
+
+op_own_name = proc() returns (string)
+    defn_name: string := current_apply$get_short_name()
+    %   if current_apply$parmd() cor
+    %      (current_type$exists() cand current_type$parmd())
+    %     then defn_name := defn_name || "_of" end
+    if current_type$exists() then
+       defn_name := current_type$get_name() || "_op_" || defn_name
+       %     if current_type$parmd() then
+       %	  defn_name := defn_name || current_type$get_formals_string()
+       %	  end
+       end
+    %    if current_apply$parmd() then
+    %      defn_name := defn_name || current_apply$get_formals_string() end
+    return (defn_name)
+    end op_own_name
+
+g_externs = proc (e: g_env, names: an, b: stmtlist)
+
+    g_iterbody_names(names, b)
+    g_env$newline(e)
+    for each_name: name in array[name]$elements(names) do
+	if g_env$add_extern(each_name) then
+	   g_env$putl(e, "extern errcode " || escape_ckeyword(each_name) || "();")
+	   end
+	end
+    end g_externs
+
+g_typedefn = proc (e: g_env, t: typedefn)
+
+    %% t.idn.str = CLUSTER [ t.parms ] IS t.ops 
+    %%     WHERE t.where_ 
+    %%     REP = t.down_
+    %%     t.init	% own vars
+    %%     t.body[1]
+    %%         :
+    %%	   t.body[n]
+    %% END t.idn.str
+
+    current_type$set(t)
+    g_env$puts(e, "/**** BEGIN CLUSTER ")
+    g_idnlit(e, t.idn)
+    g_env$putl(e, " ****/")
+    g_env$blankline(e)
+    reqs$start(t.idn)
+    reqs$preprocessing(true)
+    reqs$parms(t.idn, t.parms)
+    %%  removed the following statement 12/4/91 lp/comtable
+    dbg_info$set_own_context(e, "type", ~decllist$empty(t.parms))
+    reqs$more(e, t.idn, t.where_)
+    % remove debug_print operation if debugging not active
+    if ~dbg_info$active() then
+       newbod: applydefnlist := applydefnlist$new()
+       for a: applydefn in applydefnlist$elements(t.body) do
+	   if a.idn.str ~= "%debug_print" then
+	      newbod := applydefnlist$addh(newbod, a)
+	      end
+	   end
+       t.body := newbod
+       end
+    for a: applydefn in applydefnlist$elements(t.body) do
+	reqs$more(e, a.idn, a.where_)
+	end
+    reqs$preprocessing(false)
+    reqs$initial_output(e)
+    parm$enter_base(t.parms)
+    g_env$newline(e)
+
+    s: stmtlist := initlist_to_stmtlist(t.init)
+    ext_names: an := an$predict(1,40)
+    g_expr_proc_names(ext_names, s)
+    g_xref$add_ent(ext_names)
+    for a: applydefn in applydefnlist$elements(t.body) do
+	if decllist$size(a.parms) ~= 0 then parm$enter(a.parms) end
+	   % logit("typedefn: extending")
+	   s := seq_extend[stmt](s, initlist_to_stmtlist(a.init))
+	   s := seq_extend[stmt](s, a.body)
+	   % end
+	end
+    g_expr_proc_names(ext_names, s)
+    g_externs(e, ext_names, s)
+    ib$init()		% forget the for statement bodies
+    g_tbl$find_tables(e, s, definition$make_cluster_(t))
+    g_tbl$prune()	% forget tables dependent on op parms
+    parm$leave()
+    dbg_info$set_own_context(e, "type", ~decllist$empty(t.parms))
+    g_const$find_consts(e, s)
+    if current_type$parmd()
+       then 
+	    typ$fix_parm_typelist(t.parms)
+    	    g_ptypeownvars(e, t.init, t.body)
+	    g_env$newline(e)
+	    g_powninit(e, t.init)
+	    current_type$set_own_init_proc(true)
+       else 
+	    dbg_info$add_ilist(t.init)
+	    for each_ap: applydefn in applydefnlist$elements(t.body) do
+		if ~decllist$empty(each_ap.parms) then continue end
+		n: string := each_ap.idn.str
+		if n[1] = '%' then n := string$rest(n, 2) end
+		%		dbg_info$add_own(t.idn.str || "OP" || n)
+	        dbg_info$add_ilist(each_ap.init)
+		end
+	    g_ownvars(e, t.init, 1)
+	    g_env$newline(e)
+	    exists: bool := g_owninit(e, t.init)
+	    current_type$set_own_init_proc(exists)
+       end
+    g_env$set_convert_type(e, t.up_)	% the up type for cvt is t.up_
+    typ$begin_local_idn_types()
+    for a: applydefn in applydefnlist$elements(t.body) do
+	g_applydefn(e, a, t.idn.str)
+	g_env$newline(e)
+	end
+    g_env$newline(e)
+    g_opstruct(e, t.idn, t.ops)
+    reqs$output(e)
+    reqs$reset()
+    parm$leave_base()
+    g_env$blankline(e)
+    g_env$puts(e, "/**** END CLUSTER ")
+    g_idnlit(e, t.idn)
+    g_env$putl(e, " ****/")
+    typ$undo_global_idn_types()
+    current_type$reset()
+    dbg_info$reset()
+    end g_typedefn   
+
+g_opstruct = proc(e:g_env, id:idn, ops:idnlist)
+    g_env$newline(e)
+    g_env$putl(e, "typedef struct{")
+    g_env$indent(e)
+    g_env$putl(e, "long count;")
+    g_env$putl(e, "OWNPTR type_owns;")
+    g_env$putl(e, "OWNPTR op_owns;")
+    num : int := idnlist$size(ops)
+    if dbg_info$active() then num := num + 1 end
+    g_env$putl(e, "struct OP_ENTRY entry[" || int$unparse(num) || "];")
+    g_env$outdent(e)
+    g_env$puts(e, "} ") 
+    g_env$puts(e, id.str)
+    g_env$putl(e, "_OPS;");
+    g_env$blankline(e)
+    for each_op:idn in idnlist$elements(ops) do
+	nm: string := each_op.str
+	% if nm = "%debug_print" cand ~dbg_info$active() then continue end
+	if nm[1] = '%' then nm := string$substr(nm, 2, string$size(nm) - 1) end
+    	g_env$puts(e, "CLU_proc ")
+	g_env$puts(e, id.str)
+	g_env$puts(e, "_oe_")
+	g_env$puts(e, nm)
+	g_env$puts(e, " = {{0,0,0,0}, ")
+	g_env$puts(e, id.str)
+	g_env$puts(e, sep)
+	g_env$puts(e, nm)
+	g_env$putl(e, ", 0};")
+	end % for
+    if dbg_info$active() then
+       g_env$puts(e, "CLU_proc ")
+       g_env$puts(e, id.str)
+       g_env$puts(e, "_oe_debug_print = {{0,0,0,0}, ")
+       g_env$puts(e, id.str)
+       g_env$putl(e, "OPdebug_print, 0};")
+       end
+    g_env$blankline(e)
+    g_env$puts(e, id.str)
+    g_env$puts(e, "_OPS ")
+    g_env$puts(e, id.str)
+    g_env$puts(e, "_ops_actual = {")
+    nth: bool := false
+    g_env$puts(e, int$unparse(num) || ", (OWNPTR)&")
+    g_env$puts(e, id.str)
+    g_env$puts(e, "_own_init, (OWNPTR)&")
+    g_env$puts(e, id.str)
+    g_env$putl(e, "_own_init, {")
+    g_env$indent(e)
+    for each_op:idn in idnlist$elements(ops) do
+	nm: string := each_op.str
+	if nm[1] = '%' then nm := string$substr(nm, 2, string$size(nm) - 1) end
+	if nth then g_env$putl(e, ",") else nth := true end
+	g_env$puts(e, "{&")
+	g_env$puts(e, id.str)
+	g_env$puts(e, "_oe_")
+	g_env$puts(e, nm)
+	g_env$puts(e, ", \"")
+	g_env$puts(e, nm)
+        g_env$puts(e, "\"")
+	g_env$puts(e, "}")
+	end % for
+    if dbg_info$active() then
+       if nth then g_env$putl(e, ",") else nth := true end
+       g_env$puts(e, "{&")
+       g_env$puts(e, id.str)
+       g_env$puts(e, "_oe_debug_print")
+       g_env$puts(e, ", \"debug_print\"}")
+       end
+    g_env$putl(e, "}};")
+    g_env$outdent(e)
+    g_env$blankline(e)
+    g_env$puts(e, "struct OPS *")
+    g_env$puts(e, id.str)
+    g_env$puts(e, "_ops = (struct OPS *)&")
+    g_env$puts(e, id.str)
+    g_env$putl(e, "_ops_actual;")
+    end g_opstruct
+
+g_arglist = proc (e: g_env, args: decllist)
+
+    %% decls[1], decls[2], ..., decls[n] (names only)
+    g_commalist[decllist, decl](e, args, g_arg)
+    end g_arglist
+
+g_arg = proc (e: g_env, stmt: decl)
+
+    g_idnlitlist(e, stmt.idns)
+    end g_arg
+
+g_retlist = proc (e: g_env, rets: typelist, first: int)
+
+    fid$g_fidn_save()
+    %% decls[1], decls[2], ..., decls[n] (fake names only)
+    g_next_commalist[typelist, typespec](e, rets, g_ret, first)
+    fid$g_fidn_restore()
+    end g_retlist
+
+g_ret = proc (e: g_env, ret: typespec)
+
+    g_env$puts(e, fid$g_fid(ret))
+    end g_ret
+
+g_argdecllist = proc (e: g_env, rets: decllist)
+
+    %% decls[1], decls[2], ..., decls[n] (fake names plus types)
+    for x: decl in decllist$elements(rets) do
+	g_argdecl(e, x)
+	end % for
+    end g_argdecllist
+
+g_argdecl = proc (e: g_env, arg: decl)
+
+    for each_i: idn in idnlist$elements(arg.idns) do
+	g_decl_typespec(e, arg.type_, idnlit(each_i))
+	end
+    end g_argdecl
+
+g_retdecllist = proc (e: g_env, rets: typelist)
+
+    %% decls[1], decls[2], ..., decls[n] (fake names plus types)
+    fid$g_fidn_save()
+    for x: typespec in typelist$elements(rets) do
+	g_retdecl(e, x)
+	end % for
+    fid$g_fidn_restore()
+    end g_retdecllist
+
+g_retdecl = proc (e: g_env, ret: typespec)
+
+    %g_decl_typespec(e, ret, " *"||fid$g_fid(ret))
+    g_env$putl(e, "CLUREF *"||fid$g_fid(ret) ||";")
+    end g_retdecl
+
+g_ctype = proc(typ: typespec) returns(string)
+    tagcase typ.abs
+       tag idn(i:idn):
+	   return(i.str)
+       others:
+	   return("REF")
+       end
+    end g_ctype
+
+g_typelist = proc (e: g_env, types: typelist)
+
+    %% types[1], types[2], ..., types[n]
+    g_commalist[typelist, typespec](e, types, g_typespec)
+    end g_typelist
+
+g_term_typespec = proc (e:g_env, ts:typespec)
+    tagcase ts.abs
+       tag select (ta: seltype):
+	   g_env$puts(e, ta.gen.common)
+       others:
+	   g_env$puts(e, "CLUREF")
+       end
+    end g_term_typespec
+
+g_ref_name_typespec = proc (e:g_env, ts:typespec)
+    %typespec_print(ts)
+    tagcase ts.abs
+       tag cluster_ (ta: clutype):
+	   % logit("g_ref_name_typespec: cluster_")
+	   prefix: string := s_owns_prefix_exprlist(ta.parms)
+	   g_env$puts(e, prefix || ta.gen.common)
+	   if (exprlist$size(ta.parms) ~= 0) then
+	      g_env$puts(e, "_of")
+	      for each_expr: expr in exprlist$elements(ta.parms) do
+		  g_env$puts(e, "_")
+		  g_expr4(e, each_expr)
+		  end
+	      end
+       tag select (ta: seltype):
+	   % logit("g_ref_name_typespec: select")
+	   g_env$puts(e, s_owns_prefix_fieldlist(ta.parms) || ta.gen.common || "_" || make_sel_name(ta.parms))
+       tag apply (ta: applytype):
+	   % logit("g_ref_name_typespec: apply")
+	   g_env$puts(e, ta.gen.common)
+       tag idn (i:idn):
+	   % logit("g_ref_name_typespec: idn")
+	   g_env$puts(e, s_owns_prefix(i) || i.str) 
+       tag any_:
+	   g_env$puts(e, "any")
+       others:
+	   logit(302, "g_ref_name_typespec: don't know output for this typespec")
+	   typespec_print(ts)
+       end
+    end g_ref_name_typespec
+
+s_ref_name_typespec = proc (ts:typespec) returns (string)
+    result: string
+    tagcase ts.abs
+       tag cluster_ (ta: clutype):
+	   % logit("s_ref_name_typespec: cluster_")
+	   result := ta.gen.common
+	   prefix: string := s_owns_prefix_exprlist(ta.parms)
+	   if (exprlist$size(ta.parms) ~= 0) then
+	      result := prefix || result || "_of"
+	      for each_expr: expr in exprlist$elements(ta.parms) do
+		  result := result || "_" || s_expr4(each_expr)
+		  end
+	      end
+       tag select (ta: seltype):
+	   % logit("s_ref_name_typespec: select")
+	   result := s_owns_prefix_fieldlist(ta.parms) || ta.gen.common || "_" || make_sel_name(ta.parms)
+       tag apply (ta: applytype):
+	   % logit("s_ref_name_typespec: apply")
+	   result := ta.gen.common
+       tag idn (i:idn):
+	   % logit("s_ref_name_typespec: idn")
+	   result :=  s_owns_prefix(i) || i.str
+       tag any_:
+	   return ("any")
+       others:
+	   % logit("g_name_typespec: don't know output for this typespec")
+	   typespec_print(ts)
+	   result := "WRONG"
+       end
+    return (result)
+    end s_ref_name_typespec
+
+g_name_typespec = proc (e:g_env, ts:typespec)
+    tagcase ts.abs
+       tag cluster_ (ta: clutype):
+	   g_env$puts(e, ta.gen.common)
+	   if (exprlist$size(ta.parms) ~= 0) then
+	      g_env$puts(e, "_of")
+	      for each_expr: expr in exprlist$elements(ta.parms) do
+		  g_env$puts(e, "_")
+		  g_expr4(e, each_expr)
+		  end
+	      end
+       tag select (ta: seltype):
+	   g_env$puts(e, ta.gen.common || "_" || make_sel_name(ta.parms))
+       tag apply (ta: applytype):
+	   g_env$puts(e, ta.gen.common)
+       tag idn (i:idn):
+	   g_env$puts(e, i.str) 
+       tag any_:
+	   g_env$puts(e, "any")
+       others:
+	   g_env$puts(e, "WRONG")
+	   logit(303, "g_name_typespec: don't know output for this typespec")
+	   typespec_print(ts)
+       end
+    end g_name_typespec
+
+s_name_typespec = proc (ts:typespec) returns (string)
+    tagcase ts.abs
+       tag cluster_ (ta: clutype):
+	   result: string := ta.gen.common
+	   if (exprlist$size(ta.parms) ~= 0) then
+	      result := result || "_of"
+	      for each_expr: expr in exprlist$elements(ta.parms) do
+		  result := result || "_" || s_expr4(each_expr)
+		  end
+	      end
+	   return (result)
+       tag select (ta: seltype):
+	   return(ta.gen.common || "_" || make_sel_name(ta.parms))
+       tag apply (ta: applytype):
+	   return(ta.gen.common)
+       tag idn (i:idn):
+	   return (i.str)
+       tag any_:
+	   return("any")
+       others:
+	   logit(304, "s_name_typespec: don't know output for this typespec")
+	   typespec_print(ts)
+	   return ("WRONG")
+       end
+    end s_name_typespec
+
+g_decl_typespec = proc (e:g_env, ts:typespec, s:string)
+    g_env$putl(e, "CLUREF " || s || ";")
+    end g_decl_typespec
+
+g_typespec = proc (e: g_env, ts: typespec)
+    tagcase ts.abs
+       tag cluster_ (ta: clutype):
+	   g_env$puts(e, ta.gen.common)
+       tag apply (ta: applytype):
+	   g_env$puts(e, ta.gen.unique)
+       tag select (ta: seltype):
+	   logit(305, "CHANGE g_typespec or reference to it/select")
+	   typespec_print(ts)
+       others:
+	   g_env$puts(e, "CLUREF")
+       end
+    end g_typespec
+
+s_typespec = proc (ts: typespec) returns (string)
+    tagcase ts.abs
+       tag cluster_ (ta: clutype):
+	   return(ta.gen.common)
+       tag apply (ta: applytype):
+	   logit(306, "CHANGE g_typespec or reference to it/apply")
+	   return("WRONG_1")
+       tag select (ta: seltype):
+	   logit(307, "CHANGE g_typespec or reference to it/select")
+	   return("WRONG_2")
+       others:
+	   return("CLUREF")
+       end
+    return("WRONG_3")
+    end s_typespec
+
+g_anys = proc (e: g_env, anys: decllist)
+
+    if decllist$size(anys) ~= 0 then
+       logit(308, "TIME to fix ANYS")
+       end
+
+    end g_anys

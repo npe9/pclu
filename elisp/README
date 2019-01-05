@@ -1,0 +1,9 @@
+This directory contains an Emacs CLU mode, CLU library documentation,
+and software for accessing this documentation from within emacs.
+
+Edit the definition of clu-lisp-directory in setup.el to point to the
+directory where these emacs files will be installed (typically
+$CLUHOME/elisp).  Then users can put the following line in their
+~/.emacs file to access the CLU mode and documentation.
+
+	(load-file "<location of setup.el file>/setup.el)

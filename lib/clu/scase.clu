@@ -1,0 +1,48 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+# extend
+
+lower_case = proc (s: string) returns (string)
+    return (_case (s, false, false))
+    end lower_case
+
+upper_case = proc (s: string) returns (string)
+    return (_case (s, true, true))
+    end upper_case
+
+capitalize = proc (s: string) returns (string)
+    return (_case (s, true, false))
+    end capitalize
+
+_case = proc (s: string, first, rest: bool) returns (string)
+    ac = array[char]
+    own buf: ac := ac$new ()
+    pos: int := 1
+    upper: bool := first
+    for c: char in string$chars (s) do
+	if (upper cand c >= 'a' cand c <= 'z')
+	     cor (~upper cand c >= 'A' cand c <= 'Z')
+	   then exit change
+	   end
+	pos := pos + 1
+	upper := rest
+	end
+       except when change:
+		   npos: int := 1
+		   upper := first
+		   for c: char in string$chars (s) do
+		       if npos >= pos
+			  then if (upper cand c >= 'a' cand c <= 'z')
+				  then c := char$i2c (char$c2i (c) - 040)
+				elseif (~upper cand c >= 'A' cand c <= 'Z')
+				  then c := char$i2c (char$c2i (c) + 040)
+				end
+			  end
+		       ac$addh (buf, c)
+		       npos := npos + 1
+		       upper := rest
+		       end
+		   s := string$ac2s (buf)
+		   ac$trim (buf, 1, 0)
+	      end
+    return (s)
+    end _case

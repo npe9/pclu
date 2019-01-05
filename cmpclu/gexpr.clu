@@ -1,0 +1,2211 @@
+
+%  Copyright    Massachusetts Institute of Technology     1990,1991
+
+%%%
+%%% Expression Generation
+%%%
+
+% 12/17/90 : created temps to hold constants for reals
+%	     and caused arguments to be unions  (i.e. without .num, etc.)
+
+% 1/4/91   : created temps for char constants (necessary for mips)
+			 
+g_expr = proc(e: g_env, exp: expr)
+    g_env$puts(e, "OLD USE OF G_EXPR")
+    end g_expr
+
+% generate temporary declarations
+
+g_expr_arg0 = proc(e: g_env, exp: expr)
+    tagcase exp.abs
+       tag int_ (i:int):
+	   if ~int_const$exists(i) then
+	      tv$decl_next(e, e.comp.int_type)
+	      end
+       others:
+	   g_expr0(e, exp)
+       end
+    end g_expr_arg0
+
+g_expr0 = proc (e: g_env, exp: expr) signals (specs_missing)
+    if debug_expr then expr_print(exp, 0) end
+    tagcase exp.abs
+       tag idn (id: idn):
+       tag any_ (xa: expr):
+	   tv$blind_decl_next(e)
+	   g_expr0(e, xa)
+       tag cand_ (xa: condop):
+	   tv$decl_next(e, e.comp.bool_type)
+	   g_expr0(e, xa.left)
+	   g_expr0(e, xa.right)
+       tag cor_ (xa: condop):
+	   tv$decl_next(e, e.comp.bool_type)
+	   g_expr0(e, xa.left)
+	   g_expr0(e, xa.right)
+       tag invoke (inv: invoke):
+	   for each_exp: expr in exprlist$elements(inv.args) do
+	       g_expr_arg0(e, each_exp)
+	       end % for
+	   ty: typespec := inv.apply.typespec
+	   tagcase ty.abs
+	      tag apply (a: applytype):
+		  for val: typespec in typelist$elements(a.vals) do
+		      tv$decl_next(e, val)
+		      end % for
+	      tag other (o: othertype):
+		  tagcase o
+		     tag du:
+	   		 tv$blind_decl_next(e)
+		     tag op (clop: clusterop):
+			 tv$decl_next(e, clop.type_)
+		     tag return_:
+	   		 tv$blind_decl_next(e)
+		     end
+	      others:
+		  if exprabs$is_op(inv.apply.abs) cand
+		     exprabs$value_op(inv.apply.abs).name = "debug_print"
+		     then
+		     else
+			  tv$blind_decl_next(e)
+			  logit(400, "g_expr0: unhandled invoke.apply.typespec XXXX")
+			  typespec_print(ty)
+		     end
+	      end
+	   if ~g_qinv_test(inv.apply) then
+	      g_inv0(e, inv.apply)
+	      end
+       tag a_cons (xa: arraycons):
+	   tv$decl_next(e, xa.type_)
+	   if mexpr$is_one(xa.low) then 
+	      g_expr_arg0(e, mexpr$value_one(xa.low)) end
+	   size: int := exprlist$size(xa.elts)
+	   if ~int_const$exists(size) then
+	      tv$decl_next(e, e.comp.int_type) end
+	   for each_elt: expr in exprlist$elements(xa.elts) do
+	       g_expr_arg0(e, each_elt)
+	       end
+       tag s_cons (xa: selectcons):
+	   tv$decl_next(e, xa.type_)
+	   for each_field: field in fieldlist$elements(xa.fields) do
+	       for sel: name in namelist$elements(each_field.sels) do
+		   g_expr0(e, each_field.val)
+		   end % for
+	       end % for
+       tag apply (ct: clutype):
+	   if ~specs_exist(ct) then
+	      g_env$error(e, "specifications for " ||
+			     ct.gen.common || " missing.")
+	      signal specs_missing
+	      end
+	   tv$blind_decl_next(e)
+       tag op (xa: clusterop):
+	   begin
+	       ty: typespec := xa.type_
+	       ct: clutype := typeabs$value_cluster_(ty.abs)
+	       if ~specs_exist(ct) then
+		  g_env$error(e, "specifications for " ||
+				 ct.gen.common || " missing.")
+		  signal specs_missing
+		  end
+	       end
+	      except when wrong_tag: end
+	   tv$blind_decl_next(e)
+       tag force_ (xa: typespec):
+	   tv$blind_decl_next(e)
+       tag up_ (xa: expr):
+	   g_expr0(e, xa)
+       tag down_ (xa: expr):
+	   g_expr0(e, xa)
+       tag type_ (xa: typespec):
+   	   g_env$error(e, "g_expr: tag type_ not expected")
+       tag type_of_ (xa: expr):
+   	   g_env$error(e, "g_expr: tag type_of_ not expected")
+       tag str:
+	   % tv$decl_next(e, e.comp.str_type)
+       tag real_:
+	   tv$decl_next(e, e.comp.real_type)
+       tag char_:
+	   tv$decl_next(e, e.comp.char_type)
+       tag null_, bool_, int_:
+       others:
+	   g_env$error(e, "g_expr: unexpected tag")
+       end
+    end g_expr0
+
+parmd_cluster = proc(xa:clusterop) returns (bool)
+    tagcase xa.type_.abs
+       tag cluster_ (ct: clutype):
+	   specs: DUspecs, b: bool := du$read_specs(ct.gen)
+	   if ~DUspecs$is_none(specs) then
+	      if duspecs$is_cluster_(specs) then
+		 ti: typeinfo := duspecs$value_cluster_(specs)
+		 if idnlist$size(ti.parms) ~= 0 then
+		    return(true)
+		    end
+		 end
+	      end
+       others:
+	   return (false)
+       end
+    return(false)
+    end parmd_cluster
+
+% generate subexpressions, returning terminal expressions containing result
+
+g_expr_arg1 = proc(e: g_env, exp: expr) returns (exprlist)
+    tagcase exp.abs
+       tag int_ (i:int):
+	   if int_const$exists(i) 
+	      then
+		   return(exprlist$fill(1, exp))
+	      else
+		   return(g_int_const1(e, i))
+	      end
+       others:
+	   return(g_expr1(e, exp))
+       end
+    end g_expr_arg1
+
+
+g_expr1 = proc (e: g_env, exp: expr) returns (exprlist)
+    if debug_expr then expr_print(exp, 1) end
+    tagcase exp.abs
+       tag idn (id: idn):
+	   return(exprlist$fill(1, exp))
+       tag str (s:str):
+	   %return(g_string_const(e, s))
+	   return(exprlist$fill(1, exp))
+       tag real_ (r:real):
+	   return(g_real_const(e, r))
+       tag char_ (c:char):
+	   return(g_char_const(e, c))
+       tag null_, bool_, int_:
+	   return(exprlist$fill(1, exp))
+       tag cand_ (xa: condop):
+           return(g_condop(e, xa, "cand"))
+       tag cor_ (xa: condop):
+           return(g_condop(e, xa, "cor"))
+       tag invoke (inv: invoke):
+           return(g_einvoke(e, inv))
+       tag apply (xa: clutype):
+	   return(g_apply1(e, exp, xa))
+       tag op (xa: clusterop):
+	   return(g_op1(e, exp, xa))
+       tag force_ (xa: typespec):
+	   return(g_force(e, exp, xa))
+       tag up_ (xa: expr):
+	   return(g_updown(e, xa, "up"))
+       tag down_ (xa: expr):
+	   return(g_updown(e, xa, "down"))
+       tag type_ (xa: typespec):
+	   g_typespec(e, xa)
+       tag type_of_ (xa: expr):
+	   % error ???
+	   g_env$error(e, "g_expr: tag type_of_ not expected")
+       tag a_cons (xa: arraycons):
+           return(g_arraycons(e, xa))
+       tag s_cons (xa: selectcons):
+           return(g_selectcons(e, xa))
+       tag any_ (xa: expr):
+           return(g_anyize(e, xa))
+       others:
+	   g_env$error(e, "g_expr: unexpected tag")
+       end
+    return(exprlist$new())
+    end g_expr1
+
+% generate terminal expressions
+
+g_expr2 = proc (e: g_env, exp: expr)
+    if debug_expr then expr_print(exp, 2) end
+    tagcase exp.abs
+       tag idn (id: idn):
+           g_idn(e, id)
+       tag apply (xa: clutype):
+	   g_apply(e, xa)
+       tag op (xa: clusterop):
+	   g_clusterop(e, xa)
+       tag type_ (xa: typespec):
+	   g_term_typespec(e, xa)
+       tag null_, bool_, int_, str:
+	   g_const_expr(e, exp)
+       tag real_:
+	   g_env$error(e, "g_expr2: real constant unexpected")
+       tag char_:
+	   g_env$error(e, "g_expr2: char constant unexpected")
+       others:
+	   g_env$error(e, "g_expr2: non-terminal tag")
+	   %	   expr_print(exp, 2)
+       end
+    end g_expr2
+
+% generate argument expressions
+%	i.e. no union discrimination  (no .num)
+%	string constants will still have .num  (would be cleaner without,
+%			but no serious problem)
+% mostly done so that variables holding real values will be passed as unions
+
+g_expr_arg = proc (e: g_env, exp: expr)
+    if debug_expr then expr_print(exp, 2) end
+    tagcase exp.abs
+       tag idn (id: idn):
+           g_idn_no_trailer(e, id)
+       tag int_ (i:int):
+	   g_int_const(e, i)
+       tag bool_ (b: bool):
+	   g_bool_const(e, b)
+       tag str (s: string):
+	   g_string_name(e, s)
+       tag null_:
+	   g_int_const(e, 0)
+       tag real_, char_:
+	   g_const_expr(e, exp)
+       tag apply (xa: clutype):
+	   g_env$error(e, "g_expr_arg: unexpected tag apply")
+       tag op (xa: clusterop):
+	   g_env$error(e, "g_expr_arg: unexpected tag op")
+       tag type_ (xa: typespec):
+	   g_env$error(e, "g_expr_arg: unexpected tag type_")
+       others:
+	   g_env$error(e, "g_expr_arg: non-terminal tag")
+	   %	   expr_print(exp, 2)
+       end
+    end g_expr_arg
+
+% generate post terminal expressions
+%	e.g. op tables for invocation of parameterized operations
+
+g_expr3 = proc (e: g_env, exp: expr)
+    if debug_expr then expr_print(exp, 2) end
+    tagcase exp.abs
+       tag op (xa: clusterop):
+	   %g_clusterop3(e, xa)
+       others:
+	   %	   expr_print(exp)
+       end
+    end g_expr3
+
+% generate names for  expressions (mostly types)
+%	e.g. op tables for invocation of parameterized operations
+
+g_expr4 = proc (e: g_env, exp: expr)
+    if debug_expr then expr_print(exp, 2) end
+    tagcase exp.abs
+       tag type_ (ty: typespec):
+	   g_name_typespec(e, ty)
+       tag null_, bool_, char_, int_, real_, str:
+	   g_const_expr_embed(e, exp)
+       tag idn (i:idn):
+	   g_env$puts(e, i.str)
+       others:
+	   logit(401, "g_expr4 (parm tables): actual not a type_ expr")
+	   expr_print(exp, 4)
+       end
+    end g_expr4
+
+% generate names for  expressions (mostly types)
+%	e.g. op tables for invocation of parameterized operations
+
+s_expr4 = proc (exp: expr) returns (string)
+    tagcase exp.abs
+       tag type_ (ty: typespec):
+	   return(s_name_typespec(ty))
+       tag null_, bool_, char_, int_, real_, str:
+	   return(s_const_expr_embed(exp))
+       tag idn (i:idn):
+	   return(i.str)
+       others:
+	   logit(402, "g_expr4 (parm tables): actual not a type_ expr")
+	   expr_print(exp, 4)
+	   return("WRONG")
+       end
+    end s_expr4
+
+% generate names for  expressions (mostly types)
+%	e.g. op tables for invocation of parameterized operations
+
+g_expr5 = proc (e: g_env, exp: expr)
+    if debug_expr then expr_print(exp, 2) end
+    tagcase exp.abs
+       tag type_ (ty: typespec):
+	   % logit("g_expr5: type_")
+	   g_ref_name_typespec(e, ty)
+       tag null_, bool_, char_, int_, real_, str:
+	   % logit("g_expr5: null_/bool_/char_/int_/real_/str")
+	   g_const_expr_embed(e, exp)
+       tag idn (i:idn):
+	   % logit("g_expr5: idn")
+	   g_env$puts(e, i.str)
+       others:
+	   logit(403, "g_expr5 (parm tables): actual not a type_ expr")
+	   expr_print(exp, 5)
+       end
+    end g_expr5
+
+s_expr5 = proc (exp: expr) returns (string)
+    tagcase exp.abs
+       tag type_ (ty: typespec):
+	   % logit("s_expr5: type_")
+	   return(s_ref_name_typespec(ty))
+       tag null_, bool_, char_, int_, real_, str:
+	   % logit("s_expr5: null_/bool_/char_/int_/real_/str")
+	   return(s_const_expr_embed(exp))
+       tag idn (i:idn):
+	   % logit("s_expr5: idn")
+	   return(i.str)
+       others:
+	   logit(404, "s_expr5 (parm tables): actual not a type_ expr")
+	   expr_print(exp, 5)
+	   return("WRONG")
+       end
+    end s_expr5
+
+
+
+g_namelist = proc (e: g_env, nlist: namelist)
+
+    %% nlist[1], ..., nlist[n]
+
+    g_commalist[namelist, name](e, nlist, g_env$puts)
+    end g_namelist
+
+g_idnlist = proc (e: g_env, ilist: idnlist)
+
+    %% ilist[1], ..., idnlist[n]
+
+    g_commalist[idnlist, idn](e, ilist, g_idn)
+    end g_idnlist
+
+g_idnlitlist = proc (e: g_env, ilist: idnlist)
+
+    %% ilist[1], ..., idnlist[n]
+
+    g_commalist[idnlist, idn](e, ilist, g_idnlit)
+    end g_idnlitlist
+
+g_inv0 = proc(e: g_env, exp: expr)
+    tagcase exp.abs
+       tag apply:
+       tag op (cop: clusterop):
+	   tagcase cop.type_.abs
+	      tag idn:
+		  g_expr0(e, exp)
+	      tag apply:		% 8/14/90 added for proctype$equal
+		  g_expr0(e, exp)
+	      others:
+	      end
+       others:
+	   g_expr0(e, exp)
+       end % tag
+    end g_inv0
+
+g_inv1 = proc(e: g_env, exp: expr) returns (exprlist)
+	   signals (specs_missing)
+    generic_name = "generic_CLU_proc"
+    tagcase exp.abs
+       tag apply (ct: clutype):
+	   if ~specs_exist(ct) then
+	      g_env$error(e, "specifications for " ||
+			     ct.gen.common || " missing.")
+	      signal specs_missing
+	      end
+	   parm_count: int := 0
+	   parm_list: exprlist := exprlist$new()
+	   gen: DU
+	   parm_list := ct.parms
+	   gen := ct.gen
+	   parm_count := exprlist$size(parm_list)
+	   newidn: idn := idn$create(generic_name, idnkind$make_var(exp.typespec))
+	   proc_id: expr := expr$create(exprabs$make_idn(newidn), exp.typespec)
+
+	   g_env$putl(e, generic_name || ".type_owns = 0;")
+
+	   g_env$puts(e, generic_name || ".op_owns = ")
+	   if exprlist$size(parm_list) ~= 0
+	      then
+		   g_env$puts(e, "(long)" || s_owns_prefix_exprlist(parm_list))
+		   g_env$puts(e, gen.common || "_of_")
+		   for ind: int in exprlist$indexes(parm_list) do
+		       g_expr4(e, parm_list[ind])
+		       g_env$puts(e, "_")
+		       end
+		   g_env$putl(e,  "ops->op_owns;")
+	      else
+		   g_env$putl(e,  "0;")
+	      end
+
+	   g_expr2(e, proc_id)
+	   g_env$puts(e, " = ")
+	   g_expr2(e, exp)
+	   g_env$putl(e, ";")
+	   return(exprlist$fill(1, proc_id))
+       tag op (cop:clusterop):
+	   parm_count: int := 0
+	   tparm_list: exprlist := exprlist$new()
+	   parm_list: exprlist := exprlist$new()
+	   flist: fieldspeclist := fieldspeclist$new()
+	   gen: DU
+	   type_parms_ct: int := 0
+	   cop_name: string := cop.name
+	   if cop_name[1] = '%' then cop_name := string$rest(cop_name, 2) end
+	   tagcase cop.type_.abs
+	      tag cluster_(ct:clutype):
+		  gen := ct.gen
+		  tparm_list := ct.parms
+		  parm_list := seq_extend[expr](ct.parms, cop.parms)
+		  type_parms_ct := exprlist$size(ct.parms)
+		  % need both: ct for parms on whole cluster, cop for 
+		  %	parms on operation
+		  % ct.parms tends to be zero 1/11/90
+	      tag type_(ct:clutype):
+		  gen := ct.gen
+		  parm_list := ct.parms
+		  type_parms_ct := exprlist$size(ct.parms)
+	      tag select (xa: seltype):
+		  gen := xa.gen
+		  flist := xa.parms
+	      tag idn (i: idn):
+		  proc_id: expr := tv$idn_next(exp.typespec)
+		  g_expr2(e, proc_id)
+		  g_env$puts(e, " = ")
+		  % g_locals(e)			%%% NEED TO GET THIS FROM OWNS in some cases
+		  g_env$puts(e, s_owns_prefix(i))
+		  g_idnlit(e, i)
+		  g_env$putl(e, "_ops->" || cop_name || ".fcn;")
+		  return(exprlist$fill(1, proc_id))
+	      tag apply (at:applytype):		% added 8/14/90 proctype$equal
+		  % proc_id: expr := tv$idn_next(exp.typespec)
+		  % g_expr2(e, proc_id)
+		  % g_env$puts(e, " = ")
+		  % g_env$putl(e, at.gen.common || sep || cop_name || ";")
+		  % return(exprlist$fill(1, proc_id))
+	          return(g_expr1(e, exp))       % 5/16/91 proctype$equal
+	      others:
+		  logit(405, "g_inv1: can't find du")
+		  typespec_print(cop.type_)
+	      end
+	   newidn: idn := idn$create(generic_name, idnkind$make_var(exp.typespec))
+	   proc_id: expr := expr$create(exprabs$make_idn(newidn), exp.typespec)
+	   field_count: int := 0
+	   if fieldspeclist$size(flist) ~= 0 then field_count := 1 end
+	   parm_count := exprlist$size(parm_list) + field_count
+
+	   g_env$puts(e, generic_name || ".type_owns = ")
+	   if type_parms_ct ~= 0
+	      then
+		   if fieldspeclist$size(flist) = 0
+		      then
+			   g_env$puts(e, s_owns_prefix_exprlist(tparm_list))
+		      else
+			   g_env$puts(e, s_owns_prefix_fieldlist(flist))
+		      end
+		   g_env$puts(e, gen.common || "_of_")
+		   for ind: int in int$from_to(1, type_parms_ct) do
+		       g_expr4(e, parm_list[ind])
+		       g_env$puts(e, "_")
+		       end
+		   g_env$putl(e,  "ops->type_owns;")
+	      else
+		   g_env$putl(e,  "0;")
+	      end
+	   if type_parms_ct ~= exprlist$size(parm_list)
+	      then
+		   op_name: string := "_op_" || cop_name
+		   g_env$puts(e, generic_name || ".op_owns = ")
+		   g_env$puts(e, s_owns_prefix_exprlist(parm_list))
+		   g_env$puts(e, gen.common || op_name || "_of_")
+		   for ind: int in exprlist$indexes(parm_list) do
+		       g_expr4(e, parm_list[ind])
+		       g_env$puts(e, "_")
+		       end
+		   g_env$putl(e,  "ops->op_owns;")
+	      end
+	   if fieldspeclist$size(flist) ~= 0 then
+	      ops_index:int := g_ops_index(gen.common, cop.name)
+	      sel_name: string := make_sel_name(flist)
+	      g_env$puts(e, generic_name || ".op_owns = ")
+	      g_env$puts(e, s_owns_prefix_fieldlist(flist))
+	      g_env$puts(e, gen.common || "_" || sel_name)      %%% MAY NEED TO GET THIS FROM OWNS
+	      g_env$putl(e,  "_ops->entry[" || int$unparse(ops_index) || 
+			     "].fcn->op_owns;")
+	      % table->tables 5/22/90
+	      % tables->tables[0] 5/24/90
+	      end
+	      except when not_found:
+			  % remove this logit: hopefully only informational
+			  % logit("not_found: " || gen.common || " " || cop.name)
+		     end
+	   g_expr2(e, proc_id)
+	   g_env$puts(e, " = ")
+	   g_expr2(e, exp)
+	   g_env$putl(e, ";")
+	   return(exprlist$fill(1, proc_id))
+       others:
+	   return(g_expr1(e, exp))
+       end % tag
+    end g_inv1
+
+specs_exist = proc(ct: clutype) returns (bool)
+    specs: DUspecs, b: bool := du$read_specs(ct.gen)
+    if ~DUspecs$is_none(specs)
+       then
+	    return (true)
+       else
+	    return (false)
+       end
+    end specs_exist
+
+g_inv = proc(e: g_env, exp, gen_clu_proc_val: expr)
+
+    tagcase exp.abs
+       tag idn (i:idn):
+	   nm: string := i.str
+	   if is_temp(i) then
+	      g_env$puts(e, "CUR_PROC_VAR = ")
+	      g_idnlit(e, i)
+	      g_env$putl(e, ";")
+	    elseif string$equal(i.str, "generic_CLU_proc")  then
+	      g_env$putl(e, "CUR_PROC_VAR.proc = &generic_CLU_proc;")
+	      g_err(e)
+	      g_env$puts(e, " = ")
+	      g_expr2(e, gen_clu_proc_val)
+	      g_env$puts(e, "(")
+	      return
+	    elseif idnkind$is_ownvar(i.kind) then
+		 g_env$puts(e, "CUR_PROC_VAR = ")
+		 % removed 7/29/93: locals is handled 
+		 %	by idnlit itself for ownvars
+		 % g_locals(e)			%%% probably ok
+		 g_idnlit(e, i)
+		 g_env$putl(e, ";")
+	    else
+		 g_env$puts(e, "CUR_PROC_VAR = ")
+		 g_locals(e)			%%% probably ok
+		 g_idnlit(e, i)
+		 g_env$putl(e, ";")
+	    end
+	   g_err(e)
+	   g_env$puts(e, " = ")
+	   g_expr2(e, exp)
+	   g_env$puts(e, "->proc(")
+       tag op (cop: clusterop):
+	   if parm$member(cop.type_)
+	      then
+		   g_env$puts(e, "CUR_PROC_VAR.proc = ")
+		   g_expr2(e, exp)
+		   g_env$putl(e, ";")
+		   g_err(e)
+		   g_env$puts(e, " = ")
+		   g_expr2(e, exp)
+		   g_env$puts(e, "->proc(")
+	    elseif parmd_cluster(cop)
+	      then
+		   g_env$puts(e, "CUR_PROC_VAR = ")
+		   g_expr2(e, exp)
+		   g_env$putl(e, ";")
+		   g_err(e)
+		   g_env$puts(e, " = ")
+		   g_expr2(e, exp)
+		   g_env$puts(e, "->proc(")
+	    else
+		 logit(406, "INV: here")
+		 g_err(e)
+		 g_env$puts(e, " = ")
+		 g_expr2(e, exp)
+		 g_env$puts(e, "(")
+	    end
+	   % apply (clutype) (use ct.gen.common to get name)
+	   %	eg hash_obj used in gcd_tab
+	   %	no parms here & default path ok: other case unclear
+       others:
+	   logit (407, "CUR_PROC_VAR not set:")
+	   expr_print(exp, 4)
+	   g_err(e)
+	   g_env$puts(e, " = ")
+	   g_expr2(e, exp)
+	   g_env$puts(e, "(")
+       end
+
+    end g_inv
+
+g_locals = proc(e: g_env)
+    if ib$exist() cor dbg_info$active() then
+       if ib$bodies()
+	  then
+	       g_env$puts(e, "locals->")
+	  else
+	       g_env$puts(e, "locals.")
+	  end
+       end
+    end g_locals
+
+g_err = proc (e: g_env)
+
+    if ib$exist() cor dbg_info$active() then
+       if ib$bodies() then
+	  g_env$puts(e, "locals->err")
+	  else
+	       g_env$puts(e, "locals.err")
+	  end
+       else
+	    g_env$puts(e, "err")
+       end
+    end g_err
+
+g_proc = proc (e: g_env)
+
+    if ib$exist() cor dbg_info$active() then
+       if ib$bodies() then
+	  g_env$puts(e, "locals->proc")
+	  else
+	       g_env$puts(e, "locals.proc")
+	  end
+       else
+	    g_env$puts(e, "proc")
+       end
+    end g_proc
+
+g_user_locals = proc (e: g_env)
+
+    if ib$exist() cor dbg_info$active() then
+       if ib$bodies() then
+	  g_env$puts(e, "locals->user_locals")
+	  else
+	       g_env$puts(e, "locals.user_locals")
+	  end
+       else
+	    g_env$puts(e, "user_locals")
+       end
+    end g_user_locals
+
+g_idn = proc (e: g_env, i: idn)
+
+    %% i.str
+    % strip off leading '%' if necessary
+    nm: string := i.str
+    if nm[1] = '%'
+       then nm := string$substr(nm, 2, string$size(nm) - 1)
+       end
+    nm := purify(nm)
+    if is_temp(i) cor string$equal(i.str, "generic_CLU_proc")
+       then
+	    g_env$puts(e, nm)
+	    if (idnkind$is_var(i.kind)) then
+	       var: typespec := idnkind$value_var(i.kind)
+	       tagcase var.abs
+		  tag cluster_ (ct: clutype):
+		      if (ct.gen.common = "int") then
+			 g_env$puts(e, ".num")
+		       elseif (ct.gen.common = "bool") then
+			 g_env$puts(e, ".num")
+		       elseif (ct.gen.common = "string") then
+			 g_env$puts(e, ".str")
+		       elseif (ct.gen.common = "char") then
+			 g_env$puts(e, ".ch")
+		       else
+			    g_env$puts(e, ".num")
+		       end
+		  tag select:
+		      % added 12/4 after changing decls for selectors
+		      g_env$puts(e, ".num")
+		  tag apply:
+		      g_env$puts(e, ".proc")
+		  others:
+		      if i.str = "generic_CLU_proc"
+			 then
+			      g_env$puts(e, ".proc")  % take care of debug_print
+			 else
+			      g_env$puts(e, ".num")
+			 end
+		      %if idnkind$is_var(i.kind) then
+		      %  logit("g_idn: uncaught var:" || i.str)
+		      % typespec_print(idnkind$value_var(i.kind)) end
+		  end
+	       else
+		    g_env$puts(e, ".num")   % might not be good
+	       end
+     elseif (idnkind$is_ownvar(i.kind)) then
+       g_ownref(e, i, nm, "full")
+     else
+	  tagcase i.kind
+	     tag var (ts:typespec):
+	         g_locals(e) 
+                 g_env$puts(e, nm)
+		 tagcase ts.abs
+		    tag apply:
+			g_env$puts(e, ".proc")
+		    tag select:
+			% added 12/4 after changing decls for selectors
+			g_env$puts(e, ".num")
+		    others:
+			g_env$puts(e, ".num")
+		    end
+	     tag vparm (ts:typespec):
+		 g_env$puts(e, s_owns_prefix(i) || nm || ".num")
+	     others:
+		 logit(408, "g_idn: others arm: " || i.str)
+		 idnkind_print(i.kind)
+	  	 g_env$puts(e, ".XXX")
+	     end
+     end
+    end g_idn
+
+g_idn_no_trailer = proc (e: g_env, i: idn)
+
+    %% i.str
+    % strip off leading '%' if necessary
+    nm: string := i.str
+    if nm[1] = '%'
+       then nm := string$substr(nm, 2, string$size(nm) - 1)
+       end
+    nm := purify(nm)
+    if is_temp(i) cor string$equal(i.str, "generic_CLU_proc")
+       then
+	    g_env$puts(e, nm)
+     elseif (idnkind$is_ownvar(i.kind)) then
+       g_ownref(e, i, nm, "head")
+     else
+	  tagcase i.kind
+	     tag var (ts:typespec):
+	         g_locals(e) 
+                 g_env$puts(e, nm)
+	     tag vparm (ts:typespec):
+		 g_env$puts(e, s_owns_prefix(i) || nm)
+	     others:
+		 logit(409, "g_idn_no_trailer: others arm: " || i.str)
+		 idnkind_print(i.kind)
+	  	 g_env$puts(e, ".XXX")
+	     end
+     end
+    end g_idn_no_trailer
+
+g_ownref = proc(e: g_env, i:idn, nm: string, trailer: string)
+    g_env$puts(e, ownref(i, nm, trailer))
+    end g_ownref
+
+ownref = proc(i:idn, nm: string, trailer: string) returns (string)
+
+    result: string := ""
+    if trailer = "full" cor trailer = "head" then
+       result := s_locals() end
+    if current_type$exists()
+       then % cluster
+	    if current_type$parmd()
+	       then % parmd cluster
+		    if trailer = "lit" then return (nm) end
+		    if current_apply$parmd()
+		       then
+			    if owns$member(i)
+			       then
+				    result := result || "op_own_ptr->" || nm
+			       else
+				    result := result || "type_own_ptr->" || nm
+			       end
+		       else
+			    result := result || "type_own_ptr->" || nm
+		       end
+	       else % unparmd cluster
+		    if current_apply$parmd()
+		       then % unparmd cluster, parmd op
+			    if owns$member(i)
+			       then
+				    if trailer = "lit" then return (nm) end
+				    result := result || "op_own_ptr->" || nm
+			       else
+				    result := current_type$get_name()|| sep || nm
+			       end
+		       else % unparmd cluster, unparmd op
+			    if owns$member(i)
+			       then
+				    result := current_apply$get_name()||sep || nm
+			       else
+				    result := current_type$get_name()||sep || nm
+			       end
+		       end
+	       end
+
+       else  % proc or iter
+	    if current_apply$parmd()
+	       then
+	            if trailer = "lit" then return (nm) end
+		    result := result || "op_own_ptr->" || nm
+	       else
+		    result := current_apply$get_name()||sep || nm
+	       end
+       end
+
+    if trailer = "full"
+       then 
+	  % ownvar testing added 7/29/93; may need to add str, ch
+	  ownvar: typespec := idnkind$value_ownvar(i.kind)
+	  tagcase ownvar.abs
+	     tag apply:
+		return (result || ".proc")
+	     others:
+		return (result || ".num")
+	     end
+	end
+
+    return (result)
+
+    end ownref
+
+s_locals = proc() returns (string)
+    if ib$exist() cor dbg_info$active() then
+       if ib$bodies()
+	  then
+	       return ("locals->")
+	  else
+	       return ("locals.")
+	  end
+       else
+	    return("")
+       end
+    end s_locals
+
+g_idn_plain = proc (e: g_env, i: idn)
+
+    %% i.str
+    % strip off leading '%' if necessary
+    nm: string := i.str
+    if nm[1] = '%'
+       then nm := string$substr(nm, 2, string$size(nm) - 1)
+       end
+    nm := purify(nm)
+    if is_temp(i) then
+       g_env$puts(e, nm)
+     elseif (idnkind$is_ownvar(i.kind)) 
+       then
+	    %%% added 5/16/90
+	    if (current_type$exists() cand current_type$parmd())
+	       % cor current_apply$parmd() 	% removed 4/30/91
+	       then
+		    %%% added 5/10/90
+		    g_locals(e)
+		    %%% end added 5/10/90 (larch/hash_table: opt iter on own var)
+	       end
+	    if  (~current_type$exists() cand current_apply$parmd())
+	       then
+		    g_locals(e)
+	       end
+	    if (current_type$exists() cand ~current_type$parmd() cand current_apply$parmd())
+	       then
+		    if owns$member(i) then
+		       g_locals(e)
+		       end
+	       end
+	    %%% end added 5/16/90 (larch/iodev: access to owns not via locals)
+	    g_ownref(e, i, nm, "plain")
+     else
+	  g_locals(e)
+	  g_env$puts(e, nm)
+     end
+    end g_idn_plain
+
+purify = proc(nm: string) returns (string)
+
+    own reserved : namelist := 
+	    namelist$["auto", "case", "const", "default",
+		      "double", "enum", "extern", "float", 
+		      "goto", "long", "register", "short",
+		      "signed", "sizeof", "static", "switch",
+		      "typedef", "union", "unsigned", "void",
+		      "volatile", "word",
+		      "err", "locals", "elist", "ecode",
+		      "ecode2", "errcode", "user_locals"]
+
+    for each_st: name in namelist$elements(reserved) do
+	if nm = each_st then
+	   new: name := nm||"_UNIQ"
+	   reserved := namelist$addh(reserved, new)
+	   return(new)
+	   end
+	end
+    return(nm)
+
+    end purify
+
+g_idnlit = proc (e: g_env, i: idn)
+
+    %% i.str
+    % strip off leading '%' if necessary
+    nm: string := i.str
+    
+    if nm[1] = '%'
+       then nm := string$substr(nm, 2, string$size(nm) - 1)
+       end
+    nm := purify(nm)
+    % 7/29/93: omitted extra output of nm for ownvar case
+    if (idnkind$is_ownvar(i.kind)) then
+          g_ownref(e, i, nm, "lit")
+    	else
+          g_env$puts(e, nm)
+        end
+
+    end g_idnlit
+
+idnlit = proc (i: idn) returns (string)
+
+    %% i.str
+    % strip off leading '%' if necessary
+    nm: string := i.str
+    nm := purify(nm)
+    
+    if nm[1] = '%'
+       then nm := string$substr(nm, 2, string$size(nm) - 1)
+       end
+    if (idnkind$is_ownvar(i.kind)) then
+       %       return(current_apply$get_name() || sep ||nm)
+       return(ownref(i, nm, "lit"))
+       end
+
+    return(nm)
+    end idnlit
+
+g_einvoke = proc (e: g_env, stmt: invoke) returns(exprlist)
+	      signals(specs_missing)
+
+    % see if we have specs
+    
+    ap: expr := stmt.apply
+    tagcase ap.abs
+       tag apply (ct: clutype):
+           specs: DUspecs, b:bool := du$read_specs(ct.gen)
+           if DUspecs$is_none(specs) then
+	      g_env$error(e, "specifications for " ||
+			     ct.gen.common || " missing.")
+	      signal specs_missing
+	      end
+       others:
+       end
+    
+    % generate code to compute intermediate results
+
+    el: exprlist := exprlist$new()
+    for each_arg: expr in exprlist$elements(stmt.args) do
+	new_el: exprlist := g_expr_arg1(e, each_arg)
+	el := seq_extend[expr](el, new_el)
+	end % for
+    reslist: exprlist := exprlist$new()
+
+    % generate exprs (names) for return values
+
+    ty: typespec := stmt.apply.typespec
+    tagcase ty.abs
+       tag apply (a: applytype):
+	   for val: typespec in typelist$elements(a.vals) do
+	       new_id: expr := tv$idn_next(val)
+	       reslist := exprlist$addh(reslist, new_id)
+	       end % for
+       tag other (o:othertype):
+	   tagcase o
+	      tag du (d: clutype):
+		  new_id: expr := tv$idn_next(ty)
+		  reslist := exprlist$addh(reslist, new_id)
+	      tag op (cop: clusterop):
+		  n: string := ""
+		  tagcase cop.type_.abs
+		     tag cluster_(ct:clutype):
+			 n := ct.gen.common || "$"   % not sep here!
+		     others:
+		     end
+		  g_env$error(e, "specifications for " || n ||
+				 cop.name || " missing.")
+	          signal specs_missing
+	      others:
+		  logit(410, "g_einvoke: unhandled invoke.apply.typespec.other ")
+		  typespec_print(ty)
+		  expr_print(stmt.apply, -1)
+		  g_env$error(e, "specifications missing")
+		  signal specs_missing
+	      end
+       others:
+	   if exprabs$is_op(stmt.apply.abs) cand
+	      exprabs$value_op(stmt.apply.abs).name = "debug_print"
+	      then
+	      else
+		   logit(411, "g_einvoke: unhandled invoke.apply.typespec ")
+		   typespec_print(ty)
+		   expr_print(stmt.apply, -2)
+		   g_env$error(e, "specifications missing")
+		   signal specs_missing
+	      end
+       end
+    %    res: expr := tv$idn_next(stmt.apply.typespec)
+
+    % compute proctype to be invoked
+
+    quick: bool := g_qinv_test(stmt.apply)
+    proc_id: expr := stmt.apply
+
+
+    % generate the actual invocation
+
+    if quick
+       then
+	    g_qinv(e, proc_id, el, reslist)
+       else
+	    gen_proc_id: expr := exprlist$bottom(g_inv1(e, stmt.apply))
+	    g_inv(e, gen_proc_id, proc_id)
+	    first: bool := true
+	    for each_arg: expr in exprlist$elements(el) do
+		if ~first then g_env$puts(e, ", ") else first := false end
+		g_expr_arg(e, each_arg)
+		end % for
+	    for each_res: expr in exprlist$elements(reslist) do
+		if ~first then g_env$puts(e, ", ") else first := false end
+		g_env$puts(e, "&")
+		g_expr_arg(e, each_res)
+		end % for
+	    g_env$puts(e, ");")
+	    g_env$newline(e)
+	    g_env$puts(e, "if (")
+	    g_err(e)
+	    g_env$putl(e, " != ERR_ok) goto "||
+			  ex$get_current_ex_label()||";")
+       end
+    return(reslist)
+    end g_einvoke
+
+g_apply1 = proc(e: g_env, exp:expr, ct: clutype) returns (exprlist)
+    % MOST OF THE FOLLOWING IS BROKEN FOR SELECTORS
+    % 12/4
+    %    if exprlist$size(ct.parms) = 0 
+    %       then return (exprlist$fill(1, exp)) end
+    % end experiment
+    parm_count: int := 0
+    parm_list: exprlist := exprlist$new()
+    gen: DU
+    parm_list := ct.parms
+    gen := ct.gen
+    parm_count := type_parm_count(parm_list)
+    proc_id: expr := tv$idn_next(exp.typespec)
+    g_err(e)
+    g_env$puts(e, " = proctype" || sep || "new(CLU_"|| int$unparse(parm_count) ||", &")
+    g_expr2(e, proc_id)
+    g_env$putl(e, ");")
+    g_env$puts(e, "if (")
+    g_err(e)
+    g_env$putl(e, "!= ERR_ok) goto " || ex$get_current_ex_label() || ";")
+
+    g_idnlit(e, exprabs$value_idn(proc_id.abs))
+       except when wrong_tag:
+		   logit(412, "g_apply1: wrong_tag")
+		   expr_print(proc_id, 1)
+	      end
+    g_env$putl(e, ".proc->type_owns = 0;")
+
+    g_idnlit(e, exprabs$value_idn(proc_id.abs))
+       except when wrong_tag:
+		   logit(413, "g_apply1: wrong_tag")
+		   expr_print(proc_id, 1)
+	      end
+    g_env$puts(e, ".proc->op_owns = ")
+    if exprlist$size(parm_list) ~= 0
+       then
+	    g_env$puts(e, s_owns_prefix_exprlist(parm_list))
+	    g_env$puts(e, gen.common || "_of_")
+	    for ind: int in exprlist$indexes(parm_list) do
+		g_expr4(e, parm_list[ind])
+		g_env$puts(e, "_")
+		end
+	    g_env$putl(e,  "ops->op_owns;")
+       else
+	    g_env$putl(e,  "0;")
+       end
+
+    g_expr2(e, proc_id)
+    g_env$puts(e, "->proc = ")
+    g_expr2(e, exp)
+    g_env$putl(e, ";")
+    return(exprlist$fill(1, proc_id))
+    end g_apply1
+
+g_op1 = proc(e: g_env, exp: expr, cop: clusterop) returns (exprlist)
+
+    % 12/4 experiment removes following conditional
+    %    if ~typeabs$is_select(cop.type_.abs)
+    %	 cand ~parmd_cluster(cop)
+    %       then return (exprlist$fill(1, exp)) end
+    % end
+
+    parm_count: int := 0
+    tparm_list: exprlist := exprlist$new()
+    parm_list: exprlist := exprlist$new()
+    flist: fieldspeclist := fieldspeclist$new()
+    gen: DU
+    type_parms_ct: int := 0
+    cop_name: string := cop.name
+    if cop_name[1] = '%' then cop_name := string$rest(cop_name, 2) end
+    tagcase cop.type_.abs
+       tag cluster_(ct:clutype):
+	   if ~base_cluster_test(cop, ct) then
+	      gen := ct.gen
+	      tparm_list := ct.parms
+	      parm_list := seq_extend[expr](ct.parms, cop.parms)
+	      type_parms_ct := exprlist$size(ct.parms)
+	      end
+	   % need both: ct for parms on whole cluster, cop for 
+	   %	parms on operation
+	   % ct.parms tends to be zero 1/11/90
+       tag type_(ct:clutype):
+	   gen := ct.gen
+	   parm_list := ct.parms
+	   type_parms_ct := exprlist$size(ct.parms)
+       tag select (xa: seltype):
+	   gen := xa.gen
+	   flist := xa.parms
+       tag idn (i: idn):
+	   proc_id: expr := tv$idn_next(exp.typespec)
+	   g_expr2(e, proc_id)
+	   g_env$puts(e, " = ")
+	   % g_locals(e)					%%% NEED TO GET THIS FROM OWNS in some cases
+	   g_env$puts(e, s_owns_prefix(i))
+	   g_idnlit(e, i)
+	   g_env$putl(e, "_ops->" || cop_name || ".fcn;")
+	   return(exprlist$fill(1, proc_id))
+       tag apply (ap: applytype):             % 5/16/91 proctype$equal
+           gen := ap.gen                      % "
+       others:
+	   logit(414, "g_op1: can't find du")
+	   typespec_print(cop.type_)
+       end
+    field_count: int := 0
+    if fieldspeclist$size(flist) ~= 0 then field_count := 1 end
+    parm_count := type_parm_count(parm_list) + field_count
+    proc_id: expr := tv$idn_next(exp.typespec)
+    g_err(e)
+    g_env$puts(e, " = proctype" || sep || "new(CLU_"|| int$unparse(parm_count) ||", &")
+    g_expr2(e, proc_id)
+    g_env$putl(e, ");")
+    g_env$puts(e, "if (")
+    g_err(e)
+    g_env$putl(e, "!= ERR_ok) goto " || ex$get_current_ex_label() || ";")
+    if exprlist$size(parm_list) ~= 0 then
+       g_idnlit(e, exprabs$value_idn(proc_id.abs))
+	  except when wrong_tag:
+		      logit(415, "g_op1: wrong_tag 1")
+		      expr_print(proc_id, 1)
+		 end
+       g_env$puts(e, ".proc->type_owns = ")
+       if type_parms_ct ~= 0 
+	  then
+	       if fieldspeclist$size(flist) = 0
+		  then
+		       g_env$puts(e, s_owns_prefix_exprlist(tparm_list))
+		  else
+		       g_env$puts(e, s_owns_prefix_fieldlist(flist))
+		  end
+	       g_env$puts(e, gen.common || "_of_")
+	       for ind: int in int$from_to(1, type_parms_ct) do
+		   g_expr4(e, parm_list[ind])
+		   g_env$puts(e, "_")
+		   end
+	       g_env$putl(e,  "ops->type_owns;")
+	  else
+	       g_env$putl(e,  "0;")
+	  end
+       if type_parms_ct ~= exprlist$size(parm_list)
+	  then
+	       op_name: string := "_op_" || cop_name
+	       g_idnlit(e, exprabs$value_idn(proc_id.abs))
+		  except when wrong_tag:
+			      logit(416, "g_op1: wrong_tag 1")
+			      expr_print(proc_id, 1)
+			 end
+	       g_env$puts(e, ".proc->op_owns = ")
+	       g_env$puts(e, s_owns_prefix_exprlist(parm_list))
+	       g_env$puts(e, gen.common || op_name || "_of_")
+	       for ind: int in exprlist$indexes(parm_list) do
+		   g_expr4(e, parm_list[ind])
+		   g_env$puts(e, "_")
+		   end
+	       g_env$putl(e,  "ops->op_owns;")
+	  end
+       end
+    if fieldspeclist$size(flist) ~= 0 then
+       ops_index:int := g_ops_index(gen.common, cop.name)
+       sel_name: string := make_sel_name(flist)
+       g_idnlit(e, exprabs$value_idn(proc_id.abs))
+	  except when wrong_tag:
+		      logit(417, "g_op1: wrong_tag 2")
+		      expr_print(proc_id, 1)
+		 end
+       g_env$puts(e, ".proc->op_owns = ")
+       g_env$puts(e, s_owns_prefix_fieldlist(flist))
+       g_env$puts(e, gen.common || "_" || sel_name)    %%%%%%% MAY NEED TO GET THIS FROM OWNS
+       g_env$putl(e,  "_ops->entry[" || int$unparse(ops_index) ||
+		      "].fcn->op_owns;")
+       % table->tables 5/22/90
+       % tables->tables[0] 5/24/90
+       end
+       except when not_found:
+		   % remove this logit: hopefully only informational
+		   % logit("not_found: " || gen.common || " " || cop.name)
+	      end
+    g_expr2(e, proc_id)
+    g_env$puts(e, "->proc = ")
+    g_expr2(e, exp)
+    g_env$putl(e, ";")
+    return(exprlist$fill(1, proc_id))
+
+    end g_op1
+
+% Given a selector and an operation return an index into the ops table
+%	see selector.c and selector.h
+
+g_ops_index = proc(sel: name, oper: name) returns(int) signals (not_found)
+    if sel = "oneof" then
+       if oper = "equal"   then return (0) end
+       if oper = "similar" then return (1) end
+       if oper = "copy"    then return (2) end
+       if oper = "print"   then return (3) end
+       if oper = "encode"  then return (4) end
+       if oper = "decode"  then return (5) end
+       if oper = "_gcd"    then return (6) end
+       if oper = "debug_print" then return (7) end
+       end
+    if sel = "variant" then
+       if oper = "similar"  then return (0) end
+       if oper = "similar1" then return (1) end
+       if oper = "copy"     then return (2) end
+       if oper = "print"    then return (3) end
+       if oper = "encode"   then return (4) end
+       if oper = "decode"   then return (5) end
+       if oper = "_gcd"     then return (6) end
+       if oper = "debug_print" then return (7) end
+       end
+    if sel = "record" then
+       if oper = "similar"  then return (0) end
+       if oper = "similar1" then return (1) end
+       if oper = "copy"     then return (2) end
+       if oper = "print"    then return (3) end
+       if oper = "encode"   then return (4) end
+       if oper = "decode"   then return (5) end
+       if oper = "_gcd"     then return (6) end
+       if oper = "debug_print" then return (7) end
+       end
+    if sel = "struct" then
+       if oper = "equal"   then return (0) end
+       if oper = "similar" then return (1) end
+       if oper = "copy"    then return (2) end
+       if oper = "print"   then return (3) end
+       if oper = "encode"  then return (4) end
+       if oper = "decode"  then return (5) end
+       if oper = "_gcd"    then return (6) end
+       if oper = "debug_print" then return (7) end
+       end
+    signal not_found
+    end g_ops_index
+
+g_anyize = proc (e: g_env, exp: expr) returns (exprlist)
+
+    % normally, generate call _anyize(exp)
+
+    res: expr := tv$idn_next(exp.typespec)
+    el: exprlist := g_expr1(e, exp)
+    g_env$puts(e, "generic_CLU_proc.type_owns = (OWNPTR)")
+    pref: string := s_owns_prefix_expr(exp)
+    g_env$puts(e, pref)
+    g_name_typespec(e, exp.typespec)
+    g_env$putl(e, "_ops->type_owns;")
+    g_env$puts(e, "generic_CLU_proc.op_owns = (OWNPTR)")
+    g_env$puts(e, pref)
+    g_name_typespec(e, exp.typespec)
+    g_env$putl(e, "_ops->op_owns;")
+    g_env$putl(e, "generic_CLU_proc.proc = _anyize;")
+    g_env$putl(e, "CUR_PROC_VAR.proc = &generic_CLU_proc;")
+    g_err(e)
+    g_env$puts(e, " = generic_CLU_proc.proc(")
+    g_expr_arg(e, exprlist$bottom(el))
+    g_env$puts(e, ", &")
+    g_expr_arg(e, res)
+    g_env$putl(e, ");")
+    return (exprlist$fill(1, res))
+    end g_anyize
+
+g_condop = proc (e: g_env, cop: condop, opn: string) returns (exprlist)
+
+    % opn = "cand" or open = "cor"
+    %% ( cop.left ) opn ( cop.right )
+
+    res: expr := tv$idn_next(e.comp.bool_type)
+
+    randl: exprlist := g_expr1(e, cop.left)
+
+    g_expr2(e, res)
+    g_env$puts(e, " = ")
+    g_expr2(e, exprlist$bottom(randl))
+    g_env$putl(e, ";")
+    g_env$puts(e, "if (")
+    if opn = "cor" then
+       g_env$puts(e, "!")
+       end
+    g_expr2(e, exprlist$bottom(randl))
+    g_env$putl(e, ") {")
+    g_env$indent(e)
+
+    randr: exprlist := g_expr1(e, cop.right)
+
+    g_expr2(e, res)
+    g_env$puts(e, " = ")
+    g_expr2(e, exprlist$bottom(randr))
+    g_env$putl(e, ";")
+    g_env$outdent(e)
+    g_env$putl(e, "}")
+
+    return(exprlist$fill(1,res))
+    end g_condop
+
+%g_string_const = proc (e: g_env, s: string) returns (exprlist)
+%
+%    res: expr := tv$idn_next(e.comp.str_type)
+%    g_err(e)
+%    g_env$puts(e, " = string" || sep || "cons(" )
+%    g_string(e, s)
+%    size: int := string$size(s)
+%    if int_const$exists(size)
+%       then
+%	    g_env$puts(e, ", CLU_1, CLU_" ||
+%			  int$unparse(string$size(s))||", &")
+%       else
+%	    size_ex: expr := tv$idn_next(e.comp.int_type)
+%	    g_expr_arg(e, size_ex)
+%	    g_env$puts(e, ", CLU_1, "
+%	    g_env$puts(e, ", &")
+%       end
+%    g_expr_arg(e, res)
+%    g_env$putl(e,  ");")
+%    g_env$puts(e, "if (")
+%    g_err(e)
+%    g_env$putl(e, " != ERR_ok) goto " || ex$get_current_ex_label()||";")
+%    return(exprlist$fill(1, res))
+%    end g_string_const
+
+g_real_const = proc (e: g_env, r: real) returns (exprlist)
+
+    res: expr := tv$idn_next(e.comp.real_type)
+    g_idnlit(e, exprabs$value_idn(res.abs))
+    g_env$putl(e, ".real = " || real$unparse(r) || ";")
+    return(exprlist$fill(1, res))
+    end g_real_const
+
+g_char_const = proc (e: g_env, c: char) returns (exprlist)
+
+    res: expr := tv$idn_next(e.comp.char_type)
+    g_idnlit(e, exprabs$value_idn(res.abs))
+    g_env$puts(e, ".ch = '")
+    g_char(e, c)
+    g_env$putl(e, "';")
+    return(exprlist$fill(1, res))
+    end g_char_const
+
+g_int_const1 = proc (e: g_env, i: int) returns (exprlist)
+
+    res: expr := tv$idn_next(e.comp.int_type)
+    g_idnlit(e, exprabs$value_idn(res.abs))
+    g_env$putl(e, ".num = " || int$unparse(i) || ";")
+    return(exprlist$fill(1, res))
+    end g_int_const1
+
+g_int_const = proc(e: g_env, i: int)
+    g_env$puts(e, "CLU_" || int$unparse(i))
+    end g_int_const
+
+g_bool_const = proc(e: g_env, b: bool)
+    g_env$puts(e, "CLU_")
+    if b then g_env$puts(e, "1")
+       else g_env$puts(e, "0")
+       end
+    end g_bool_const
+
+g_arraycons = proc (e: g_env, ac: arraycons) returns (exprlist)
+
+    %% ac.type_$[ ac.low : ac.elts ]
+
+    nm: str
+    %typespec_print(ac.type_)
+    tagcase (ac.type_.abs)
+       tag cluster_ (ct: clutype):
+	   nm := ct.gen.common
+       others:
+	   logit(418, "g_arraycons: type_ not cluster_")
+       end
+    if nm = "sequence" 
+       then
+	    return (g_sequencecons(e, ac, nm))
+       end
+    % create array
+    arr: expr := tv$idn_next(ac.type_)
+    each_expr: expr
+    if typeabs$is_cluster_(ac.type_.abs) then
+       ct: clutype := typeabs$value_cluster_(ac.type_.abs)
+       each_expr := exprlist$bottom(ct.parms)
+       end
+    if mexpr$is_one(ac.low) 
+       then
+	    low: exprlist := g_expr_arg1(e, mexpr$value_one(ac.low))
+	    g_err(e)
+	    g_env$puts(e, " = " || nm || sep || "create(")
+	    g_expr_arg(e, exprlist$bottom(low))
+	    g_env$puts(e, ", ")
+       else
+	    g_err(e)
+	    g_env$puts(e, " = " || nm || sep || "new(")
+       end
+    g_env$puts(e, " &")
+    g_expr_arg(e, arr)
+    g_env$puts(e, ");")
+    g_env$newline(e)
+    g_env$puts(e, "if (")
+    g_err(e)
+    g_env$putl(e, " != ERR_ok) goto "||
+		  ex$get_current_ex_label()||";")
+    % the following keeps idn's lined up: it really should be used
+    %	to do array$predict
+    if ~int_const$exists(exprlist$size(ac.elts)) then
+       size_nm: expr := tv$idn_next(e.comp.int_type) end
+
+    % ASSUMES no constructors for user defined types
+    %    g_env$puts(e, "CUR_PROC_VAR = ")
+    %    g_idnlit(e, exprabs$value_idn(proc_id.abs))
+    %    g_env$putl(e, ";")
+        
+    % stuff elements into the array
+    begin
+	for each_elt: expr in exprlist$elements(ac.elts) do
+	    elti: exprlist := g_expr_arg1(e, each_elt)
+	    g_err(e)
+	    g_env$puts(e, " = "|| nm || sep || "addh(")
+	    g_expr_arg(e, arr)
+	    g_env$puts(e, ", ")
+	    g_expr_arg(e, exprlist$bottom(elti))
+	    g_env$puts(e, ");")
+	    g_env$newline(e)
+	    g_env$puts(e, "if (")
+	    g_err(e)
+	    g_env$putl(e, " != ERR_ok) goto "||
+			  ex$get_current_ex_label()||";")
+	    end % for
+	end
+       except when bounds: end
+    return(exprlist$fill(1, arr))
+    end g_arraycons
+
+g_sequencecons = proc (e:g_env, ac:arraycons, nm: name) returns (exprlist)
+
+    % create sequence
+    seq: expr := tv$idn_next(ac.type_)
+    each_expr: expr
+    if typeabs$is_cluster_(ac.type_.abs) then
+       ct: clutype := typeabs$value_cluster_(ac.type_.abs)
+       each_expr := exprlist$bottom(ct.parms)
+       end
+    size: int := exprlist$size(ac.elts)
+    if int_const$exists(size)
+       then
+	    g_env$puts(e, "sequence" || sep || "new2(CLU_" ||
+        		  int$unparse(size) || ", &")
+       else
+	    size_nm: expr := tv$idn_next(e.comp.int_type)
+	    g_idnlit(e, exprabs$value_idn(size_nm.abs))
+	    g_env$putl(e, ".num = " || int$unparse(size) || ";")
+	    g_env$puts(e, "sequence" || sep || "new2(")
+	    g_expr_arg(e, size_nm)
+	    g_env$puts(e, ", &")
+       end
+    seqidn: idn := exprabs$value_idn(seq.abs)
+    g_idnlit(e, seqidn)
+    g_env$puts(e, ");")
+    g_env$newline(e)
+
+    % stuff elements into the sequence
+    begin
+        i: int := 0
+	for each_elt: expr in exprlist$elements(ac.elts) do
+	    % g_expr1 -> g_expr_arg1 9/18/92 dwc
+	    elti: exprlist := g_expr_arg1(e, each_elt)
+
+	    g_idnlit(e, seqidn)
+	    g_env$puts(e, ".vec->data[" || int$unparse(i) || "] = ")
+	    g_constr_rhs(e, exprlist$bottom(elti))
+	    g_env$newline(e)
+
+	    i := i + 1
+	    end % for
+	end
+       except when bounds: end
+    return(exprlist$fill(1, seq))
+    end g_sequencecons
+
+g_selectcons = proc (e: g_env, sc: selectcons) returns (exprlist)
+
+    %% sc.type_${ sc.fields }
+
+    % create record 
+    rec: expr := tv$idn_next(sc.type_)
+    size: int := 0
+    for each_field: field in fieldlist$elements(sc.fields) do
+	size := size + namelist$size(each_field.sels)
+	end % for
+    g_env$puts(e, "RecordAlloc(" || int$unparse(size) ||", ")
+    recidn: idn := exprabs$value_idn(rec.abs)
+    g_idn_plain(e, recidn)
+    g_env$putl(e, ");")
+    %    g_err(e)
+    %    g_env$puts(e, " = record$new(" || int$unparse(size) || ", &")
+    %    g_expr2(e, rec)
+    %    g_env$putl(e, ", elist);")
+    %    g_env$puts(e, "if (")
+    %    g_err(e)
+    %    g_env$putl(e, " != ERR_ok) goto " || ex$get_current_ex_label()||";")
+    %    g_env$newline(e)
+
+    % compute field values and insert into record fields
+
+    flist: fieldspeclist := fieldspeclist$new()
+    flist := typeabs$value_select(sc.type_.abs).parms
+       except when wrong_tag: end
+    for each_field: field in fieldlist$elements(sc.fields) do
+	for each_name: name in namelist$elements(each_field.sels) do
+	    el: exprlist := g_expr1(e, each_field.val)
+	    junk: string, ind: int := 
+		field_index("set_" || each_name, flist)
+	    g_idn_plain(e, recidn)
+	    g_env$puts(e, ".vec->data[" || int$unparse(ind-1) || "]  = ") %%% cast new 6/11/90
+	    g_constr_rhs(e, el[1])
+	    end % for
+	end % for
+    return(exprlist$fill(1, rec))
+
+    end g_selectcons
+
+g_apply = proc (e: g_env, ct: clutype)
+
+    g_env$puts(e, escape_ckeyword(ct.gen.common))
+    return
+    end g_apply
+
+g_apply3 = proc (e: g_env, ct: clutype)
+
+    if exprlist$size(ct.parms) > 0
+       then 
+	    for each_expr: expr in exprlist$elements(ct.parms) do
+	        g_env$puts(e, s_owns_prefix_expr(each_expr))
+		g_env$puts(e, ct.gen.common || "_of_")
+		g_expr4(e, each_expr)
+		g_env$puts(e, "_ops ")			%%%% ? NEED TO GET FROM OWNS  %%% ? RIGHT
+		end % for
+       end
+    return
+    end g_apply3
+    
+
+g_clusterop = proc (e: g_env, cop: clusterop)
+
+    % strip leading '%' off name if there (and leave off cluster name prefix
+    % in that case)
+    %% cop.type_$cop.name [ cop.parms ]
+
+    
+    nm: string := cop.name
+
+    if nm[1] = '%'
+       then nm := string$substr(nm, 2, string$size(nm) - 1)
+	    % dont want cluster name prefix
+	    % for an internal routine
+       end
+    if parm$member(cop.type_)
+       then
+	    tn:idn := typeabs$value_idn(cop.type_.abs)
+	    g_env$puts(e, "(")
+            g_env$puts(e, s_owns_prefix(tn))
+	    g_idn(e, tn)
+	    g_env$puts(e, "_ops")			%%%% ? NEED TO GET FROM OWNS
+	    g_env$puts(e, "->" || nm || ".fcn->proc)")
+       else
+	    if typeabs$is_select(cop.type_.abs) then
+	       ta: seltype := typeabs$value_select(cop.type_.abs)
+	       op: string, ind: int := field_index(nm, ta.parms)
+	       if ind ~= 0 then
+		  indstr: string := int$unparse(ind)
+		  g_env$puts(e, ta.gen.common || sep||op||indstr)
+		  return
+		  else
+		       g_env$puts(e, ta.gen.common || sep||op)
+		       return
+		  end
+	       end
+	    g_typespec(e, cop.type_)
+	    g_env$puts(e, sep)
+	    g_env$puts(e, nm)
+       end
+       except when wrong_tag:
+		   logit(419, "g_clusterop: wrong_tag")
+		   typespec_print(cop.type_)
+	      end
+    return
+    end g_clusterop
+
+g_clusterop3 = proc (e: g_env, cop: clusterop)
+
+    % strip leading '%' off name if there (and leave off cluster name prefix
+    % in that case)
+    %% cop.type_$cop.name [ cop.parms ]
+
+    
+    nm: string := cop.name
+
+    if nm[1] = '%'
+       then nm := string$substr(nm, 2, string$size(nm) - 1)
+	    % dont want cluster name prefix
+	    % for an internal routine
+       end
+    if parm$member(cop.type_)
+       then
+       else
+	    %	    if typeabs$is_select(cop.type_.abs) then
+	    %	       ta: seltype := typeabs$value_select(cop.type_.abs)
+	    %	       op: string, ind: int := field_index(nm, ta.parms)
+	    %	       if ind ~= 0 then
+	    %		  g_env$puts(e, int$unparse(ind)||", ")
+	    %		  return
+	    %		  end
+	    %	       end
+       end
+    tagcase cop.type_.abs
+       tag cluster_ (ta: clutype):
+	   for each_expr: expr in exprlist$elements(ta.parms) do
+	       g_env$puts(e, s_owns_prefix_expr(each_expr))
+	       g_typespec(e, cop.type_)
+	       g_env$puts(e, "_of_")
+	       g_expr4(e, each_expr)
+	       g_env$puts(e, "_ops, ")		%%%%% ? NEED TO GET FROM OWNS   %%%%%%% ? RIGHT
+	       end % for
+       tag select:
+       tag idn:
+       others:
+	   %	   % may need to enhance this later
+	   logit(420, "g_clusterop: handle other type_'s")
+	   typespec_print(cop.type_)
+       end
+    return
+    end g_clusterop3
+
+g_force = proc (e: g_env, ex:expr, ty: typespec) returns (exprlist)
+
+    parm_list: exprlist := exprlist$new()
+    flist: fieldspeclist := fieldspeclist$new()
+    parm_count: int := 0
+    fcount: int := 0
+    ct: clutype
+    nm: string := ""
+    tagcase ty.abs
+       tag cluster_, type_(c:clutype):
+	   ct := c
+	   parm_list := ct.parms
+	   parm_count := exprlist$size(parm_list)
+	   nm := ct.gen.common
+       tag any_:
+	   nm := "_anyize"
+	   parm_count := 0
+       tag select (xa: seltype):
+	   nm := xa.gen.common
+	   flist := xa.parms
+	   fcount := fieldspeclist$size(flist)
+       tag idn (i: idn):
+	   % must be name of type parameter
+	   nm := i.str
+       others:
+	   logit(421, "force: look out below")
+	   typespec_print(ty)
+       end
+    proc_id: expr := tv$idn_next(ex.typespec)
+    g_err(e)
+    g_env$puts(e, " = proctype" || sep || "new(CLU_"|| int$unparse(1) ||", &")
+    g_expr2(e, proc_id)
+    g_env$putl(e, ");")
+
+    g_idnlit(e, exprabs$value_idn(proc_id.abs))
+       except when wrong_tag:
+		   logit(422, "force: wrong_tag")
+		   expr_print(proc_id, 1)
+	      end
+    g_env$puts(e, ".proc->type_owns = ")
+    if parm_count ~= 0 then
+       g_env$puts(e, s_owns_prefix_exprlist(parm_list)) 
+     elseif fcount ~= 0 then
+       g_env$puts(e, s_owns_prefix_fieldlist(flist))
+     else
+       g_env$puts(e, s_owns_prefix_type(ty))
+     end
+    g_env$puts(e, nm)
+    g_env$puts(e, "_")
+    if parm_count ~= 0 then
+       g_env$puts(e, "of_")
+       for ind: int in exprlist$indexes(parm_list) do
+	   g_expr4(e, parm_list[ind])
+	   g_env$puts(e, "_")
+	   end
+     elseif fcount ~= 0 then
+       sel_name: string := make_sel_name(flist)
+       g_env$puts(e, sel_name || "_")
+     end
+    g_env$putl(e,  "ops->type_owns;")
+
+    g_idnlit(e, exprabs$value_idn(proc_id.abs))
+       except when wrong_tag:
+		   logit(423, "force: wrong_tag")
+		   expr_print(proc_id, 1)
+	      end
+    g_env$puts(e, ".proc->op_owns = ")
+    if parm_count ~= 0 then
+       g_env$puts(e, s_owns_prefix_exprlist(parm_list))
+     elseif fcount ~= 0 then
+       g_env$puts(e, s_owns_prefix_fieldlist(flist))
+     else
+       g_env$puts(e, s_owns_prefix_type(ty))
+     end
+    g_env$puts(e, nm)
+    g_env$puts(e, "_")
+    if parm_count ~= 0 then
+       g_env$puts(e, "of_")
+       for ind: int in exprlist$indexes(parm_list) do
+	   g_expr4(e, parm_list[ind])
+	   g_env$puts(e, "_")
+	   end
+     elseif fcount ~= 0 then
+       sel_name: string := make_sel_name(flist)
+       g_env$puts(e, sel_name || "_")
+     end
+    g_env$putl(e,  "ops->op_owns;")
+
+    g_expr2(e, proc_id)
+    g_env$putl(e, "->proc = force;")
+    return(exprlist$fill(1, proc_id))
+
+    end g_force
+
+g_updown = proc (e: g_env, x: expr, op: string) returns (exprlist)
+
+    el: exprlist := g_expr1(e, x)
+    return(el)
+
+    end g_updown
+
+g_const_expr = proc (e: g_env, x: expr)
+
+    % a constant whose type is one of: null, bool, int, real, char, string
+    % strings and chars must be escapified before being output
+
+    tagcase x.abs
+       tag null_: g_env$puts(e, "nil")
+       tag bool_ (b: bool):
+	   if b then g_env$puts(e, "true") else g_env$puts(e, "false") end
+       tag int_ (i: int): g_env$puts(e, int$unparse(i))
+       tag real_ (r: real): g_env$puts(e, real$unparse(r))
+       tag char_ (c: char):
+	   g_env$puts(e, "'")
+	   g_char(e, c)
+	   g_env$puts(e, "'")
+       tag str (s: string):
+	   g_string2(e, s)
+       others: g_env$error(e, "g_const_expr: unexpected tag")
+       end
+    end g_const_expr
+
+g_printing_char = proc (c: char) returns (bool)
+    return(c >= ' ' cand c <= '~')
+    end g_printing_char
+
+g_string = proc (e: g_env, s: string)
+    g_env$puts(e, "\"")
+    for c: char in string$chars(s) do
+	g_char(e, c)
+	end
+    g_env$puts(e, "\"")
+    end g_string
+
+g_string2 = proc(e: g_env, s:string)
+    g_env$puts(e, s_string_name(s) || ".num")
+    end g_string2
+
+g_string_name = proc(e:g_env, s:string)
+    g_env$puts(e, "STR_" || s_string_embed(s))
+    end g_string_name
+
+s_string_name = proc(s:string) returns (string)
+    return("STR_" || s_string_embed(s))
+    end s_string_name
+
+g_char = proc (e: g_env, c: char)
+    if g_printing_char(c) cand c ~= '\\' cand c ~= '"' cand c ~= '\''
+       then g_env$puts(e, string$c2s(c))
+       else
+	    g_env$puts(e, "\\")
+	    if c = '\n'
+	       then g_env$puts(e, "n")
+	     elseif c = '\\'
+	       then g_env$puts(e, "\\")
+	     elseif c = '\"'
+	       then g_env$puts(e, "\"")
+	     elseif c = '\t'
+	       then g_env$puts(e, "t")
+	     elseif c = '\p'
+	       then g_env$puts(e, "f")
+	     elseif c = '\b'
+	       then g_env$puts(e, "b")
+	     elseif c = '\r'
+	       then g_env$puts(e, "r")
+	     elseif c = '\v'
+	       then g_env$puts(e, "v")
+	     elseif c = '\''
+	       then g_env$puts(e, "'")
+	     else
+		  ostr: string := "00" || i_ounparse(char$c2i(c))
+		  g_env$puts(e, string$substr(ostr, string$size(ostr)-2, 3))
+	     end
+       end
+    end g_char    
+
+
+g_const_expr_embed = proc (e: g_env, x: expr)
+
+    % a constant whose type is one of: null, bool, int, real, char, string
+    % strings and chars must be escapified before being output
+
+    tagcase x.abs
+       tag null_: g_env$puts(e, "nil")
+       tag bool_ (b: bool):
+	   if b then g_env$puts(e, "true") else g_env$puts(e, "false") end
+       tag int_ (i: int): g_env$puts(e, int$unparse(i))
+       tag real_ (r: real): g_env$puts(e, real_embed(real$unparse(r)))
+       tag char_ (c: char):
+	   g_env$puts(e, s_char_embed(c))
+       tag str (s: string):
+	   g_env$puts(e, s_string_embed(s))
+       others: g_env$error(e, "g_const_expr_embed: unexpected tag")
+       end
+    end g_const_expr_embed
+
+s_const_expr_embed = proc (x: expr) returns (string)
+
+    % a constant whose type is one of: null, bool, int, real, char, string
+    % strings and chars must be escapified before being output
+
+    tagcase x.abs
+       tag null_: return("nil")
+       tag bool_ (b: bool):
+	   if b then return("true") else return("false") end
+       tag int_ (i: int): return(int$unparse(i))
+       tag real_ (r: real): 
+	   return(real_embed(real$unparse(r)))
+       tag char_ (c: char): 
+	   return(s_char_embed(c))
+       tag str (s: string):
+	   return(s_string_embed(s))
+       others: logit(424,"s_const_expr_embed: unexpected tag")
+       end
+    return ("WRONG")
+    end s_const_expr_embed
+
+real_embed = proc(s: string) returns (string)
+    ans: string := ""
+    for each_char: char in string$chars(s) do
+	ans := ans || s_char_embed(each_char)
+	end
+    return (ans)
+    end real_embed
+
+s_string_embed = proc (s: string) returns (string)
+    ans: string := ""
+    for c: char in string$chars(s) do
+	ans := ans || s_char_embed(c)
+	end
+    return (ans)
+    end s_string_embed
+
+s_char_embed = proc (c: char) returns (string)
+    if sep = "$" then return (s_char_embed1(c)) end
+    return (s_char_embed2(c))
+    end s_char_embed
+
+s_char_embed1 = proc (c: char) returns (string)
+    ans: string
+    if embed_char(c) cand c ~= '\\' cand c ~= '"' cand c ~= '\''
+       then return(string$c2s(c))
+       else
+	    if c = '\n' then ans := "_N$"
+	     elseif c = '\\' then ans := "_ESC$"
+	     elseif c = '\"' then ans := "_DQ$"
+	     elseif c = '\t' then ans := "_T$"
+	     elseif c = '\p' then ans := "_F$"
+	     elseif c = '\b' then ans := "_B$"
+	     elseif c = '\r' then ans := "_R$"
+	     elseif c = '\v' then ans := "_V$"
+	     elseif c = '\'' then ans := "_Q$"
+	     elseif c = '_' then ans := "__$"
+	     elseif c = '$' then ans := "_$$"
+	     else
+		  ostr: string := "00" || i_ounparse(char$c2i(c))
+		  return("_" || string$substr(ostr, string$size(ostr)-2, 3)
+			   || sep)
+	     end
+       end
+    return (ans)
+    end s_char_embed1
+
+s_char_embed2 = proc (c: char) returns (string)
+    ans: string
+    if embed_char(c) cand c ~= '\\' cand c ~= '"' cand c ~= '\''
+       then return(string$c2s(c))
+       else
+	    ostr: string := "00" || i_ounparse(char$c2i(c))
+	    return("_" || string$substr(ostr, string$size(ostr)-2, 3))
+       end
+    return (ans)
+    end s_char_embed2
+
+embed_char = proc(c: char) returns (bool)
+    if 'a' <= c cand c <= 'z' then return (true) end
+    if 'A' <= c cand c <= 'Z' then return (true) end
+    if '0' <= c cand c <= '9' then return (true) end
+    %if c = '_' then return (true) end
+    return (false)
+    end embed_char
+
+g_c_assn = proc(e: g_env, i: idn, exp: expr)
+    g_idn_plain(e, i)
+    tagcase exp.abs
+       tag idn (id: idn):
+	   g_env$puts(e, ".num = ")
+	   g_idn_plain(e, id)
+	   g_env$puts(e, ".num")
+       tag apply (ct: clutype):
+	   g_env$puts(e, " = ")
+	   g_apply(e, ct)
+       tag op (op: clusterop):
+	   g_env$puts(e, " = ")
+	   g_clusterop(e, op)
+       tag type_ (xa: typespec):
+	   g_env$puts(e, " = ")
+	   g_term_typespec(e, xa)
+       tag null_:
+	   g_env$puts(e, ".num = 0")
+       tag bool_ (b: bool):
+	   g_env$puts(e, ".tf = ")
+	   if b then g_env$puts(e, "true")
+	      else g_env$puts(e, "false") end
+       tag int_ (n: int):
+	   g_env$puts(e, ".num = ")
+	   g_env$puts(e, int$unparse(n))
+       tag str (s: string):
+	   g_env$puts(e, " = ")
+	   g_string_name(e, s)
+       tag real_:
+	   g_env$error(e, "g_c_assn: real constant unexpected")
+       tag char_:
+	   g_env$error(e, "g_c_assn: char constant unexpected")
+       others:
+	   g_env$error(e, "g_c_assn: unexpected tag on expr")
+	   expr_print(exp, 56)
+       end
+    g_env$putl(e, ";")
+    end g_c_assn
+
+% just like g_c_assn, except that lhs and = have been done already
+%	and lhs is of type integer
+g_constr_rhs = proc(e: g_env, exp: expr)
+    tagcase exp.abs
+       tag idn (id: idn):
+	   g_idn_plain(e, id)
+	   g_env$puts(e, ".num")
+       tag apply (ct: clutype):
+	   g_apply(e, ct)
+	   g_env$puts(e, ".num")
+       tag op (op: clusterop):
+	   g_clusterop(e, op)
+	   g_env$puts(e, ".num")
+       tag type_ (xa: typespec):
+	   g_term_typespec(e, xa)
+	   g_env$puts(e, ".num")
+       tag null_:
+	   g_env$puts(e, "0")
+       tag bool_ (b: bool):
+	   if b then g_env$puts(e, "true")
+	      else g_env$puts(e, "false") end
+       tag int_ (n: int):
+	   g_env$puts(e, int$unparse(n))
+       tag str (s: string):
+	   g_string_name(e, s)
+	   g_env$puts(e, ".num")
+       tag real_:
+	   g_env$error(e, "g_constr_rhs: real constant unexpected")
+       tag char_:
+	   g_env$error(e, "g_constr_rhs: char constant unexpected")
+       others:
+	   g_env$error(e, "g_constr_rhs: unexpected tag on expr")
+	   expr_print(exp, 56)
+       end
+    g_env$putl(e, ";")
+    end g_constr_rhs
+
+g_ret_assn = proc(e: g_env, i: int, exp: expr)
+    g_env$puts(e, "ret_")
+    g_env$puts(e, int$unparse(i))
+    tagcase exp.abs
+       tag idn (id: idn):
+	   g_env$puts(e, "->num = ")
+	   g_idn_plain(e, id)
+	   g_env$puts(e, ".num")
+       tag null_:
+	   g_env$puts(e, "->num = 0")
+       tag bool_ (b: bool):
+	   g_env$puts(e, "->tf = ")
+	   if b then g_env$puts(e, "true")
+	      else g_env$puts(e, "false") end
+       tag int_ (n: int):
+	   g_env$puts(e, "->num = ")
+	   g_env$puts(e, int$unparse(n))
+       tag str (s: string):
+	   g_env$puts(e, "->str = ")
+	   g_string_name(e, s)
+	   g_env$puts(e, ".str")
+       others:
+	   g_env$error(e, "g_ret_assn: unexpected tag on expr")
+	   expr_print(exp, 57)
+       end
+    g_env$putl(e, ";")
+    end g_ret_assn
+
+g_sig_assn = proc(e: g_env, i: int, exp: expr)
+    g_env$puts(e, "elist[")
+    g_env$puts(e, int$unparse(i))
+    g_env$puts(e, "]")
+    tagcase exp.abs
+       tag idn (id: idn):
+	   g_env$puts(e, " = ")
+	   g_idn_plain(e, id)
+       tag null_:
+	   g_env$puts(e, ".num = 0")
+       tag bool_ (b: bool):
+	   g_env$puts(e, ".tf = ")
+	   if b then g_env$puts(e, "true")
+	      else g_env$puts(e, "false") end
+       tag int_ (n: int):
+	   g_env$puts(e, ".num = ")
+	   g_env$puts(e, int$unparse(n))
+       tag str (s: string):
+	   g_env$puts(e, " = ")
+	   g_string_name(e, s)
+       others:
+	   g_env$error(e, "g_sig_assn: unexpected tag on expr")
+	   expr_print(exp, 58)
+       end
+    g_env$putl(e, ";")
+    end g_sig_assn
+
+g_fieldeclist = proc (e: g_env, flist: fieldspeclist)
+
+    for this_fs: fieldspec in fieldspeclist$elements(flist) do
+	g_fieldecl(e, this_fs)
+	end
+
+    end g_fieldeclist
+
+g_fieldecl = proc (e: g_env, fspc: fieldspec)
+
+    g_decl_typespec(e, fspc.type_, fspc.sel)
+
+    end g_fieldecl
+
+field_index = proc(nm: string, flist: fieldspeclist) returns (string, int)
+		signals (not_found)
+    loc_of_sep : int := string$indexc('_', nm)
+    prefix: string := string$substr(nm, 1, loc_of_sep)
+    suffix: string := string$rest(nm, loc_of_sep+1)
+    if prefix = "get_" 
+	 cor prefix = "set_" 
+	 cor prefix = "make_" 
+	 cor prefix = "is_" 
+	 cor prefix = "change_" 
+	 cor prefix = "value_"
+	 cor prefix = "replace_"
+       then
+	    for i:int in fieldspeclist$indexes(flist) do
+		if suffix = flist[i].sel then return (prefix, i) end
+		end
+	    return(nm, -1)
+       else
+	    return(nm, 0)
+       end
+    signal not_found
+    end field_index
+
+all_field_types_null = proc(flist: fieldspeclist) returns (bool)
+    for each_fs: fieldspec in fieldspeclist$elements(flist) do
+	tagcase each_fs.type_.abs
+	   tag cluster_ (ct:clutype):
+	       if ct.gen.common = "null" then continue end
+	       return (false)
+	   others:
+	       return (false)
+	   end
+	end
+    return (true)
+    end all_field_types_null
+
+s_owns_prefix = proc(i: idn) returns (string)
+
+    tagcase i.kind
+       tag vparm, tparm:
+	   type_or_op: string := "op"
+	   if parm$member_base(i.str) then type_or_op := "type" end
+	   return (s_locals() || type_or_op || "_own_ptr->")
+       others:
+	   % logit("sop: idn, but not tparm, vparm: " || i.str)
+       end
+    return ("")
+
+    end s_owns_prefix
+
+s_owns_prefix_expr = proc(p:expr) returns (string)
+    el: exprlist := exprlist$fill(1,p)
+    if el_cont_op_parm(el) then
+       return (s_locals() || "op_own_ptr->")
+       end
+    if el_cont_type_parm(el) then
+       return (s_locals() || "type_own_ptr->")
+       end
+    return ("")
+    end s_owns_prefix_expr
+
+s_owns_prefix_exprlist = proc(el:exprlist) returns (string)
+    if el_cont_op_parm(el) then
+       return (s_locals() || "op_own_ptr->")
+       end
+    if el_cont_type_parm(el) then
+       return (s_locals() || "type_own_ptr->")
+       end
+    return ("")
+    end s_owns_prefix_exprlist
+
+s_owns_prefix_fieldlist = proc(fl: fieldspeclist) returns (string)
+    if fl_cont_op_parm(fl) then
+       return (s_locals() || "op_own_ptr->")
+       end
+    if fl_cont_type_parm(fl) then
+       return (s_locals() || "type_own_ptr->")
+       end
+    return ("")
+    end s_owns_prefix_fieldlist
+
+s_owns_prefix_type = proc(ty: typespec) returns (string)
+    if type_cont_op_parm(ty) then
+	return (s_locals() || "op_own_ptr->")
+	end
+    if type_cont_type_parm(ty) then
+	return (s_locals() || "type_own_ptr->")
+	end
+    return ("")
+    end s_owns_prefix_type

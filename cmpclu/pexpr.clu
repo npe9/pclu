@@ -1,0 +1,311 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	PEXPR	CLU
+%
+%	CLU Compiler: Parsing routines for expressions
+
+p_expr1 = proc (e: p_env) returns (expr)
+	return(p_expr0(e, min_prec))
+	    except when none: p_env$assume(e, "expression")
+		   when bad:
+		   end
+	return(e.bad_expr)
+	end p_expr1
+
+p_expr = proc (e: p_env) returns (expr) signals (none, bad)
+	return(p_expr0(e, min_prec))
+	    resignal none, bad
+	end p_expr
+
+% expr => prim | infix
+% infix => expr infixop expr
+% Expressions are parsed using precedence techniques instead of recursive descent.
+
+p_expr0 = proc (e: p_env, level: prec_level) returns (expr) signals (none, bad)
+	left: expr := p_prim(e)
+	    resignal none
+	while true do
+		prec: prec_level
+		op: name
+		neg: bool
+		tagcase e.peek1
+		   tag op, equal (k: infixop):
+			prec := k.prec
+			op := k.op
+			neg := k.neg
+		   others:
+			return(left)
+		   end
+		if prec > level  cor  prec = max_prec
+		   then p_env$next_token(e)
+		   else return(left)
+		   end
+		right: expr := p_expr0(e, prec)
+		    except when none: p_env$assume(e,
+					"expression after binary operator")
+				      right := e.bad_expr
+			   when bad:  right := e.bad_expr
+			   end
+		abs: exprabs
+		if op = "cand"
+		   then abs := exprabs$make_cand_(condop${left:  left,
+							  right: right})
+		elseif op = "cor"
+		   then abs := exprabs$make_cor_(condop${left:  left,
+							 right: right})
+		else abs := exprabs$make_infix(infix${left:  left,
+						      op:    op,
+						      neg:   neg,
+						      right: right})
+		end
+		left := expr$create(abs, e.unknown_type)
+		end
+	end p_expr0
+
+% prim => primary1 more_primary | (expr) | ~ prim | - prim
+% primary1 => idn constlist | cons | op | int | NIL | TRUE | FALSE | force | UP(expr) |
+%	      DOWN(expr) | TYPE_OF(expr) | string | char | real | type
+% Note that we combine primary with prim here.  If we find a prim we return immediately.
+% If we find a primary, we fall out the tagcase to get the largest primary.
+
+p_prim = proc (e: p_env) returns (expr) signals (none)
+	abs: exprabs
+	tagcase e.peek1
+	   tag idn (k: idn):
+		p_env$next_token(e)
+		abs := p_idn_primary(e, k)
+	   tag type_, typekey:
+		abs := p_type_primary(e, p_type(e))
+	   tag expr (k: exprabs):
+		p_env$next_token(e)
+		abs := k
+	   tag exprkey (k: exprkey):
+		p_env$next_token(e)
+		tagcase k
+		   tag force_:   abs := exprabs$make_force_(p_force(e))
+		   tag type_of_: abs := exprabs$make_type_of_(p_pexpr(e))
+		   tag up_:      abs := exprabs$make_up_(p_pexpr(e))
+		   tag down_:    abs := exprabs$make_down_(p_pexpr(e))
+		   end
+	   tag l_paren:
+		return(p_pexpr(e))
+	   tag not:
+		p_env$next_token(e)
+		return(expr$create(exprabs$make_not(p_prim(e)), e.unknown_type))
+	   tag op, equal (k: infixop):
+		if "sub" ~= k.op  cor  k.neg
+		   then p_env$assume(e, "expression before binary operator")
+			return(e.bad_expr)
+		   end
+		p_env$next_token(e)
+		return(expr$create(exprabs$make_minus(p_prim(e)), e.unknown_type))
+	   others:
+		signal none
+	   end
+	   except when none: p_env$assume(e, "expression after unary operator")
+			     return(e.bad_expr)
+		  when bad: return(e.bad_expr)
+		  end
+	return(p_more_primary(e, expr$create(abs, e.unknown_type)))
+	end p_prim
+
+p_idn_primary = proc (e: p_env, id: idn) returns (exprabs)
+	tagcase e.peek1
+	   tag l_bkt:
+		if p_is_seltype(e)
+		   then parms: fieldspeclist := p_fieldspeclist(e)
+			ta: typeabs := typeabs$make_xsel(
+						xseltype${idn:   id,
+							  parms: parms})
+			return(p_type_primary(e, typespec$create(ta, 0)))
+		   end
+		parms: exprlist := p_blist[expr](e, p_expr, _none_ok,
+								"constant")
+		tagcase e.peek1
+		   tag dollar:
+			ta: typeabs := typeabs$make_xclu(
+						xclutype${idn:   id,
+							  parms: parms})
+			return(p_type_primary(e, typespec$create(ta, 0)))
+		   others:
+			return(exprabs$make_ref(bracketref${idn:   id,
+							    parms: parms}))
+		   end
+	   tag dollar:
+		ta: typeabs := typeabs$make_idn(id)
+		return(p_type_primary(e, typespec$create(ta, 0)))
+	   others:
+		return(exprabs$make_idn(id))
+	   end except when bad: return(exprabs$make_bad(nil)) end
+	end p_idn_primary
+
+% op => type <> $ name constlist
+% cons => s_cons | a_cons
+
+p_type_primary = proc (e: p_env, t: typespec) returns (exprabs) signals (bad)
+	tagcase e.peek1
+	   tag dollar: p_env$next_token(e)
+	   others:     return(exprabs$make_type_(t))
+	   end
+	tagcase e.peek1
+	   tag l_curly:
+		p_env$next_token(e)
+		return(p_s_cons(e, t))
+	   tag l_bkt:
+		p_env$next_token(e)
+		return(p_a_cons(e, t))
+	   tag idn (k: idn):
+		p_env$next_token(e)
+		parms: exprlist := p_blist[expr](e, p_expr, _none_ok,
+								"constant")
+		return(exprabs$make_op(clusterop${type_: t,
+						  name:  k.str,
+						  parms: parms}))
+	   others:
+		p_env$assume(e, "constructor or name after type_spec$")
+		signal bad
+	   end
+	end p_type_primary
+
+% more_primary => empty | . name more_primary | [expr] more_primary |
+%	      (mexprlist) more_primary
+% We have a "small" primary, and we want to continue parsing until we get the largest.
+
+p_more_primary = proc (e: p_env, x: expr) returns (expr)
+	while true do
+	    abs: exprabs
+	    tagcase e.peek1
+		tag period:
+			p_env$next_token(e)
+			n: name := p_name(e)
+			abs := exprabs$make_get(get_sugar${object: x,
+							   sel:    n})
+		tag l_bkt:
+			p_env$next_token(e)
+			index: expr := p_expr1(e)
+			tagcase e.peek1
+			   tag r_bkt: p_env$next_token(e)
+			   others:    p_env$assume(e, "] in primary[expression]")
+			   end
+			abs := exprabs$make_fetch(fetch_sugar${object: x,
+							       index:  index})
+		tag l_paren:
+			args: exprlist := p_plist[expr](e, p_expr, _no_none,
+							_empty_ok, "expression")
+			abs := exprabs$make_invoke(invoke${apply:  x,
+						 	   args:   args})
+		others: return(x)
+		end
+		except when none: p_env$err(e, "missing name - '.' ignored",
+									minor)
+				  abs := x.abs
+		       end
+	    x := expr$create(abs, e.unknown_type)
+	    end
+	end p_more_primary
+
+% s_cons => type $ { <> fieldlist }
+% fieldlist => field | field , fieldlist
+% field => namelist : expr
+% We have parsed type${ and we want the rest of the record constructor
+
+p_s_cons = proc (e: p_env, t: typespec) returns (exprabs)
+	fields: fieldlist := p_clist[field](e, p_field, "field")
+	abs: exprabs := exprabs$make_s_cons(selectcons${type_:  t,
+							fields: fields})
+	tagcase e.peek1
+	   tag r_curly: p_env$next_token(e)
+	   others:	p_env$assume(e, "} in constructor")
+	   end
+	return(abs)
+	end p_s_cons
+
+p_field = proc (e: p_env) returns (field) signals (none, bad)
+	tagcase e.peek1
+	   tag idn:
+	   others:  signal none
+	   end
+	sels: namelist := p_clist[name](e, p_name, "name")
+	line: int := e.line
+	val: expr
+	tagcase e.peek1
+	   tag colon: p_env$next_token(e)
+		      val := p_expr1(e)
+	   others:    p_env$assume(e, ": expression in field of constructor")
+		      val := e.bad_expr
+	   end
+	return(field${sels: sels,
+		      val:  val,
+		      line: line})
+	end p_field
+
+% a_cons => type $ [ <> low mexprlist ]
+% low => empty | expr :
+% We have parsed type$[ and we want the rest of the array constructor
+
+p_a_cons = proc (e: p_env, t: typespec) returns (exprabs)
+	x: expr
+	low: mexpr
+	elts: exprlist
+	tagcase e.peek1
+	   tag r_bkt:
+		p_env$next_token(e)
+		return(exprabs$make_a_cons(arraycons${type_: t,
+						      low:   mexpr$make_none(nil),
+						      elts:  exprlist$new()}))
+	   others:
+		x := p_expr1(e)
+	   end
+	tagcase e.peek1
+	   tag colon: p_env$next_token(e)
+		      low := mexpr$make_one(x)
+		      tagcase e.peek1
+			 tag r_bkt: elts := exprlist$new()
+			 others: elts := p_clist[expr](e, p_expr, "expression")
+			 end
+	   tag comma: p_env$next_token(e)
+		      low := mexpr$make_none(nil)
+		      elts := p_clist[expr](e, p_expr, "expression")
+		      elts := exprlist$addl(elts, x)
+	   others:    low := mexpr$make_none(nil)
+		      elts := exprlist$[x]
+	   end
+	tagcase e.peek1
+	   tag r_bkt: p_env$next_token(e)
+	   others:    p_env$assume(e, "] in constructor")
+	   end
+	return(exprabs$make_a_cons(arraycons${type_: t,
+					      low:   low,
+					      elts:  elts}))
+	end p_a_cons
+
+% force => FORCE <> [type]
+
+p_force = proc (e: p_env) returns (typespec)
+	tagcase e.peek1
+	   tag l_bkt: p_env$next_token(e)
+	   others:    p_env$assume(e, "[type_spec] in FORCE[type_spec]")
+		      return(e.unknown_type)
+	   end
+	t: typespec := p_type1(e)
+	tagcase e.peek1
+	   tag r_bkt: p_env$next_token(e)
+	   others:    p_env$assume(e, "] in FORCE[type_spec]")
+	   end
+	return(t)
+	end p_force
+
+% pexpr => (expr)
+
+p_pexpr = proc (e: p_env) returns (expr)
+	tagcase e.peek1
+	   tag l_paren: p_env$next_token(e)
+	   others:	p_env$assume(e, "(expression)")
+			return(e.bad_expr)
+	   end
+	x: expr := p_expr1(e)
+	tagcase e.peek1
+	   tag r_paren: p_env$next_token(e)
+	   others:	p_env$assume(e, ") in (expression)")
+	   end
+	return(x)
+	end p_pexpr

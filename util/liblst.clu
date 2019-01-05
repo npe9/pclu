@@ -1,0 +1,47 @@
+%  Copyright    Massachusetts Institute of Technology     1989
+ac = array[char]
+as = array[string]
+fname = file_name
+liblist = array[libform]
+libform = record[path:  string,
+                 name:  string,
+                 specs: _obj]
+nameheap = heap[string]
+
+start_up = proc ()
+    po: stream := stream$primary_output()
+    jcl: string := get_jcl()
+    if string$empty(jcl)
+       then pi: stream := stream$primary_input()
+            stream$puts(po, "FILE = ")
+            jcl := stream$getl(pi)
+       end
+    line: ac := string$s2ac(jcl)
+    outfs: string := get_output_part(line)
+       except when none: outfs := "/dev/p" end
+    st: stream := stream$open(fname$parse(outfs), "write")
+       except when bad_format, not_possible (*): st := po end
+    for fns: string in as$elements(get_input_parts(line)) do
+        fn: fname := file_name_fill(fname$parse(fns), "lib")
+           except when bad_format:
+                       stream$puts(po, "bad format file name: ")
+                       stream$putl(po, fns)
+                       continue
+                  end
+        stream$puts(st, fname$unparse(fn))
+        stream$puts(st, ": ")
+        h: nameheap := nameheap$create(string$lt)
+        for f: libform in liblist$elements(gc_read[liblist](fn)) do
+            nameheap$insert(h, f.name)
+            end except when not_possible (why: string):
+                            stream$putl(po, why)
+                            continue
+                       end
+        stream$puts(st, "\n\n")
+        while true do
+            stream$putl(st, nameheap$remove(h))
+            end except when empty: end
+        stream$putc(st, '\n')
+        end
+    stream$close(st)
+    end start_up

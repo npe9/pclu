@@ -1,0 +1,11 @@
+#!/bin/csh -f
+
+# usage: update sysasm int.o
+
+ar d libpclu_opt.a $2
+ar q libpclu_opt.a $1/Opt/$2
+ranlib libpclu_opt.a
+
+ar d libpclu_debug.a $2
+ar q libpclu_debug.a $1/Debugger/$2
+ranlib libpclu_debug.a

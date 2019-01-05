@@ -1,0 +1,5 @@
+% Copyright Massachusetts Institute of Technology 1981, 1989
+
+_cause_wrong_tag = proc () signals (wrong_tag)
+	signal	wrong_tag
+	end _cause_wrong_tag

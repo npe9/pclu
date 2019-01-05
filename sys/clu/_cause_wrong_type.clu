@@ -1,0 +1,5 @@
+% Copyright Massachusetts Institute of Technology 1981, 1989
+
+_cause_wrong_type = proc () signals (wrong_type)
+	signal	wrong_type
+	end _cause_wrong_type

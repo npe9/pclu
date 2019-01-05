@@ -1,0 +1,13 @@
+% Copyright Massachusetts Institute of Technology 1982, 1989
+
+% _gcd operations should be of the form:
+%	_gcd = proc (x: cvt, tab: gcd_tab) returns (int)
+%		return(rep$_gcd(x, tab))
+%		end _gcd
+
+gc_dump = proc [t: type] (x: t, fn: file_name) returns (file_name)
+					       signals (not_possible(string))
+	    where t has _gcd: proctype (t, gcd_tab) returns (int)
+    return(gcd_tab$grind[t](x, fn))
+       resignal not_possible
+    end gc_dump

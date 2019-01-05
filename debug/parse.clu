@@ -1,0 +1,1016 @@
+as = array[string]
+
+
+dparse = proc(args: string) returns (dexpr)
+    args := strip_blanks(args)	% strip leading & trailing blanks
+    % logit("dparse args: " || args)
+    first: char := args[1]
+    d: dexpr
+    if (string$indexc(first, "+-.0123456789") > 0)
+       then
+	    % handle numbers
+	    if (string$indexc('.', args) = 0)
+	       then
+		    num: int := int$parse(args)
+		    d := dexpr$make_const(con$make_int_(num))
+		    return(d)
+	       else
+		    num: real := real$parse(args)
+		    d := dexpr$make_const(con$make_real_(num))
+		    return(d)
+	       end
+     elseif first = '\''
+       then
+	    % handle a character constant
+	    % really need some bounds checking here!
+	    if args[2] ~= '\\'
+	       then
+		    d := dexpr$make_const(con$make_char_(args[2]))
+	       else
+		    c: char := args[3]
+		    if  c = '\\' then
+		       d := dexpr$make_const(con$make_char_('\\'))
+		     elseif c = '\''  then
+		       d := dexpr$make_const(con$make_char_('\''))
+		     elseif c = '\"'  then
+		       d := dexpr$make_const(con$make_char_('\"'))
+		     elseif c = 'n'  then
+		       d := dexpr$make_const(con$make_char_('\n'))
+		     elseif c = 't'  then
+		       d := dexpr$make_const(con$make_char_('\t'))
+		     elseif c = 'b'  then
+		       d := dexpr$make_const(con$make_char_('\b'))
+		     elseif c = 'p'  then
+		       d := dexpr$make_const(con$make_char_('\p'))
+		     elseif c = 'r'  then
+		       d := dexpr$make_const(con$make_char_('\r'))
+		     elseif c = 'v'  then
+		       d := dexpr$make_const(con$make_char_('\v'))
+		     elseif string$indexc(c, "0123456789") ~= 0 then
+		       ostr: string := string$substr(args, 3, 3)
+		       onum: int := i_oparse(ostr)
+		       d := dexpr$make_const(con$make_char_(char$i2c(onum)))
+		     end
+	       end
+	    return(d)
+     elseif first = '\"'
+       then
+	    % handle a string
+	    str: string := string$substr(args, 2, string$size(args)-1)
+	    last: int := string$indexc('"', str)
+	    str := string$substr(str, 1, last - 1)
+	    d := dexpr$make_const(con$make_str(str))
+	    return(d)
+     elseif (first >= 'a' cand first <= 'z') cor first  = '_'
+	      cor (first >= 'A' cand first <= 'Z')
+       then
+	    % starts with an identifier
+	    if string$indexc('=', args) > 0
+	       then
+		    sz: int := string$size(args)
+		    col: int := string$indexc(':', args)
+		    eq: int := string$indexc('=', args)
+		    rhs: string := strip_blanks(string$rest(args, eq+1))
+		    len: int := eq
+		    if col > 0 cand col < len then len := col end
+		    lhs: string := strip_blanks(string$substr(args, 1, len-1))
+		    % parse lhs (idnlist)
+		    l: dexprlist := dexprlist$new()
+		    while true do
+			com: int := string$indexc(',', lhs)
+			if com = 0
+			   then
+				d := dexpr_idn(strip_blanks(lhs))
+				l := dexprlist$addh(l, d)
+				break
+			   else
+				d := dexpr_idn(strip_blanks(
+							string$substr(lhs, 1, com-1)))
+				lhs := strip_blanks(string$rest(lhs, com+1))
+				l := dexprlist$addh(l, d)
+			   end
+			end
+		    % get rhs
+		    d := dparse(rhs)
+		    r: dexprlist := dexprlist$fill(1, d)
+		    % make assignment expr
+		    d := dexpr$make_assign(assn${left: d2l(l), right: d2l(r)})
+		    return(d)
+	     elseif string$indexc('(' , args) > 0
+	       then
+		    % handle invocation
+		    lparen: int := string$indexc('(', args)
+		    len: int := lparen - 1
+		    op_name: string := string$substr(args, 1, len)
+		    op_name := strip_blanks(op_name)
+		    args := string$rest(args, lparen + 1)
+		    args := strip_blanks(args)
+		    a: dexprlist := dexprlist$new()
+
+		    while true do
+			%			rparen: int := string$indexc(')', args)
+			%			if rparen = 1 then break end
+			%			com: int := string$indexc(',', args)
+			%			len := rparen
+			%			if com > 0 cand com < len then len := com end
+			%			len := len - 1
+			%			arg: string := string$substr(args, 1, len)
+			%			arg := strip_blanks(arg)
+			%			if com = 0 then break end
+			%			args := string$rest(args, com + 1)
+			%			args := strip_blanks(args)
+			arg: string
+			arg, args := dparg(args)
+			d := dparse(arg)
+			a := dexprlist$addh(a, d)
+			end
+		       except when none: end
+
+		    % separate type & op parameters from op_name
+		    loc: int := string$indexc('$', op_name)
+		    tname: string := ""
+		    tparms: dexprlist := dexprlist$new()
+		    oparms: dexprlist := dexprlist$new()
+		    if loc ~= 0
+		       then
+			    tname := string$substr(op_name, 1, loc - 1)
+			    tname := strip_blanks(tname)
+			    op_name := string$rest(op_name, loc)
+			    loc := string$indexc('[', tname)
+			    if loc ~= 0
+			       then
+				    parms: string := string$rest(tname, loc)
+				    tname := string$substr(tname, 1, loc - 1)
+				    tname := strip_blanks(tname)
+				    loc := string_lindexs("]", parms)
+				    parms := string$substr(parms, 1, loc)
+				    parms := strip_blanks(parms)
+				    plist: as := split_tlist(parms)
+				    if tname = "record" cor tname = "oneof" cor
+				       tname = "struct" cor tname = "variant" then
+				       for each_t: string in as$elements(plist) do
+					   tparms := dexprlist$addh(tparms,
+								    dpfspec(each_t))
+					   end
+				       else
+					    for each_t: string in as$elements(plist) do
+						tparms := dexprlist$addh(tparms,
+									 dptype(each_t))
+						end
+				       end
+			       end
+		       end
+		    loc := string$indexc('[', op_name)
+		    if loc ~= 0
+		       then
+			    parms: string := string$rest(op_name, loc)
+			    op_name := string$substr(op_name, 1, loc - 1)
+			    op_name := strip_blanks(op_name)
+			    loc := string_lindexs("]", parms)
+			    parms := string$substr(parms, 1, loc)
+			    parms := strip_blanks(parms)
+			    plist: as := split_tlist(parms)
+			    for each_t: string in as$elements(plist) do
+				oparms := dexprlist$addh(oparms, dptype(each_t))
+				end
+		       end
+		    op_name := tname || op_name
+		    d := dexpr$make_apply(op${op: op_name, tparms: d2l(tparms),
+					      oparms: d2l(oparms), args: d2l(a)})
+		    return(d)
+	     elseif string$indexs("$[", args) > 0 then
+	       % handle array constructor
+	       % {array|sequence}[type]$[{number:}{value{,value}}]
+	       % parse, then create odesc with appropriate ops
+	       loc: int := string$indexs("$[", args)
+	       typ: string := string$substr(args, 1, loc - 1)
+	       vals: string := string$rest(args, loc + 2)
+	       vals := strip_blanks(vals)
+	       loc := string$indexc('[', typ)
+	       parm: dexpr := dptype(split_tlist(string$rest(typ, loc))[1])
+	       parms: dexprlist := dexprlist$fill(1, parm)
+	       typ := string$substr(typ, 1, loc - 1)
+	       strt: dexpr := dexpr$make_const(con$make_int_(1))
+	       col: int := string$indexc(':', vals)
+	       found: bool := false
+	       if col ~= 0 then
+		  temp: string := strip_blanks(string$substr(vals, 1, col - 1))
+		  % expect to find number or idn that resolves to an integer value
+		  found := true
+		  strt := dparse(temp)
+		     except others:
+				 found := false
+			    end
+		  end
+	       if found then vals := string$rest(vals, col) end
+	       dvals: dexprlist := dpexprlist(vals)
+	       return(dexpr$make_acons(acs${typ: typ, parm: d2l(parms),
+					    start: d2o(strt), vals: d2l(dvals)}))
+	     elseif string$indexs("${", args) > 0 then
+	       % handle record constructor
+	       % {record|struct|oneof|variant}[name:type,...]${name:val,...}
+	       % parse, then create odesc with appropriate ops
+	       loc: int := string$indexs("${", args)
+	       typ: string := string$substr(args, 1, loc - 1)
+	       vals: string := string$rest(args, loc + 2)
+	       vals := strip_blanks(vals)
+	       loc := string$indexc('[', typ)
+	       parms: string := string$rest(typ, loc)
+	       typ := string$substr(typ, 1, loc - 1)
+	       fspecs: dexprlist := dpfspeclist(parms)
+	       if typ = "variant" cor typ = "oneof" 
+		  then
+		       tg: int, dval: dexpr := dpfieldexpr(vals, fspecs)
+		       return(dexpr$make_vcons(vcs${typ: typ, parms: d2l(fspecs),
+						    val: d2o(dval), tg: tg}))
+		  else
+		       dvals: dexprlist := dpfieldexprlist(vals, fspecs)
+		       return(dexpr$make_scons(scs${typ: typ, parms: d2l(fspecs),
+						    vals: d2l(dvals)}))
+		  end
+	     elseif string$indexc(':', args) > 0
+	       then
+		    % handle a field spec
+		    loc: int := string$indexc(':', args)
+		    f: string := strip_blanks(string$substr(args, 1, loc -1))
+		    t: dexpr := dptype(strip_blanks(string$rest(args, loc + 1)))
+		    return (dexpr$make_field(fspec${name: f, typ: d2o(t)}))
+	     else
+		  % must be an identifier: ? check existence ?  ?check legality?
+		  return (dexpr_idn(args))
+	     end
+     else
+	  % hogwash  (FIX: should be signalling)
+	  return (dexpr$make_none(nil))
+     end
+    end dparse
+
+dexpr_idn = proc(arg: string) returns (dexpr)
+	if arg = "true" then return (dexpr$make_const(con$make_bool_(true))) end
+	if arg = "false" then return (dexpr$make_const(con$make_bool_(false))) end
+	return(dexpr$make_idn(arg))
+	end dexpr_idn
+
+dparg = proc(args: string) returns (string, string) signals (none)
+    level: int := 0
+    count: int := string$size(args)
+    i: int := 1		% in case loop doesn't happen
+    for i in int$from_to(1, count) do
+	c: char := args[i]
+	if c = ')' cand level = 0 then break end
+	if c = ',' cand level = 0 then break end
+	if c = '(' then level := level + 1 end
+	if c = ')' then level := level - 1 end
+	end
+    next_arg: string := strip_blanks(string$substr(args, 1, i-1))
+    if string$size(next_arg) = 0 then signal none end
+    args := strip_blanks(string$rest(args, i+1))
+    return (next_arg, args)
+    end dparg
+
+% parse an expr from a string (oneof/variant value)
+% assumes parms are alphabetized
+dpfieldexpr = proc(line: string, parms:dexprlist) returns (int,dexpr)
+    sz: int := dexprlist$size(parms)
+    if line[1] = ':' then line := string$rest(line, 2) end
+    d: dexpr
+    tg: int := 0
+    while ~string$empty(line) do
+	this_arg: string := ""
+        this_field: string := ""
+	skipped: int := 0
+	for c: char in string$chars(line) do
+	    if c = ',' cor c = ']' cor c = '}' then
+	       line := string$rest(line, string$size(this_arg) + 2 + skipped)
+	       break
+	     elseif c = ':' then
+	       skipped := string$size(this_arg) + 1
+	       this_field := this_arg
+	       this_arg := ""
+	     else
+		  this_arg := string$append(this_arg, c)
+	     end
+	    end
+	this_arg := strip_blanks(this_arg)
+	this_field := strip_blanks(this_field)
+	d := dparse(this_arg)
+	for i: int in int$from_to(1, sz) do
+	    if this_field = dexpr$value_field(parms[i]).name then
+	       tg := i
+	       break
+	       end
+	    end
+	end
+    return(tg, d)
+    end dpfieldexpr
+
+% parse an exprlist from a string
+% assumes parms are alphabetized and vals are in same order
+dpfieldexprlist = proc(line: string, parms:dexprlist) returns (dexprlist)
+    dexprarr = array[dexpr]
+    sz: int := dexprlist$size(parms)
+    fake_elt: dexpr := dexpr$make_const(con$make_int_(0))
+    nda: dexprarr := dexprarr$fill(1, sz, fake_elt)
+    if line[1] = ':' then line := string$rest(line, 2) end
+    while ~string$empty(line) do
+	this_arg: string := ""
+        this_field: string := ""
+	skipped: int := 0
+	for c: char in string$chars(line) do
+	    if c = ',' cor c = ']' cor c = '}' then
+	       line := string$rest(line, string$size(this_arg) + 2 + skipped)
+	       break
+	     elseif c = ':' then
+	       skipped := string$size(this_arg) + 1
+	       this_field := this_arg
+	       this_arg := ""
+	     else
+		  this_arg := string$append(this_arg, c)
+	     end
+	    end
+	this_arg := strip_blanks(this_arg)
+	this_field := strip_blanks(this_field)
+	d: dexpr := dparse(this_arg)
+	for i: int in int$from_to(1, sz) do
+	    if this_field = dexpr$value_field(parms[i]).name then
+	       nda[i] := d
+	       end
+	    end
+	end
+    return(dexprlist$a2s(nda))
+    end dpfieldexprlist
+
+% parse an exprlist from a string
+dpexprlist = proc(line: string) returns (dexprlist)
+    if line[1] = ':' then line := string$rest(line, 2) end
+    dl: dexprlist := dexprlist$new()
+    while ~string$empty(line) do
+	this_arg: string := ""
+	for c: char in string$chars(line) do
+	    if c = ',' cor c = ']' cor c = '}'
+	       then
+		    line := string$rest(line, string$size(this_arg) + 2)
+		    break
+	       else
+		    this_arg := string$append(this_arg, c)
+	       end
+	    end
+	this_arg := strip_blanks(this_arg)
+	d: dexpr := dparse(this_arg)
+	dl := dexprlist$addh(dl, d)
+	end
+    return(dl)
+    end dpexprlist
+
+% parse a fspeclist from a string
+% fix to parse real types: probably need separate subr & new rep
+dpfspeclist = proc(line: string) returns (dexprlist)
+    fspecarr = array[dexpr]
+    fl: dexprlist := dexprlist$new()
+    parms: as := split_tlist(line)
+    for each_s: string in as$elements(parms) do
+	df: dexpr := dpfspec(each_s)
+	fl := dexprlist$addh(fl, df)
+	end
+    nfa: fspecarr := fspecarr$predict(1, dexprlist$size(fl))
+    for each_d: dexpr in dexprlist$elements(fl) do
+	each_f: fspec := dexpr$value_field(each_d)
+	nm: string := each_f.name
+	sz: int := fspecarr$size(nfa)
+	x: dexpr := each_d
+	for i: int in int$from_to(1,sz) do
+	    if dexpr$value_field(nfa[i]).name < nm then continue
+	       else 
+		    for j: int in int$from_to(i, sz) do
+			ox: dexpr := nfa[j]
+			nfa[j] := x
+			x := ox
+			end
+		    break
+	       end
+	    end
+	fspecarr$addh(nfa, x)
+	end
+    fl := dexprlist$a2s(nfa)
+    return (fl)
+    end dpfspeclist
+
+dpfspec = proc(line: string) returns (dexpr)
+    n: string := ""
+    t: string := ""
+    first: bool := true
+    c: char
+    bcount: int := 0
+    for c in string$chars(line) do
+	if c = ',' cand bcount = 0
+	   then
+		f: fspec := fspec${name: n, typ: d2o(dptype(t))}
+		return(dexpr$make_field(f))
+	   end
+	if c = '[' then bcount := bcount + 1 end
+	if c = ']' then bcount := bcount - 1 end
+	if c = ':' cand first then first := false continue end
+	if c = ' ' then continue end
+	if first then
+	   n := string$append(n, c)
+	   else
+		t := string$append(t, c)
+	   end
+	end
+    f: fspec := fspec${name: n, typ: d2o(dptype(t))}
+    return(dexpr$make_field(f))
+    end dpfspec
+
+split_tlist = proc(tl: string) returns (as)
+    % strip leading, trailing blanks and []
+    tl := strip_blanks(tl)
+    loc: int := string$indexc('[', tl)
+    tl := string$rest(tl, loc+1)
+    loc := string_lindexs("]", tl)
+    tl := string$substr(tl, 1, loc - 1)
+    tl := strip_blanks(tl)
+    new: as := as$predict(1, 20)
+    elt: string := ""
+    ch: char
+    bcount: int := 0
+    for ch in string$chars(tl) do
+	if ch = ',' cand bcount = 0 then
+	   as$addh(new, elt)
+	   elt := ""
+	   continue
+	   end
+	if ch = '[' then bcount := bcount + 1 end
+	if ch = ']' then bcount := bcount - 1 end
+	elt := string$append(elt, ch)
+	end
+    as$addh(new, elt)
+    return(new)
+    end split_tlist
+
+dptype = proc(tstr: string) returns (dexpr)
+    tstr := strip_blanks(tstr)
+    loc: int := string$indexs("[", tstr)
+    if loc = 0 then return (dexpr$make_idn(tstr)) end
+    tname: string := string$substr(tstr, 1, loc - 1)
+    if tname = "record" cor tname = "struct" cor tname = "oneof"
+	 cor tname = "variant" then
+       sparms: string := string$rest(tstr, loc - 1)
+       slist: as := split_tlist(sparms)
+       dlist: dexprlist := dexprlist$new()
+       for each_s: string in as$elements(slist) do
+	   dlist := dexprlist$addh(dlist, dpfspec(each_s))
+	   end
+       return(dexpr$make_sel(sel${name: tname, parms:d2l(dlist)}))
+       else
+	    tparms: string := string$rest(tstr, loc - 1)
+	    tlist: as := split_tlist(tparms)
+	    dlist: dexprlist := dexprlist$new()
+	    for each_s: string in as$elements(tlist) do
+		dlist := dexprlist$addh(dlist, dptype(each_s))
+		end
+	    return(dexpr$make_tgen(tgen${name: tname, parms:d2l(dlist)}))
+       end
+    end dptype
+
+strip_blanks = proc(s: string) returns (string)
+
+    % strip leading blanks
+    s := remblank(s)
+
+    % strip trailing blanks
+    count: int := 0
+    sz: int := string$size(s)
+    for i: int in int$from_to_by(sz, 1, -1) do
+	if s[i] = ' ' then count := count + 1
+	   else break end
+	end
+    s := string$substr(s, 1, sz - count)
+    return (s)
+    end strip_blanks
+
+src = cluster is list, find_module, set_context, get_context
+    rep = null
+    own current_file_name: string := ""
+    own current_module: string := ""
+    own current_file: file_name := file_name$create("","","","")
+    own current_line: int := -1
+    own stream_exists : bool := false
+    own current_stream: stream
+
+    set_context = proc(fn: string, mod: string) signals (not_found)
+	if stream_exists then stream$close(current_stream) stream_exists := false end
+	current_file_name := fn
+	current_module := mod
+	current_file := file_name$parse(fn)
+	current_line := find_module(fn, mod)
+	   resignal not_found
+	end set_context
+
+    get_context = proc() returns (string, string, int) signals (not_found)
+	if current_file_name = "" then signal not_found end
+	return (current_file_name, current_module, current_line)
+	end get_context
+    
+    list = proc(tyo: stream, fname: string, mod: string, 
+		first_line, last_line, flag_line: int, number, flag: bool)
+	% logit(int$unparse(first_line))
+	% logit(int$unparse(first_line))
+	% logit(mod)
+	% logit(int$unparse(current_line))
+	% logit(current_module)
+	l: string
+	i: int
+	if mod = current_module	cand first_line > current_line
+	   then
+		for i in int$from_to(current_line+1, first_line-1) do
+		    l := stream$getl(current_stream)
+		    end
+		   except when end_of_file:
+			       stream$putl(tyo, "\nNot that many lines in the file (1)\n")
+			  end
+	   else
+		if stream_exists then
+		   stream$close(current_stream)
+		   end
+		probable_file: file_name := file_name$parse(fname)
+		current_stream := stream$open(probable_file, "read")
+		   except when not_possible (*):
+			   newfn: string := ""
+			   begin
+			       loc: int := string$indexs("pclu", fname)
+			       trailer: string := string$rest(fname, loc)
+			       loc := string$indexc('/', trailer)
+			       trailer := string$rest(trailer, loc)
+			       newfn := _environ("CLUHOME") || trailer
+			       probable_file := file_name$parse(newfn)
+			       current_stream := stream$open(probable_file, "read")
+				end
+				  except others:
+					if newfn = "" then
+					      stream$putl(tyo, "\nCan't open file: "
+							 || fname || "\n")
+					else
+					      stream$putl(tyo, "\nCan't open file: "
+							 || fname || " or " || newfn || "\n")
+					end
+					      return
+					 end
+			  end
+		current_module := mod
+		current_file_name := fname
+		current_file := probable_file
+		stream_exists := true
+		for i in int$from_to(1, first_line-1) do
+		    l := stream$getl(current_stream)
+		    end
+		   except when end_of_file:
+			       stream$putl(tyo, "\nNot that many lines in the file (2)\n")
+			  end
+	   end
+	for i in int$from_to(first_line, last_line) do
+	    l := stream$getl(current_stream)
+	    if flag then
+	       if i = flag_line
+		  then
+		       stream$puts(tyo, "*>")
+		  else
+		       stream$puts(tyo, "  ")
+		  end
+	       end
+	    if number then
+	       stream$puts(tyo, int$unparse(i))
+	       stream$puts(tyo, ":\t")
+	       end
+	    stream$putl(tyo, l)
+	    current_line := last_line
+	    end
+	   except when end_of_file:
+		       % stream$putl(tyo, "\nNot that many lines in the file (3)\n")
+		  end
+	end list
+
+    % given a file name and a module name, search for the module in the file
+    find_module = proc(fname: string, mod: string) returns (int)
+		    signals (not_found)
+	fn: file_name := file_name$parse(fname)
+	temp_stream: stream := stream$open(fn, "read")
+	   except when not_possible (*):
+		       loc: int := string$indexs("pclu", fname)
+		       trailer: string := string$rest(fname, loc)
+		       loc := string$indexc('/', trailer)
+		       trailer := string$rest(trailer, loc)
+		       fn := file_name$parse(_environ("CLUHOME") || trailer)
+		       temp_stream := stream$open(fn, "read")
+		  end
+
+	% decide if proc/iter or clusterop
+	oper: string := ""
+	sep: int := string$indexs("$", mod)
+	sepsize: int := 1
+	if sep = 0 then
+	   sep := string$indexs("OP", mod)
+	   sepsize := 2
+	   end
+	if sep ~= 0 then
+	   oper := string$rest(mod, sep+sepsize)
+	   mod := string$substr(mod, 1, sep - 1)
+	   end
+
+	% find "mod = proc/iter/cluster"
+	i: int := 1
+	sz: int := string$size(mod)
+	while true do
+	    begin
+		l: string := stream$getl(temp_stream)
+		l2: string := remblank(l)
+		index: int := string$indexs(mod, l2)
+		if (index ~= 1) then i := i + 1 continue end
+		l2 := string$rest(l2, sz + 1)
+		l2 := remblank(l2)
+		if l2[1] ~= '=' then i := i + 1 continue end
+		l2 := string$rest(l2, 2)
+		l2 := remblank(l2)
+		if oper ~= ""
+		   then
+			index := string$indexs("cluster", l2)
+			if index ~= 1 then i := i + 1 continue end
+		   else
+			index := string$indexs("proc", l2)
+			if index ~= 1 then index := string$indexs("iter", l2) end
+			if index ~= 1 then i := i + 1 continue end
+		   end
+		end
+	       except when end_of_file: stream$close(temp_stream)
+					signal not_found
+		      others: i := i + 1 continue
+		      end
+	    break
+	    end
+	% if proc/iter we're done; if cluster look for "oper = proc/iter"
+	if oper ~= "" then
+	   sz := string$size(oper)
+	   while true do
+	       begin
+		   l: string := stream$getl(temp_stream)
+		   l2: string := remblank(l)
+		   index: int := string$indexs(oper, l2)
+		   if (index ~= 1) then i := i + 1 continue end
+		   l2 := string$rest(l2, sz + 1)
+		   l2 := remblank(l2)
+		   if l2[1] ~= '=' then i := i + 1 continue end
+		   l2 := string$rest(l2, 2)
+		   l2 := remblank(l2)
+		   index := string$indexs("proc", l2)
+		   if index ~= 1 then index := string$indexs("iter", l2) end
+		   if index ~= 1 then i := i + 1 continue end
+		   end
+		  except when end_of_file: stream$close(temp_stream)
+					   signal not_found
+			 others: i := i + 1 continue
+			 end
+	       break
+	       end
+	   end
+	stream$close(temp_stream)
+	return (i)
+	end find_module
+    
+    end src
+
+dvar = cluster is get_value, get_dexpr, set_value
+
+    rep = array[entry]
+
+    entry = record[name: string, value: dexpr]
+
+    own dvars: rep := rep$new()
+    % own po: pstream := pstream$primary_output()
+
+    get_value = proc(nm: string) returns (_obj) signals (not_found)
+	% if nm = "po" then return (_cvt[pstream, _obj](po)) end
+	if nm = "true" then return (_cvt[bool, _obj](true)) end
+	if nm = "false" then return (_cvt[bool, _obj](false)) end
+	for e: entry in rep$elements(dvars) do
+	    if e.name = nm then 
+	       tagcase e.value
+		  tag const (c: con):
+		      tagcase c
+			 tag int_ (i: int):
+			     return(_cvt[int,_obj](i))
+			 tag bool_ (b: bool):
+			     return(_cvt[bool,_obj](b))
+			 tag null_:
+			     return(_cvt[null,_obj](nil))
+			 tag char_ (ch: char):
+			     return(_cvt[char,_obj](ch))
+			 tag str (s: string):
+			     return(_cvt[string,_obj](s))
+			 tag real_ (r: real):
+			     return(_cvt[real,_obj](r))
+			 end
+		  tag object (o: odesc):
+		      return (o.value)
+		  others:
+		  end
+	       end
+	    end
+	signal not_found
+	end get_value
+
+    get_dexpr = proc(nm: string) returns (dexpr) signals (not_found)
+	if nm = "true" then return (dexpr$make_const(con$make_bool_(true))) end
+	if nm = "false" then return (dexpr$make_const(con$make_bool_(false))) end
+	for e: entry in rep$elements(dvars) do
+	    if e.name = nm then return (e.value) end
+	    end
+	signal not_found
+	end get_dexpr
+
+    set_value = proc(nm: string, val: dexpr)
+	for e: entry in rep$elements(dvars) do
+	    if e.name = nm then
+	       e.value := val
+	       return
+	       end
+	    end
+	rep$addh(dvars, entry${name:nm, value:val})
+	end set_value
+
+    end dvar
+
+alias = cluster is init, add_alias, show_alias, remove_alias, expand_alias,
+		   elements
+    alrec = record[nm: string, value: string]
+    MAX_EXPANDS = 10
+    rep = array[alrec]
+    own alias_list: rep := rep$new()
+    own tyo: stream
+    own expansion_count: int := 0
+
+    init = proc(st: stream)
+	tyo := st
+	end init
+
+    add_alias = proc(args: string, arglist:as)
+	new_al_nm: string := arglist[1]
+	loc: int := string$indexs(new_al_nm, args)
+	new_al_val: string := string$rest(args, loc + string$size(new_al_nm))
+	found: bool := false
+	for nth_al: alrec in rep$elements(alias_list) do
+	    if new_al_nm = nth_al.nm
+	       then nth_al.value := new_al_val found := true break end
+	    end
+	if ~found then
+	   rep$addh(alias_list, alrec${nm: new_al_nm, value: new_al_val})
+	   end
+	dbg_env$dump()
+	end add_alias
+
+    remove_alias = proc(als: as)
+	for each_al: string in as$elements(als) do
+	    found: bool := false
+	    for nth_al: alrec in rep$elements(alias_list) do
+		if each_al = nth_al.nm
+		   then nth_al.value := "" found := true break end
+		end
+	    if ~found then
+	       stream$putl(tyo, "No alias found for " || each_al)
+	       end
+	    end
+	new_alias_list: rep := rep$new()
+	for nth_al: alrec in rep$elements(alias_list) do
+	    if string$empty(nth_al.value) then continue end
+	    rep$addh(new_alias_list, nth_al)
+	    end
+	alias_list := new_alias_list
+	dbg_env$dump()
+	end remove_alias
+
+    show_alias = proc(al: string)
+	for each_al: alrec in rep$elements(alias_list) do
+	    if al = "all" cor each_al.nm = al then
+	       stream$puts(tyo, each_al.nm)
+	       stream$puts(tyo, "   ")
+	       stream$putl(tyo, each_al.value)
+	       end
+	    end
+	end show_alias
+
+    expand_alias = proc(line: string) returns (string) signals (too_many)
+	expansion_count := 0
+	return(expand_alias_asst(line))
+	   resignal too_many
+	end expand_alias
+
+    expand_alias_asst = proc(line: string) returns (string) signals (too_many)
+	%stream$putl(tyo, line)
+	% copy input line to output line
+	% finding tokens on the way
+	%   see if there is an alias for the token
+	%   if so, put alias value into output line
+	%	else put token into output line
+	% copy non-token elements to the output line
+	expansion_count := expansion_count + 1
+	if expansion_count > MAX_EXPANDS then signal too_many end
+	output_line: string := ""
+	tok: string := ""
+	tok_alert: bool := true
+	for c:char in string$chars(line) do
+	    if tok_alert cand
+	       ((c >= 'a' cand c <= 'z') cor
+		(c >= 'A' cand c <= 'Z') cor
+		(c >= '0' cand c <= '9'))
+	       then
+		    tok := tok || string$c2s(c)
+	       else
+		    if c = '\'' then tok_alert := ~tok_alert end
+		    if c = '\"' then tok_alert := ~tok_alert end
+		    if ~string$empty(tok) then
+		       output_line := output_line || subst(tok)
+		       tok := ""
+		       end
+		    output_line := output_line || string$c2s(c)
+	       end
+	    end
+	% handle last token...
+	if ~string$empty(tok) then output_line := output_line || subst(tok) end
+	%stream$putl(tyo, output_line)
+	if output_line = line then return(output_line)
+	   else return (expand_alias_asst(output_line)) resignal too_many end
+	end expand_alias_asst
+
+    subst = proc(tok: string) returns (string)
+       %stream$putl(tyo, tok)
+       for each_al: alrec in rep$elements(alias_list) do
+	   %stream$putl(tyo, each_al.nm)
+	   if each_al.nm = tok then
+	      return(each_al.value)
+	      end
+	   end
+	return(tok)
+	end subst
+
+    elements = iter() yields (string)
+	for each_al: alrec in rep$elements(alias_list) do
+	    yield(each_al.nm || " " || each_al.value)
+	    end
+	end elements
+
+    end alias
+
+dbg_env = cluster is load, dump
+
+    rep = null
+    own dir: string := ""
+    own bkptfn: file_name
+    own init: bool := false
+    own tyo: stream
+    own pst_tyo: pstream
+
+    setup = proc()
+	begin
+	    pgm_name: string := _get_xjname()
+% 1/6/94 dcurtis: reworked the following code to extend file_names
+%	properly: a.out, etc.
+	    bkptfn := extend_file_name(file_name$parse(pgm_name), "bkpts")
+	    end
+	init := true
+	end setup
+
+    load = proc(outst: stream, ptyo: pstream)
+	if ~init then setup() end
+	tyo := outst
+        pst_tyo := ptyo
+	if ~file_exists(bkptfn) 
+	   then
+		% stream$putl(tyo, "breakpoints file not found")
+		return
+	   end
+	inst: stream := stream$open(bkptfn, "read")
+	while true do
+	    l: string := stream$getl(inst)
+	    args: as := parse_line(l)
+	    if args[1] = "L"
+	       then
+		    if as$size(args) ~= 3 then
+		       stream$putl(tyo, "bad format breakpoints file 1")
+		       exit done
+		       end
+		    ctl_pts$bp_add(args[2], "l", int$parse(args[3]))
+		       except when bad_format:
+				   stream$putl(tyo, "bad format integer in breakpoint file")
+				   exit done
+			      when not_found:
+				   stream$putl(tyo, "breakpoint " || args[2] ||
+						    " not found, continuing")
+			      end
+	     elseif args[1] = "F"
+	       then
+		    if as$size(args) ~= 2 then
+		       stream$putl(tyo, "bad format breakpoints file 2")
+		       exit done
+		       end
+		    ctl_pts$bp_add(args[2], "f", 0)
+		       except when not_found:
+				   stream$putl(tyo, "breakpoint " || args[2] ||
+						    " not found, continuing")
+			      end
+	     elseif args[1] = "S"
+	       then
+		    if as$size(args) ~= 2 then
+		       stream$putl(tyo, "bad format breakpoints file 3")
+		       exit done
+		       end
+		    ctl_pts$bp_add(args[2], "s", 0)
+		       except when not_found:
+				   stream$putl(tyo, "breakpoint " || args[2] ||
+						    " not found, continuing")
+			      end
+	     elseif args[1] = "T"
+	       then
+		    if as$size(args) ~= 2 then
+		       stream$putl(tyo, "bad format breakpoints file 4")
+		       exit done
+		       end
+		    ctl_pts$sig_add(args[2])
+		       except when not_found:
+				   stream$putl(tyo, "breakpoint " || args[2] ||
+						    " not found, continuing")
+			      end
+	     elseif args[1] = "A"
+	       then
+		    if as$size(args) ~>= 3 then
+		       stream$putl(tyo, "bad format breakpoints file 5")
+		       exit done
+		       end
+		    as$reml(args) as$set_low(args, 1)
+		    alias$add_alias(string$rest(l, 2), args)
+	     elseif args[1] = "P"
+	       then
+		    if as$size(args) ~= 3 then
+		       stream$putl(tyo, "bad format breakpoints file 6")
+		       exit done
+		       end
+		    pstream$set_max_width(pst_tyo, int$parse(args[2]))
+	            pstream$set_max_depth(pst_tyo, int$parse(args[3]))
+	     else
+		  stream$putl(tyo, "bad format breakpoints file 4")
+		  exit done
+	     end
+	    end
+	   except when done:
+		  when end_of_file:
+		       stream$close(inst)
+			  except others: end
+		       return
+		  others (why: string):
+		       stream$putl(tyo, "breakpoints file loading failed: " || why)
+		       stream$close(inst)
+			  except others: end
+		       return
+		  end
+	end load
+
+    dump = proc()
+	if ~init then setup() end
+	outst_exists: bool := false
+	outst: stream
+	begin
+	    if file_exists(bkptfn) then delete_file(bkptfn) end
+	    outst := stream$open(bkptfn, "write")
+	    outst_exists := true
+	    for bkpt: string in ctl_pts$sbp_elements() do
+		stream$putl(outst, "S " || bkpt)
+		end
+	    for bkpt: string in ctl_pts$fbp_elements() do
+		stream$putl(outst, "F " || bkpt)
+		end
+	    for bkpt: string in ctl_pts$lbp_elements() do
+		stream$putl(outst, "L " || bkpt)
+		end
+	    for bkpt: string in ctl_pts$sig_elements() do
+		stream$putl(outst, "T " || bkpt)
+		end
+	    for al: string in alias$elements() do
+		stream$putl(outst, "A " || al)
+		end
+	    stream$putl(outst, "P " || int$unparse(pstream$get_max_width(pst_tyo))
+				 || " " || int$unparse(pstream$get_max_depth(pst_tyo)))
+	    stream$close(outst)
+	    end
+	   except others (errstr: string):
+		       stream$putl(tyo, "environment dump failed: " || errstr)
+		       if outst_exists then stream$close(outst) end
+			  except others: end
+		  end
+	end dump
+
+    end dbg_env
+
+%	    index: int :=  string$indexs(mod, l)
+%	    if index = 0 then i := i + 1 continue end
+%	    index2: int := string$indexc('=', l)
+%	    if index2 < index + sz then i := i + 1 continue end
+%	    index3: int := string$indexs("proc", l)
+%	    if index3 < index2 then i := i + 1 continue end
+%

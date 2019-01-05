@@ -1,0 +1,49 @@
+2/14/95 dcurtis:
+	1) driver/driver.c: mods to work with linux (linking) (Montwill)
+	2) driver/Makefile.linux: minor dependency improvements
+	3) example,example-debug/factorial.clu: 
+		let negative numbers cause failure
+	4) example,example-debug/Makefile.linux: changed to use PCLU
+	5) example,example-debug/Makefile.linux.pclu:
+		(formerly Makefile.linux) (uses pclu, not PCLU)
+
+8/26/2016 dcurtis
+
+Updated the distribution to glibc on 64-bit architectures.
+cmp/
+  ccopt.cmd: added -I~CLU/code/gc/include
+  stable.c: removed extern errcode unparse();
+  syntax.c:
+code/debug/libinfo.h: deleted unused, but conflicting `extern errcode sleep();'
+code/libasm/Opt/
+  _set_alarm.c: renamed alarm() to clu_alarm()
+  _signal.c: updated definition of gcflag
+  _wordvec.c: modified for 64-bit architecture
+  link_file.c: changed 'link(oname, nname)' to 'link(oname.ref, nname.ref)'
+  pause.c: changed return type of pause() from errcode to int
+  sleep.c: changed 'errcode sleep(secs)' to 'unsigned int sleep(isecs)'
+  symlink_file.c: changed 'symlink(oname, nname)' to 'symlink(oname.ref, nname.ref)'
+  many files: replaced 'extern int errno;' by '#include <errno.h>'
+  many files: replaced '#endif lint' by '#endif'
+code/gc: modified to use gc-7.2 release
+code/include/pclu_sys.h: modified wrt gc-7.2
+code/libclu: added gc_dump.clu
+code/sysasm/Opt/
+  array.c: removed several (odd? obsolete?)  error checks
+  util.c: minor? changes to definition of errcmp
+
+11/7-29/2016 sgarland
+
+updated all makefiles
+removed all Makefile.alpha, Makefile.mips
+updated CHANGES, README, howto.install
+replaced additional occurrences of '#endif lint' by '#endif'
+modified code/libasm/Opt/util.c to use strerror, not deprecated sys_errlist
+updated doc/Makefile to generate .pdf instead of .ps
+updated exe/plink
+  removed -lbsd from loader flags, added -lgc, -lpthread
+  made optimized code the default
+updated documentation
+changed logging code in gc_read.clu, gcd_tab.clu in lib/clu
+changed definition of CLUREFSZ from 8 back to 4 in lib/gcd.equ
+commented out failing check for "insufficient room" in cludent/_buffered_read.clu

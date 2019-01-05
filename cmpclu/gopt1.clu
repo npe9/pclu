@@ -1,0 +1,1162 @@
+
+%  Copyright    Massachusetts Institute of Technology     1990,1991
+
+%
+%	Procedures to generate simpler invocations
+%
+
+% returns true if exp can be invoked quickly
+%	  false if exp needs full blown expansion
+
+% changed op/cluster test: must use long form in case of own variables
+%		even if there are no where clauses
+%	exception made for array & sequence where there is no where clause
+
+g_qinv_test = proc(exp:expr) returns (bool)
+    ty: typeabs
+    tagcase exp.abs
+       tag apply (ct: clutype):
+	   if exprlist$size(ct.parms) = 0 cor ct.gen.common = "_cvt"
+	      %
+	      % cannot find the where clauses for apply's !!!
+	      %
+	      then
+		   %logit("simple: " || ct.gen.common)
+		   return(true)
+ 	      else
+		   % expr_print(exp, 22)
+		   return(false)
+	      end
+       tag op (cop: clusterop):
+	   if parm$member(cop.type_)
+	      then return (false) end
+	   ty := cop.type_.abs
+	   if typeabs$is_cluster_(ty) then
+	      ct: clutype := typeabs$value_cluster_(ty)
+	      gen: DU := ct.gen
+	      if exprlist$size(cop.parms) = 0 cand exprlist$size(ct.parms) = 0
+		 then return (true) end
+	      if (gen.common = "array" cor gen.common = "sequence" 
+		    cor gen.common = "_vec")
+		 then
+		      if cop.name = "debug_print" then return (false) end
+		      if ~parmd_op(gen, cop.name) then return (true) end
+		 end
+	      return(false)
+	    elseif typeabs$is_select(ty)
+	      then
+		   if g_qselop(cop.name) then
+		      %  logit("simple: " || typeabs$value_select(ty).gen.common || " " || cop.name )
+		      return(true)
+		      end
+		   xt: seltype := typeabs$value_select(ty)
+		   gen: DU := xt.gen
+		   flist: fieldspeclist := xt.parms
+		   if xt.gen.common = "oneof" cand cop.name = "equal"
+			cand all_field_types_null(flist)
+		      then return (true) end
+		   if xt.gen.common = "record" cand cop.name = "equal"
+		      then return (true) end
+	    else
+		 %  logit("simple but not cluster:")
+		 %  t: typespec := cop.type_
+		 %  typespec_print(t)
+	         return(false)
+	    end
+       others:
+	   return(false)
+       end %   tag
+    return (false)
+    end g_qinv_test
+
+g_qinv = proc(e: g_env, exp:expr, args: exprlist, results: exprlist)
+    if ~g_qinv_test(exp) then 
+       signal failure("cannot do quick invocation")
+       end
+    if g_qapply(e, exp, args, results) then return end
+    if g_qop(e, exp, args, results) then return end
+    if g_qsel(e, exp, args, results) then return end
+    g_err(e)
+    g_env$puts(e, " = ")
+    g_expr2(e, exp)
+    g_env$puts(e, "(")
+    first: bool := true
+    for each_arg: expr in exprlist$elements(args) do
+	if ~first then g_env$puts(e, ", ") else first := false end
+	g_expr_arg(e, each_arg)
+	end % for
+    for each_res: expr in exprlist$elements(results) do
+	if ~first then g_env$puts(e, ", ") else first := false end
+	g_env$puts(e, "&")
+	g_expr_arg(e, each_res)
+	end % for
+    g_env$puts(e, ");")
+    g_env$newline(e)
+    g_env$puts(e, "if (")
+    g_err(e)
+    g_env$putl(e, " != ERR_ok) goto "||
+		  ex$get_current_ex_label()||";")
+    return
+    end g_qinv
+
+g_qiinv = proc(e: g_env, exp:expr, args: exprlist, ibname: name)
+    if ~g_qinv_test(exp) then 
+       signal failure("cannot do quick invocation")
+       end
+    %    if g_qapply(e, exp, args, results) then return end   % ? appropriate
+    %    if g_qsel(e, exp, args, results) then return end	 % ? appropriate
+    g_err(e)
+    g_env$puts(e, " = ")
+    g_expr2(e, exp)
+    g_env$puts(e, "(")
+    for each_arg: expr in exprlist$elements(args) do
+	g_expr_arg(e, each_arg)
+	g_env$puts(e, ", ")
+	end % for
+    if ib$bodies()
+       then
+	    g_env$putl(e, ibname || ", locals, iecode);")
+       else
+	    g_env$putl(e, ibname || ", &locals, &locals.ecode2);")
+       end
+    g_env$newline(e)
+    return
+    end g_qiinv
+
+g_inline_iter_test = proc(exp:expr) returns (bool)
+
+    ans: bool, junk1, junk2: string := g_inline_iter_test_and_info(exp)
+    return (ans)
+    end g_inline_iter_test
+
+g_inline_iter_test_and_info = proc(exp:expr) returns (bool, string, string)
+
+%%%
+%%%  Inlining of iterators is suppressed unless user has selected opt time
+%%%		1/21/93 dwc
+%%%
+
+    if g_env$min_inline() then return (false, "", "") end
+    ty: typeabs
+    tagcase exp.abs
+       tag op (cop: clusterop):
+	   ty := cop.type_.abs
+	   if typeabs$is_cluster_(ty) then
+	      ct: clutype := typeabs$value_cluster_(ty)
+	      gen: DU := ct.gen
+	      if (gen.common = "array" cand cop.name = "indexes")
+		   cor (gen.common = "array" cand cop.name = "elements")
+		   cor (gen.common = "sequence" cand cop.name = "indexes")
+		   cor (gen.common = "sequence" cand cop.name = "elements")
+		   cor (gen.common = "int" cand cop.name = "from_to")
+		   cor (gen.common = "int" cand cop.name = "from_to_by")
+		 then
+		      return (true, gen.common, cop.name) end
+	      end
+       others:
+	   return(false, "", "")
+       end %   tag
+    return (false, "", "")
+    end g_inline_iter_test_and_info
+
+g_inline_iter = proc(e:g_env, fstmt: forstmt) returns (bool)
+
+    maybe_idn = oneof[none:null, idn: idn]
+
+    yes: bool, typ, op: string := 
+	g_inline_iter_test_and_info(fstmt.call.apply)
+    %if yes then logit(" iter inlined ") else logit (" iter not inlined ") end
+    if ~yes then return (false) end
+    loop_context$enter_inline_for()
+    
+    g_env$putl(e, "{")
+
+    % declare iteration variable, temps for args to iterator
+    for each_arg: expr in exprlist$elements(fstmt.call.args) do
+	g_expr0(e, each_arg)
+	end % for
+    tv$decl_next(e, e.comp.int_type)	% iter_var
+    tv$decl_next(e, e.comp.int_type)    % limit_var
+    if op = "from_to_by" cor op = "elements" then
+       tv$decl_next(e, e.comp.int_type)    % step_var/seqn_var
+       end
+
+    % compute intermediate results for args
+    g_env$indent(e)
+    el: exprlist := exprlist$new()
+    for each_arg: expr in exprlist$elements(fstmt.call.args) do
+	new_el: exprlist := g_expr1(e, each_arg)
+	el := seq_extend[expr](el, new_el)
+	end % for
+    iter_var: expr := tv$idn_next(e.comp.int_type)
+    limit_var: expr
+    step_var: expr
+    obj_var: expr
+    limit_var := tv$idn_next(e.comp.int_type)
+    if op = "from_to_by" then
+       step_var := tv$idn_next(e.comp.int_type)
+       end
+    if op = "elements" then
+       obj_var := tv$idn_next(e.comp.int_type)
+       end
+
+    if typ = "int" cand (op = "from_to" cor op = "from_to_by") then
+	%logit(99, "int iterator")
+       limit_idn: idn := exprabs$value_idn(limit_var.abs)
+       g_c_assn(e, limit_idn, el[2])
+       if op = "from_to_by" then
+	  step_idn: idn := exprabs$value_idn(step_var.abs)
+	  g_c_assn(e, step_idn, el[3])
+	  end
+       g_env$puts(e, "for (")
+       g_expr2(e, iter_var)
+       g_env$puts(e, " = ")
+       g_expr2(e, el[1])
+       g_env$puts(e, "; ")
+
+       if op = "from_to"
+	  then
+	       g_expr2(e, iter_var)
+	       g_env$puts(e, " <= ")
+	       g_expr2(e, limit_var)
+	       g_env$puts(e, "; ")
+	  else
+	       g_env$puts(e, "((")
+	       g_expr2(e, step_var)
+	       g_env$puts(e, " == 0) || ((")
+	       g_expr2(e, step_var)
+	       g_env$puts(e, " > 0)? (")
+	       g_expr2(e, iter_var)
+	       g_env$puts(e, " <= ")
+	       g_expr2(e, limit_var)
+	       g_env$puts(e, ") : (")
+	       g_expr2(e, iter_var)
+	       g_env$puts(e, " >= ")
+	       g_expr2(e, limit_var)
+	       g_env$puts(e, "))); ")
+	  end
+
+       if op = "from_to"
+	  then
+	       g_expr2(e, iter_var)
+	       g_env$putl(e, "++) {")
+	  else
+	       g_expr2(e, iter_var)
+	       g_env$puts(e, " += ")
+	       g_expr2(e, step_var)
+	       g_env$putl(e, ") {")
+	  end
+
+       g_env$indent(e)
+       tagcase fstmt.vars
+	  tag old(idns: idnlist):
+	      if idnlist$size(idns) ~= 0 then
+		 g_idn(e, idns[1])
+		 g_env$puts(e, " = ")
+		 g_expr2(e, iter_var)
+		 g_env$putl(e, ";")
+		 end
+	  tag new(d:decllist):
+	      if decllist$size(d) ~= 0 cand idnlist$size(d[1].idns) ~= 0 then
+		 g_idn(e, d[1].idns[1])
+		 g_env$puts(e, " = ")
+		 g_expr2(e, iter_var)
+		 g_env$putl(e, ";")
+		 end
+	  end % tag
+       
+     elseif (typ = "sequence" cor typ = "array")
+	      cand (op = "indexes" cor op = "elements") then
+	%logit(99, "seq/array iterator")
+       elidn: idn := exprabs$value_idn(el[1].abs)
+       g_expr2(e, limit_var)
+       g_env$puts(e, " = ")
+       g_idn_plain(e, elidn)
+       if typ = "sequence" 
+	  then
+	       g_env$putl(e, ".vec->size; ")
+	  else
+	       g_env$putl(e, ".array->ext_high; ")
+	  end
+       obj_idn: idn
+       if op = "elements" then
+	  g_expr_plain(e, obj_var)
+	  g_env$puts(e, " = ")
+	  g_idn_plain(e, elidn)
+          g_env$putl(e, ";")
+	  obj_idn := exprabs$value_idn(obj_var.abs)
+	  end
+       g_env$puts(e, "for (")
+       g_expr2(e, iter_var)
+       if typ = "sequence"
+	  then
+	       g_env$puts(e, " = 1; ")
+	  else
+	       g_env$puts(e, " = ")
+	       g_idn_plain(e, elidn)
+	       g_env$puts(e, ".array->ext_low; ")
+	  end
+
+       g_expr2(e, iter_var)
+       g_env$puts(e, " <= ")
+       g_expr2(e, limit_var)
+       g_env$puts(e, "; ")
+       g_expr2(e, iter_var)
+       g_env$putl(e, "++) {")
+
+       g_env$indent(e)
+       if typ = "array" cand op = "elements" then
+	  g_env$puts(e, "if (")
+	  g_expr2(e, iter_var)
+	  g_env$puts(e, " > ")
+	  g_idn_plain(e, obj_idn)
+	  g_env$puts(e, ".array->ext_high || ")
+	  g_expr2(e, iter_var)
+	  g_env$puts(e, " < ")
+	  g_idn_plain(e, obj_idn)
+	  g_env$putl(e, ".array->ext_low) {")
+	  g_env$indent(e)
+	  g_err(e)
+	  g_env$putl(e, " = ERR_failure;")
+	  g_env$putl(e, "elist[0].str = array_bounds_exception_STRING;")
+	  g_env$putl(e, "goto "||
+			ex$get_current_ex_label()||";}")
+	  g_env$outdent(e)
+	  end
+       maybe_varidn: maybe_idn := maybe_idn$make_none(nil)
+       tagcase fstmt.vars
+	  tag old(idns: idnlist):
+	      if idnlist$size(idns) ~= 0 then
+		 maybe_varidn := maybe_idn$make_idn(idns[1])
+		 end
+	  tag new(d:decllist):
+	      if decllist$size(d) ~= 0 cand idnlist$size(d[1].idns) ~= 0 then
+		 maybe_varidn := maybe_idn$make_idn(d[1].idns[1])
+		 end
+	  end % tag
+       tagcase maybe_varidn
+	  tag idn (varidn: idn):
+	      g_idn(e, varidn)
+	      g_env$puts(e, " = ")
+	      if op = "indexes"
+		 then
+		      g_expr2(e, iter_var)
+		 else % op = elements
+		      if typ = "sequence"
+			 then
+			      g_idn_plain(e, obj_idn)
+			      g_env$puts(e, ".vec->data[")
+			      g_expr2(e, iter_var)
+			      g_env$puts(e, " - 1]")
+			 else
+			      g_idn_plain(e, obj_idn)
+			      g_env$puts(e, ".array->store->data[")
+			      g_expr2(e, iter_var)
+			      g_env$puts(e, " - ")
+			      g_idn_plain(e, obj_idn)
+			      g_env$puts(e, ".array->ext_low")
+			      g_env$puts(e, " + ")
+			      g_idn_plain(e, obj_idn)
+			      g_env$puts(e, ".array->int_low")
+			      g_env$puts(e, "]")
+			 end
+		 end
+	      g_env$putl(e, ";")
+	  others:
+	  end % tag
+       
+     else
+	  logit(500, "shouldn't get here: g_inline_iter: " || typ || sep || op)
+     end
+
+    for s: stmt in stmtlist$elements(fstmt.body.stmts) do
+	g_stmt(e, s)
+	end
+	
+    g_env$outdent(e)
+    g_env$putl(e, "}")
+    g_env$outdent(e)
+    g_env$putl(e, "}")
+    n: int := loop_context$get_current_inline_for_count()
+    g_env$putl(e, "end_inline_for_" || int$unparse(n) || ":;")
+    g_env$ensure_newline(e)
+    loop_context$leave()
+    return (true)
+
+    end g_inline_iter
+
+g_qselop = proc(nm: name) returns (bool)
+    loc_of_sep : int := string$indexc('_', nm)
+    prefix: string := string$substr(nm, 1, loc_of_sep)
+    if prefix = "get_" 
+	 cor prefix = "set_" 
+	 cor prefix = "make_" 
+	 cor prefix = "is_" 
+	 cor prefix = "change_" 
+	 cor prefix = "value_"
+	 cor prefix = "replace_"
+       then
+	    return(true)
+       else
+	    return(false)
+       end
+    end g_qselop
+
+g_qapply = proc(e: g_env, exp: expr, args: exprlist, results: exprlist)
+	     returns(bool)
+    if ~exprabs$is_apply(exp.abs) then return (false) end
+    ct: clutype := exprabs$value_apply(exp.abs)
+    if ct.gen.common = "_cvt" 
+       then
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = ")
+	    g_expr2(e, exprlist$bottom(args))
+	    g_env$putl(e, ";")
+	    return (true)
+       else return (false) 
+       end
+    end g_qapply
+
+g_qop = proc(e: g_env, exp: expr, args: exprlist, results: exprlist)
+	  returns(bool)
+    if ~exprabs$is_op(exp.abs) then return (false) end
+    cop: clusterop := exprabs$value_op(exp.abs)
+    gen: DU
+    flist: fieldspeclist
+    tagcase cop.type_.abs
+       tag cluster_,type_ (ct: clutype):
+	   gen := ct.gen
+       tag select (xt: seltype):
+	   gen := xt.gen
+	   flist := xt.parms
+       others: return (false)
+       end
+    op_name: string := cop.name
+    type_name: string := gen.common
+    if type_name = "bool" cand op_name = "not"
+       then
+	%logit(99, "bool not")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = ")
+	    g_expr2(e, exprlist$bottom(args))
+	    g_env$putl(e, " ^ 1;")
+	    return (true)
+     elseif type_name = "_obj" cand op_name = "equal"
+       then
+	%logit(99, "_obj equal")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = (")
+	    g_expr2(e, args[1])
+	    g_env$puts(e, " == ")
+	    g_expr2(e, args[2])
+	    g_env$putl(e, ")? true : false;")
+	    return (true)
+     elseif type_name = "oneof" cand op_name = "equal"
+       then
+	%logit(99, "oneof equal")
+	    if all_field_types_null(flist) 
+	       then
+		    % logit("all_field_types_null: true")
+		    o1, o2:idn
+		    tagcase args[1].abs
+		       tag idn(i:idn):
+			   o1 := i
+		       others:
+			   % logit("arg1: not idn")
+			   return (false)
+		       end
+		    tagcase args[2].abs
+		       tag idn(i:idn):
+			   o2 := i
+		       others:
+			   % logit("arg2: not idn")
+			   return (false)
+		       end
+		    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+		    g_idn_plain(e, residn)
+		    g_env$puts(e, ".num = (")
+		    g_idn_plain(e, o1)
+		    g_env$puts(e, ".cell->tag")
+		    g_env$puts(e, " == ")
+		    g_idn_plain(e, o2)
+		    g_env$puts(e, ".cell->tag")
+		    g_env$putl(e, ")? true : false;")
+		    return (true)
+	       else
+		    % logit("all_field_types_null: false")
+		    return (false)
+	       end
+     elseif type_name = "char" cand op_name = "equal"
+       then
+	%logit(99, "char equal")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = (")
+	    % 6/18/90: revamped again
+	    a1, a2: idn
+	    tagcase args[1].abs
+	       tag idn(i:idn):
+		   g_idn_plain(e, i)   % 5/29/90 from g_expr2
+		   g_env$puts(e, ".ch")
+	       tag char_(c: char):
+		   g_const_expr(e, args[1])
+	       others:
+		   % logit("gopt1: char$equal 1")
+		   expr_print(args[1], 82)
+	       end
+	    g_env$puts(e, " == ")
+	    tagcase args[2].abs
+	       tag idn(i:idn):
+		   g_idn_plain(e, i)   % 5/29/90 from g_expr2
+		   g_env$puts(e, ".ch")
+	       tag char_(c: char):
+		   g_const_expr(e, args[2])
+	       others:
+		   % logit("gopt1: char$equal 2")
+		   expr_print(args[2], 83)
+	       end
+	    g_env$putl(e, ")? true : false;")
+	    return (true)
+     elseif type_name = "bool" cand op_name = "equal"
+       then
+	%logit(99, "bool equal")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = (")
+	    % 6/18/90: revamped again
+	    a1, a2: idn
+	    tagcase args[1].abs
+	       tag idn(i:idn):
+		   g_idn_plain(e, i)   % 5/29/90 from g_expr2
+		   g_env$puts(e, ".tf")
+	       tag bool_(b: bool):
+		   g_const_expr(e, args[1])
+	       others:
+		   % logit("gopt1: bool$equal 1")
+		   expr_print(args[1], 82)
+	       end
+	    g_env$puts(e, " == ")
+	    tagcase args[2].abs
+	       tag idn(i:idn):
+		   g_idn_plain(e, i)   % 5/29/90 from g_expr2
+		   g_env$puts(e, ".tf")
+	       tag bool_(b: bool):
+		   g_const_expr(e, args[2])
+	       others:
+		   % logit("gopt1: bool$equal 2")
+		   expr_print(args[2], 83)
+	       end
+	    g_env$putl(e, ")? true : false;")
+	    return (true)
+     elseif type_name = "record" cand op_name = "equal"
+       then
+	%logit(99, "record equal")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = (")
+	    g_expr2(e, args[1])
+	    g_env$puts(e, " == ")
+	    g_expr2(e, args[2])
+	    g_env$putl(e, ")? true : false;")
+	    return (true)
+     elseif type_name = "int" cand op_name = "equal"
+       then
+	%logit(99, "int equal")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = (")
+	    g_expr2(e, args[1])
+	    g_env$puts(e, " == ")
+	    g_expr2(e, args[2])
+	    g_env$putl(e, ")? true : false;")
+	    return (true)
+     elseif type_name = "int" cand op_name = "lt"
+       then
+	%logit(99, "int lt")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = (")
+	    g_expr2(e, args[1])
+	    g_env$puts(e, " < ")
+	    g_expr2(e, args[2])
+	    g_env$putl(e, ")? true : false;")
+	    return (true)
+     elseif type_name = "int" cand op_name = "le"
+       then
+	%logit(99, "int le")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = (")
+	    g_expr2(e, args[1])
+	    g_env$puts(e, " <= ")
+	    g_expr2(e, args[2])
+	    g_env$putl(e, ")? true : false;")
+	    return (true)
+     elseif type_name = "int" cand op_name = "ge"
+       then
+	%logit(99, "int ge")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = (")
+	    g_expr2(e, args[1])
+	    g_env$puts(e, " >= ")
+	    g_expr2(e, args[2])
+	    g_env$putl(e, ")? true : false;")
+	    return (true)
+     elseif type_name = "int" cand op_name = "gt"
+       then
+	%logit(99, "int gt")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = (")
+	    g_expr2(e, args[1])
+	    g_env$puts(e, " > ")
+	    g_expr2(e, args[2])
+	    g_env$putl(e, ")? true : false;")
+	    return (true)
+     elseif type_name = "char" cand op_name = "c2i"
+       then
+	%logit(99, "char c2i")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = (long)(")
+	    argidn: idn := exprabs$value_idn(args[1].abs)
+	       except when wrong_tag:
+			   g_expr2(e, args[1])
+			   g_env$putl(e, ";")
+			   return (true)
+		      end
+	    g_idn_plain(e, argidn)
+	    g_env$putl(e, ".ch & 0xff);")	% 1/9/91 mips fix
+	    return (true)
+     elseif type_name = "array" cand op_name = "low"
+       then
+	%logit(99, "array low")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    argidn: idn := exprabs$value_idn(exprlist$bottom(args).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = ")
+	    g_idn_plain(e, argidn)
+	    g_env$putl(e, ".array->ext_low;")
+	    return (true)
+     elseif type_name = "array" cand op_name = "high"
+       then
+	%logit(99, "array high")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    argidn: idn := exprabs$value_idn(exprlist$bottom(args).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = ")
+	    g_idn_plain(e, argidn)
+	    g_env$putl(e, ".array->ext_high;")
+	    return (true)
+     elseif type_name = "array" cand op_name = "empty"
+       then
+	%logit(99, "array empty")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    argidn: idn := exprabs$value_idn(exprlist$bottom(args).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = (")
+	    g_idn_plain(e, argidn)
+	    g_env$putl(e, ".array->ext_size == 0)? true : false;")
+	    return (true)
+     elseif type_name = "array" cand op_name = "size"
+       then
+	%logit(99, "array size")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    argidn: idn := exprabs$value_idn(exprlist$bottom(args).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = ")
+	    g_idn_plain(e, argidn)
+	    g_env$putl(e, ".array->ext_size;")
+	    return (true)
+     elseif type_name = "sequence" cand op_name = "size"
+       then
+	%logit(99, "sequence size")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    argidn: idn := exprabs$value_idn(exprlist$bottom(args).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = ")
+	    g_idn_plain(e, argidn)
+	    g_env$putl(e, ".vec->size;")
+	    return (true)
+%%%
+%%%  Inlining after this point is suppressed unless user has specified opt time
+%%%	i.e. the following inlining significantly expands program size
+%%%	and is turned off during debugging (dwc 1/21/93)
+%%%
+
+     elseif g_env$min_inline() then return (false)
+     elseif type_name = "string" cand op_name = "equal"
+       then
+	%logit(99, "string equal")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    arg1: expr := args[1]
+	    arg2: expr := args[2]
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = ((")
+	    g_expr_plain(e, arg1)
+	    g_env$puts(e, ".str->size != ")
+	    g_expr_plain(e, arg2)
+	    g_env$putl(e, ".str->size)? false :")
+	    g_env$indent(e)
+	    g_env$puts(e, "!(bcmp(")
+	    g_expr_plain(e, arg1)
+	    g_env$puts(e, ".str->data, ")
+	    g_expr_plain(e, arg2)
+	    g_env$puts(e, ".str->data, ")
+	    g_expr_plain(e, arg1)
+	    g_env$putl(e, ".str->size)));")
+	    g_env$outdent(e)
+	    return (true)
+     elseif type_name = "int" cand op_name = "add"
+       then % new 8/22/90
+	%logit(99, "int add")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = ")
+	    g_expr2(e, args[1])
+	    g_env$puts(e, " + ")
+	    g_expr2(e, args[2])
+	    g_env$putl(e, ";")
+	    g_env$puts(e, " if ((")
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num > 0 && ")
+	    g_expr2(e, args[1])
+	    g_env$puts(e, " < 0 && ")
+	    g_expr2(e, args[2])
+	    g_env$putl(e, " < 0) || ")
+	    g_env$puts(e, "     (")
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num < 0 && ")
+	    g_expr2(e, args[1])
+	    g_env$puts(e, " > 0 && ")
+	    g_expr2(e, args[2])
+	    g_env$putl(e, " > 0)) {")
+	    g_env$indent(e)
+	    g_err(e)
+	    g_env$putl(e, " = ERR_overflow;")   %  1/16/91 formerly bounds
+	    g_env$putl(e, "goto " || ex$get_current_ex_label()||";}")
+	    g_env$outdent(e)
+	    return (true)
+     elseif type_name = "int" cand op_name = "sub"
+       then % new 8/22/90
+	%logit(99, "int sub")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = ")
+	    g_expr2(e, args[1])
+	    g_env$puts(e, " - ")
+	    g_expr2(e, args[2])
+	    g_env$putl(e, ";")
+	    g_env$puts(e, " if ((")
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num >= 0 && ")
+	    g_expr2(e, args[1])
+	    g_env$puts(e, " < 0 && (-")
+	    g_expr2(e, args[2])
+	    g_env$putl(e, ") < 0) || ")
+	    g_env$puts(e, "     (")
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num <= 0 && ")
+	    g_expr2(e, args[1])
+	    g_env$puts(e, " > 0 && (-")
+	    g_expr2(e, args[2])
+	    g_env$putl(e, ") > 0)) {")
+	    g_env$indent(e)
+	    g_err(e)
+	    g_env$putl(e, " = ERR_overflow;")   % 1/16/91 formerly bounds
+            g_env$putl(e, "goto " || ex$get_current_ex_label()||";}")
+	    g_env$outdent(e)
+	    return (true)
+     elseif op_name = "addh" cand type_name = "array"
+       then
+	%logit(99, "array addh")
+	    arg1: expr := args[1]
+	    arg2: expr := args[2]
+	    g_env$putl(e, "{")
+	    g_env$puts(e, "if ((")
+	    g_expr_plain(e, arg1)
+	    g_env$puts(e, ".array->int_low + ")
+	    g_expr_plain(e, arg1)
+	    g_env$puts(e, ".array->ext_size + 1) < ")
+	    g_expr_plain(e, arg1)
+	    g_env$putl(e, ".array->int_size) {")
+	    g_env$indent(e)
+	    g_expr_plain(e, arg1)
+	    g_env$puts(e, ".array->store->data[")
+	    g_expr_plain(e, arg1)
+	    g_env$puts(e, ".array->int_low + ")
+	    g_expr_plain(e, arg1)
+	    g_env$puts(e, ".array->ext_size] = ")
+	    g_expr2a(e, arg2)
+	    g_env$putl(e, ";")
+	    g_expr_plain(e, arg1)
+	    g_env$puts(e, ".array->ext_size++; ")
+	    g_expr_plain(e, arg1)
+	    g_env$putl(e, ".array->ext_high++;}")
+	    g_env$outdent(e)
+	    g_env$putl(e, "else {")
+	    g_env$indent(e)
+	    g_err(e)
+	    g_env$puts(e, " = array" || sep || "addh(")
+	    g_expr_arg(e, arg1)
+	    g_env$puts(e, ", ")
+	    g_expr_arg(e, arg2)
+	    g_env$putl(e, ");")
+	    g_env$puts(e, "if (")
+	    g_err(e)
+	    g_env$putl(e, " != ERR_ok) goto " || 
+			  ex$get_current_ex_label() || ";}")
+	    g_env$outdent(e)
+	    g_env$putl(e, "}")
+	    return(true)
+     elseif op_name = "store" cand type_name = "array"
+       then
+	%logit(99, "array store")
+	    arg1: expr := args[1]
+	    arg2: expr := args[2]
+	    arg3: expr := args[3]
+
+	    g_env$putl(e, "{")
+	    g_env$puts(e, "if (")
+	    g_expr2(e, arg2)
+	    g_env$puts(e, " < ")
+	    g_expr_plain(e, arg1)
+	    g_env$puts(e, ".array->ext_low || ")
+	    g_expr2(e, arg2)
+	    g_env$puts(e, " > ")
+	    g_expr_plain(e, arg1)
+	    g_env$putl(e, ".array->ext_high) {")
+	    g_env$indent(e)
+	    g_err(e)
+	    g_env$putl(e, " = ERR_bounds;")
+	    g_env$putl(e, "goto " || 
+			  ex$get_current_ex_label() || ";}")
+	    g_env$outdent(e)
+	    g_expr_plain(e, arg1)
+	    g_env$puts(e, ".array->store->data[")
+	    g_expr2(e, arg2)
+	    g_env$puts(e, " + ")
+	    g_expr_plain(e, arg1)
+	    g_env$puts(e, ".array->int_low - ")
+	    g_expr_plain(e, arg1)
+	    g_env$puts(e, ".array->ext_low] = ")
+	    g_expr2a(e, arg3)
+	    g_env$putl(e, ";")
+	    g_env$putl(e, "}")
+	    return(true)
+     elseif type_name = "_wordvec" cand op_name = "fetch"
+       then
+	%logit(99, "_wordvec fetch")
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    arg1idn: idn := exprabs$value_idn(args[1].abs)
+	    %	    g_env$puts(e, "{if (")
+	    %	    g_expr2(e, args[2])
+	    %	    g_env$puts(e, "-1 == (((")
+	    %	    g_expr2(e, args[2])
+	    %	    g_env$putl(e, "-1)>>2) <<2)) {")
+	    %	    g_env$indent(e)
+
+	    g_env$puts(e, "if (")
+	    g_expr2(e, args[2])
+	    g_env$puts(e, " < 1 || (")
+	    g_expr2(e, args[2])
+	    g_env$puts(e, "<<2) > (")
+	    g_idn_plain(e, arg1idn)
+	    g_env$putl(e, ".str->size)) {")
+	    g_env$indent(e)
+	    g_err(e)
+	    g_env$putl(e, " = ERR_bounds;")
+	    g_env$putl(e, "goto " || ex$get_current_ex_label() || ";}")
+	    g_env$outdent(e)
+	    g_idn_plain(e, residn)
+	    g_env$puts(e, ".num = ")
+	    g_idn_plain(e, arg1idn)
+	    g_env$puts(e, ".vec->data[")
+	    g_expr2(e, args[2])
+	    g_env$putl(e, " - 1];")
+
+	    %	    g_env$outdent(e)
+	    %	    g_env$putl(e, "else {")
+	    %	    g_env$indent(e)
+	    %	    g_err(e)
+	    %	    g_env$puts(e, " = _wordvec$fetch(")
+	    %	    g_expr_plain(e, args[1])
+	    %	    g_env$puts(e, ", ")
+	    %	    g_expr_plain(e, args[2])
+	    %	    g_env$puts(e, ", &")
+	    %	    g_idn_plain(e, residn)
+	    %	    g_env$putl(e, ", elist);")
+	    %	    g_env$puts(e, "if (")
+	    %	    g_err(e)
+	    %	    g_env$putl(e, " != ERR_ok) goto " || 
+	    %			  ex$get_current_ex_label() || ";}")
+	    %	    g_env$outdent(e)
+	    %	    g_env$putl(e, "}")
+	    return (true)
+     elseif op_name = "fetch"
+       then
+	%logit(99, "sequence/array/_bytevec fetch")
+	    tail: string
+	    if type_name = "_vec" cor type_name = "sequence" 
+	       then tail := ".vec"
+	     elseif type_name = "_bytevec"
+	       then tail := ".str"
+	     elseif type_name = "array"
+	       then tail := ".array"
+	     else return (false) end
+	    residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+	    arg1idn: idn := exprabs$value_idn(args[1].abs)
+	    g_env$puts(e, "if (")
+	    g_expr2(e, args[2])
+	    if type_name ~= "array"
+	       then
+		    g_env$puts(e, " < 1 || ")
+	       else
+		    g_env$puts(e, " < ")
+		    g_idn_plain(e, arg1idn)
+		    g_env$puts(e, tail || "->ext_low || ")
+	       end
+	    g_expr2(e, args[2])
+	    g_env$puts(e, " > ")
+	    g_idn_plain(e, arg1idn)
+	    if type_name ~= "array"
+	       then
+		    g_env$putl(e, tail || "->size ) {")
+	       else
+		    g_env$putl(e, tail || "->ext_high ) {")
+	       end
+	    g_env$indent(e)
+	    g_err(e)
+	    g_env$putl(e, " = ERR_bounds;")
+	    g_env$putl(e, "goto " || ex$get_current_ex_label() || ";}")
+	    g_env$outdent(e)
+	    g_idn_plain(e, residn)
+	    if type_name = "_bytevec" then
+	       g_env$puts(e, ".ch = ")         % 1/9/91 mips fix
+	       else g_env$puts(e, ".num = ") end
+	    g_idn_plain(e, arg1idn)
+	    if type_name ~= "array"
+	       then
+		    g_env$puts(e, tail || "->data[")
+		    g_expr2(e, args[2])
+		    g_env$putl(e, " - 1];")
+	       else
+		    g_env$puts(e, tail || "->store->data[")
+		    g_expr2(e, args[2])
+		    g_env$puts(e, " - ")
+		    g_idn_plain(e, arg1idn)
+		    g_env$puts(e, tail || "->ext_low + ")
+		    g_idn_plain(e, arg1idn)
+		    g_env$putl(e, tail || "->int_low];")
+	       end
+	    return (true)
+     else return (false)
+     end
+    end g_qop
+
+g_qsel = proc(e: g_env, exp: expr, args: exprlist, results: exprlist) 
+	   returns (bool)
+    if ~exprabs$is_op(exp.abs) then return (false) end
+
+    cop: clusterop := exprabs$value_op(exp.abs)
+    if ~typeabs$is_select(cop.type_.abs) then return (false) end
+
+    if ~g_qselop(cop.name) then return (false) end
+
+    nm: string := cop.name
+    loc_of_sep: int := string$indexc('_', nm)
+    prefix: string := string$substr(nm, 1, loc_of_sep)
+    ta: seltype := typeabs$value_select(cop.type_.abs)
+    op: string, ind: int := field_index(nm, ta.parms)
+
+    if prefix = "get_" then
+	%logit(99, "get_")
+       residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+       g_idn_plain(e, residn)
+       g_env$puts(e, ".num = ")
+       argidn: idn := exprabs$value_idn(exprlist$bottom(args).abs)
+       g_idn_plain(e, argidn)
+       g_env$putl(e, ".vec->data[" || int$unparse(ind-1) || "];")
+       return (true)
+       end
+    
+    if prefix = "set_" then
+	%logit(99, "set_")
+       arg1idn: idn := exprabs$value_idn(args[1].abs)
+       g_idn_plain(e, arg1idn)
+       g_env$puts(e, ".vec->data[" || int$unparse(ind-1) || "]  = ")
+       g_expr2a(e, args[2])
+       g_env$putl(e, ";")
+       return (true)
+       end
+    
+    if prefix = "is_" then
+	%logit(99, "is_")
+       g_env$puts(e, "if (")
+       argidn: idn := exprabs$value_idn(args[1].abs)
+       g_idn_plain(e, argidn)
+       g_env$puts(e, ".cell->tag == " || int$unparse(ind) || ") ")
+       g_expr2(e, exprlist$bottom(results))
+       g_env$puts(e, " = true; else ")
+       g_expr2(e, exprlist$bottom(results))
+       g_env$putl(e, " = false;")
+       return (true)
+       end
+    
+    if prefix = "value_" then
+	%logit(99, "value_")
+       g_env$puts(e, "if (")
+       argidn: idn := exprabs$value_idn(args[1].abs)
+       g_idn_plain(e, argidn)
+       g_env$puts(e, ".cell->tag != " || int$unparse(ind) || ") {")
+       g_err(e)
+       g_env$putl(e, " = ERR_wrong_tag; goto " || ex$get_current_ex_label()||";}")
+       g_expr2a(e, exprlist$bottom(results))
+       %       residn: idn := exprabs$value_idn(exprlist$bottom(results).abs)
+       %      g_idnlit(e, residn)
+       % g_env$puts(e, ".num = ")		AMENDED 5/10/90
+       g_env$puts(e, " = ")		
+       g_idn_plain(e, argidn)
+       g_env$putl(e, ".cell->value;")
+       return (true)
+       end
+
+    if prefix = "make_" then
+	%logit(99, "make_")
+       g_env$puts(e, "CellAlloc(" || int$unparse(ind) ||  ", ")
+       g_expr2a(e, exprlist$bottom(args))
+       g_env$puts(e, ", ")
+       residn: idn := exprabs$value_idn(results[1].abs)
+       g_idn_plain(e, residn)
+       g_env$putl(e, ");")
+       return (true)
+       end
+    
+    return (false)
+    end g_qsel
+
+
+%
+%   see if idn is artificially generated
+%
+%	not a foolproof test
+% 11/9/92: dwc: revised to be foolproof: now temps begin with capital T
+%	check for _ should be superfluous
+%
+is_temp = proc(i: idn) returns (bool)
+    nm: string := i.str
+    if string$size(nm) >= 5 cand 
+       nm[1] = 'T' cand nm[2] = '_'
+       then
+	    return (true)
+       else
+	    return (false)
+       end
+    end is_temp
+
+g_qtagcase = proc(e: g_env, stmt: tagstmt) returns (bool)
+    begin
+	ty: typespec := stmt.obj.typespec
+	if typeabs$is_select(ty.abs) then
+	   sel: seltype := typeabs$value_select(ty.abs)
+	   if sel.gen.common ~= "oneof" cand sel.gen.common ~= "variant"
+	      then return (false) end
+	   else return (false) end
+	g_env$putl(e, "{")
+	g_expr0(e, stmt.obj)
+	el0: exprlist := g_expr1(e, stmt.obj)
+	flist: fieldspeclist := fieldspeclist$new()
+	tagcase ty.abs
+	   tag select (ta: seltype):
+	       flist := ta.parms
+	   others:
+	       logit(501, "tagcase: not select!?")
+	   end
+
+
+	g_env$puts(e, "switch (")
+	tagidn: idn := exprabs$value_idn(el0[1].abs)
+	g_idn_plain(e, tagidn)
+	g_env$putl(e, ".cell->tag) {")
+
+	for t: tagarm in tagarmlist$elements(stmt.arms) do
+	    for nm: name in namelist$elements(t.tags) do
+		junk: string, ind: int := field_index("is_" || nm, flist)
+	        g_env$putl(e, "case " || int$unparse(ind) || ": ")
+		end % for
+	    g_env$indent(e)
+	    g_env$puts(e, " {")
+	    if mdecl$is_decl(t.var)
+	       then
+		    dl: decl :=  mdecl$value_decl(t.var)
+		    tv$decl_next(e, dl.type_)
+		    this_temp: expr := tv$idn_next(dl.type_)
+		    g_expr_plain(e, this_temp)
+		    % g_expr2(e, this_temp)
+		    g_env$puts(e, ".num = ")
+		    objidn: idn := exprabs$value_idn(el0[1].abs)
+		    g_idn_plain(e, objidn)
+		    g_env$putl(e, ".cell->value;")
+		    g_c_assn(e, idnlist$bottom(dl.idns), this_temp)
+		    % g_idn(e, idnlist$bottom(dl.idns))  % maybe more?
+		    % g_env$puts(e, " = ")
+		    % g_expr2(e, this_temp)
+		    % g_env$putl(e, ";")
+
+	       end
+	    g_env$indent(e)
+	    g_env$newline(e)
+	    g_body(e, t.body)
+	    g_env$putl(e, "break;")
+	    g_env$putl(e, "}")
+	    g_env$outdent(e)
+	    g_env$outdent(e)
+	    end
+	if mbody$is_body(stmt.others_)
+	   then g_env$putl(e, "default: {")
+		g_env$indent(e)
+		g_body(e, mbody$value_body(stmt.others_))
+		g_env$outdent(e)
+		g_env$newline(e)
+		g_env$puts(e, "}")
+	   end
+	g_env$ensure_newline(e)
+	g_env$putl(e, "}")
+	g_env$putl(e, "}")
+	end
+       except when bounds: end
+    return (true)
+    end g_qtagcase
+
+g_expr_plain = proc(e:g_env, exp: expr)
+    tagcase exp.abs
+       tag idn(i:idn):
+	   g_idn_plain(e, i)
+       tag str(s:str):
+	   g_string_name(e, s)
+       tag null_, bool_, int_, real_, char_:
+	   g_const_expr(e, exp)
+       others:
+	   logit(502, "g_expr_plain doesn't support this expr")
+	   expr_print(exp, 19)
+       end
+    end g_expr_plain
+
+% g_expr2a has the same effect as g_expr2 except that
+%	idns will have .num trailers, rather than .ch or .real ...
+% useful for assignment to interior of clu objects
+% 1/9/91 mips fix
+
+g_expr2a = proc(e: g_env, exp:expr)
+    tagcase exp.abs
+       tag idn(i:idn):
+	   g_idn_plain(e, i)
+	   g_env$puts(e, ".num")
+       others:
+	   g_expr2(e, exp)
+       end
+    end g_expr2a

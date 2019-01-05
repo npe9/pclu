@@ -1,0 +1,54 @@
+# extend
+
+%eproc	= proctype (env, char) signals (errmsg(string), stop(env, string))
+
+fname	= file_name
+fspec	= file_spec
+%vec	= array[eproc]
+act	= array[char]
+ast	= array[string]
+afnt	= array[fname]
+
+i2c	= char$i2c
+c2i	= char$c2i
+c2s	= string$c2s
+ac2s	= string$ac2s
+
+max_int = 65535
+
+ctrlat	= '\^@'			% escape to superior
+ctrla	= '\^A'			% get to start of line
+ctrlb	= '\^B'			% back # chars
+ctrlc	= '\^C'			% incremental update on ITS
+ctrld	= '\^D'			% delete # char
+ctrle	= '\^E'			% get to end of line
+ctrlf	= '\^F'			% forward # chars
+ctrlg	= '\^G'			% quit - should not be seen
+ctrlh	= '\^H'			% help
+ctrli	= '\^I'			% tab-insert # times
+ctrlj	= '\^J'			% insert '\n' # times
+ctrlk	= '\^K'			% kill # lines
+ctrll	= '\^L'			% clear screen & redisplay
+ctrlm	= '\^M'			% insert '\n' # times
+ctrln	= '\^N'			% next # lines
+ctrlo	= '\^O'			% insert # lines
+ctrlp	= '\^P'			% previous # lines
+ctrlq	= '\^Q'			% quote next char
+ctrlr	= '\^R'			% read (or insert) file
+ctrls	= '\^S'			% search for string
+ctrlt	= '\^T'			% set the mark
+ctrlu	= '\^U'			% set numeric arg
+ctrlv	= '\^V'			% withdraw or copy text
+ctrlw	= '\^W'			% write buffer to file
+ctrlx	= '\^X'			% miscellaneous commands
+ctrly	= '\^Y'			% define/execute macro
+ctrlz	= '\^Z'			% incremental update
+ctrlsk	= '\^['			% escape sequence
+ctrlsl	= '\^\'			% CLU/Indent etc.
+ctrlsm	= '\^]'			% Fill text
+ctrlsn	= '\^^'			% Scan/Type/List
+ctrlso	= '\^_'			% Delete/Rename/Expunge
+del	= '\^?'			% delete
+esc	= ctrlsk
+
+quit_msg = "Quit!"

@@ -1,0 +1,6 @@
+% Copyright Massachusetts Institute of Technology 1981, 1989
+
+user_name = proc () returns (string)
+	return(_environ("USER"))
+	   except when not_found: return("") end
+	end user_name

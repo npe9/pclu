@@ -1,0 +1,5 @@
+% Copyright Massachusetts Institute of Technology 1983, 1989
+
+_dir_ent_size = proc () returns (int)
+	return(255)
+	end _dir_ent_size

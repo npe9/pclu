@@ -1,0 +1,28 @@
+% Program to compute factorials
+
+start_up = proc ()
+    pi: stream := stream$primary_input()
+    po: stream := stream$primary_output()
+    while true do
+	stream$puts(po, "Enter an integer (or RETURN to exit): ")
+	s: string := stream$getl(pi)
+	if string$empty(s) then break end
+	n: int := int$parse(s)
+	   except when bad_format: 
+		       stream$putl(po, "Illegal integer")
+		  end
+	stream$putl(po, int$unparse(n) || "! = " || int$unparse(factorial(n)))
+	   except when negative: 
+		       stream$putl(po, "Integer must be positive")
+		  when overflow:
+		       stream$putl(po, "Overflow")
+		  end
+	end
+    end start_up
+
+factorial = proc (n: int) returns (int) signals (negative, overflow)
+    if n < 0 then signal negative end
+    if n = 0 then return(1) end
+    return(n*factorial(n-1))
+       resignal overflow
+    end factorial

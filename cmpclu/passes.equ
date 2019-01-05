@@ -1,0 +1,170 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	PASSES EQUATE
+%
+%	CLU Compiler Version 3: equates for the various passes
+
+%	TOP LEVEL SUPPORT
+
+fname		= file_name
+ac		= array[char]
+as		= array[str]
+qs		= sequence[str]
+command		= record[opts: as,
+			 cmnd: str,
+			 args: as]
+commandlist	= array[command]
+mspecs		= oneof[specs: DUspecs,
+			none:  null]
+DUlist		= array[DU]
+mdef		= record[def:    definition,
+			 hack:   bool,
+			 gen:    DU,
+			 mspecs: mspecs]
+mdeflist	= array[mdef]
+stuff		= record[ce:     	CE,
+			 ce_reset:	bool,
+			 ce_empty:	bool,
+			 penv:		p_env,
+			 cenv:		c_env,
+			 genv:		maybe_g_env,
+			 mode:		int,
+			 inst:		stream,
+			 outst:		stream,
+			 genst:		stream,
+			 names:		as,
+			 exts:		xref,
+			 undefs:	xref]
+
+maybe_g_env	= oneof[none: null,
+			one:  g_env]
+
+parse_		= 0
+check_		= 1
+clumac_		= 2
+binary_		= 3
+specs_		= 4
+ce_		= 5
+xce_		= 6
+execute_	= 7
+stats_		= 8
+
+bad_		= 0
+equates_	= 1
+wait_		= 2
+install_	= 3
+
+jcl_line_	= 0
+command_line_	= 1
+xfile_line_	= 2
+
+no_errs_	= 0
+minor_errs_	= 1
+bad_errs_	= 2
+
+exists_		= true
+check_exists_	= false
+
+%	TOKEN SUPPORT
+
+infixop = struct[prec: int,		% precedence
+		 op:   name,		% operation name (or "cand" or "cor")
+		 neg:  bool]		% ~'ed
+
+typekey = oneof[cluster_, selector_, applytype_: DU, rep_: idn]
+
+exprkey = oneof[force_, type_of_, up_, down_: null]
+
+stmtkey = oneof[if_, for_, tagcase_, while_, return_, yield_, signal_,
+		exit_, break_, continue_, begin_, own_:	null]
+
+defnkey = oneof[proc_, iter_: DU,
+		cluster_, selector_, applytype_: null]
+
+token   = oneof[idn:		idn,		% idn or name
+		expr:		exprabs,	% literal
+		type_:		typespec,	% built in type
+		equal:		infixop,	% =
+		op:		infixop,	% includes unary -
+		not,				% ~
+		assn,				% :=
+		colon,				% :
+		comma,				% ,
+		semi,				% ;
+		dollar,				% $
+		period,				% .
+		sharp,				% #
+		l_paren,			% (
+		l_bkt,				% [
+		l_curly,			% {
+		r_paren,			% )
+		r_bkt,				% ]
+		r_curly:	null,		% }
+		typekey:	typekey,	% keyword starting a typespec
+		exprkey:	exprkey,	% keyword starting an expr
+		stmtkey:	stmtkey,	% keyword starting a stmt
+		defnkey:	defnkey,	% keyword starting a definition
+		do_,				% other miscellaneous keywords
+		end_,
+		then_,
+		elseif_,
+		else_,
+		tag_,
+		in_,
+		others_,
+		except_,
+		when_,
+		returns_,
+		signals_,
+		resignal_,
+		yields_,
+		where_,
+		is_,
+		has_:		null,
+		eof:		null]		% end of file
+
+%	PARSER SUPPORT
+
+_empty_ok = true
+_no_empty = false
+_none_ok = true
+_no_none = false
+
+prec_level = int
+min_prec = 0
+max_prec = 6
+
+parerr = int
+none = 0
+minor = 1
+serious = 2
+
+bodykind = int
+then_body = 0
+tag_body = 1
+when_body = 2
+misc_body = 3
+
+%	CHECKER SUPPORT
+
+first_done	= true
+eval_first	= false
+break_ok	= true
+no_break	= false
+flaglist	= array[bool]
+want_gen	= 0
+want_type	= 1
+want_val	= 2
+cluster_	= 0
+selector_	= 1
+applytype_	= 2
+exit_		= true
+signal_		= false
+own_vars_	= true
+norm_vars_	= false
+
+%	CODER SUPPORT
+
+ab		= array[bool]
+ai		= array[int]
+qi		= sequence[int]
+aai		= array[ai]

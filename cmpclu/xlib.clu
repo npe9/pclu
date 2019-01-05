@@ -1,0 +1,104 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	XLIB CLU
+%
+%	CLU Compiler Version 3:  hack library
+
+XLIB = cluster is	init,		% ->
+			lookup,		% pathname -> DU => not_found
+			bind,		% pathname, DU -> exists
+			get_DU,		% name -> DU
+			dump,		% fname -> fname => not_possible(str)
+			merge,		% fname => not_possible(str)
+			unmerge		% fname => not_possible(str)
+
+tabsize		= 300
+rep		= table[pathname, DU]
+
+liblist		= array[libform]
+libform		= record[path:  pathname,
+			 name:  name,
+			 specs: DUspecs]
+
+own tab: rep := rep$create(tabsize, hash, pathname$equal)
+
+init = proc ()
+	bind("null",     DU$create("null"))
+	bind("bool",     DU$create("bool"))
+	bind("int",      DU$create("int"))
+	bind("real",     DU$create("real"))
+	bind("char",     DU$create("char"))
+	bind("string",   DU$create("string"))
+	bind("array",    DU$create("array"))
+	bind("record",   DU$create("record"))
+	bind("oneof",    DU$create("oneof"))
+	bind("sequence", DU$create("sequence"))
+	bind("struct",   DU$create("struct"))
+	bind("variant",  DU$create("variant"))
+	bind("proctype", DU$create("proctype"))
+	bind("itertype", DU$create("itertype"))
+	bind("type",     DU$create("type"))
+	end init
+
+lookup = proc (path: pathname) returns (DU) signals (not_found)
+	return(rep$lookup(tab, path))
+	   resignal not_found
+	end lookup
+
+bind = proc (path: pathname, d: DU) signals (exists)
+	rep$bind(tab, path, d)
+	   resignal exists
+	end bind
+
+get_DU = proc (n: name) returns (DU)
+	return(rep$lookup(tab, n))
+	   except when not_found: d: DU := DU$create(n)
+				  rep$bind(tab, n, d)
+				  return(d)
+		  end
+	end get_DU
+
+dump = proc (fn: fname) returns (fname) signals (not_possible(str))
+	list: liblist := liblist$new()
+	for path: pathname, d: DU in rep$elements(tab) do
+		specs: DUspecs, ok: bool := DU$get_dump_info(d)
+		if ok  cand  ~DUspecs$is_none(specs)
+		   then liblist$addh(list, libform${path:  path,
+						    name:  d.unique,
+						    specs: specs})
+		   end
+		end
+	if liblist$empty(list)
+	   then signal not_possible("nothing to dump") end
+	nfn: fname := gc_dump[liblist](list,
+				       fname$create(fn.dir, fn.name, "_l_", ""))
+	    resignal not_possible
+	rename_file(nfn, fname$create(nfn.dir, nfn.name, fn.suffix, ""))
+	    except when not_possible (why: str):
+			delete_file(nfn)
+			    except when not_possible (*): end
+			signal not_possible(why)
+		   end
+	return(fname$create(nfn.dir, nfn.name, fn.suffix, ""))
+	end dump
+
+merge = proc (fn: fname) signals (not_possible(str))
+	for form: libform in liblist$elements(gc_read[liblist](fn)) do
+		d: DU := rep$lookup(tab, form.name)
+		   except when not_found:
+				d := DU$create(form.name)
+				rep$bind(tab, d.unique, d)
+			  end
+		DU$update_specs(d, form.specs)
+		if d.unique ~= form.path
+		   then rep$mbind(tab, form.path, d) end
+		end resignal not_possible
+	end merge
+
+unmerge = proc (fn: fname) signals (not_possible(str))
+	for form: libform in liblist$elements(gc_read[liblist](fn)) do
+		DU$forget_specs(rep$lookup(tab, form.name))
+		   except when not_found: end
+		end resignal not_possible
+	end unmerge
+
+end XLIB

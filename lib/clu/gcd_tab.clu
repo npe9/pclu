@@ -1,0 +1,561 @@
+% Copyright Massachusetts Institute of Technology 1982, 1989
+
+# extend
+
+gcd_tab = cluster is grind, grindc, grindp
+
+    rep = record[next:  int,        % next address to allocate
+		 cnt:   int,        % gc count
+		 oq:    aobj,       % objects to process
+		 iq:    ainf,       % info to process
+		 bucks: veco]       % hash chains
+
+    bucket = record[obj:  _obj,
+		    addr: int,
+		    next: _obj]
+
+    aobj = array[_obj]
+    ainf = array[ginfo]
+
+    veco = _vec[_obj]
+    tago = _tagcell[_obj]
+    advo = _adv[_obj]
+    seqo = sequence[_obj]
+
+    mo = _cvt[int, _obj]
+    cb = _cvt[_obj, bucket]
+    mz = _cvt[null, _obj]
+    mi = _cvt[_obj, int]
+
+    ginfo = oneof[a_bvec: null,
+		  b_vec:  gproc,
+		  c_sel:  gproclist,
+		  d_cell: gproclist,
+		  e_sell: gproc,
+		  f_adv:  _obj,
+		  g_arp:  gproc]
+
+    gproc = proctype (_obj, gcd_tab) returns (int)
+    gproclist = sequence[gproc]
+
+    % original gcd_tab has nbuckets = 500, larch prefers the following
+    nbuckets = 50000
+
+    grind = proc [t: type] (x: t, fn: file_name) returns (file_name)
+	      signals (not_possible(string))
+		where t has _gcd: proctype (t, gcd_tab) returns (int)
+	%logit("enter gcd_tab$grind")
+	ch: _chan := _chan$open(fn, "write", 0)
+	   resignal not_possible
+	fn := ch.name
+	tab: gcd_tab := up(rep${next:  0,
+				cnt:   _gc$count(),
+				oq:    aobj$predict(1, 300000),
+				iq:    ainf$predict(1, 300000),
+				bucks: veco$create(nbuckets)})
+	buf: wvec := wvec$create(pagesz)
+	%logit("wvec size: " || int$unparse(wvec$size(buf)))
+	%for i: int in int$from_to(1, wvec$size(buf)) do
+	%  if buf[i] ~= 0 then
+	%     logit(int$unparse(i) || ": " || int$unparse(buf[i]))
+	%  end
+	%end
+	_event$defer()
+	begin
+	    mgrind[t](tab, buf, ch, x)
+	    buf[1] := down(tab).next
+	    ch.access := 4
+	    _chan$putw(ch, buf, 1, 4, false)
+	    end except when not_possible (why: string):
+			    _event$undefer()
+			    _chan$abort(ch)
+			       except when not_possible (*): end
+			    signal not_possible(why)
+		       end
+	_event$undefer()
+	%logit("closing file")
+	_chan$close(ch)
+	   resignal not_possible
+	return(fn)
+	end grind
+
+    % untested for pmax version, probably works
+    grindc = proc [t: type] (x: t, ch: _chan, pos: int)
+	       signals (not_possible(string))
+		where t has _gcd: proctype (t, gcd_tab) returns (int)
+	ch.access := pos
+	   resignal not_possible
+	tab: gcd_tab := up(rep${next:  0,
+				cnt:   _gc$count(),
+				oq:    aobj$new(),
+				iq:    ainf$new(),
+				bucks: veco$create(nbuckets)})
+	buf: wvec := wvec$create(pagesz)
+	_event$defer()
+	begin
+	    mgrind[t](tab, buf, ch, x)
+	    buf[1] := down(tab).next
+	    ch.access := pos + 4
+	    _chan$putw(ch, buf, 1, 4, false)
+	    end except when not_possible (why: string):
+			    _event$undefer()
+			    signal not_possible(why)
+		       end
+	_event$undefer()
+	end grindc
+
+    % untested for pmax version, may work
+    grindp = proc [t: type] (x: t, ch: _chan) signals (not_possible(string))
+		where t has _gcd: proctype (t, gcd_tab) returns (int)
+	tab: gcd_tab := up(rep${next:  0,
+				cnt:   _gc$count(),
+				oq:    aobj$new(),
+				iq:    ainf$new(),
+				bucks: veco$create(nbuckets)})
+	buf: wvec := wvec$create(pagesz)
+	_event$defer()
+	begin
+	    pgrind[t](tab, x)
+	    buf[2] := down(tab).next
+	    down(tab).next := 0
+	    mgrind[t](tab, buf, ch, x)
+	    end except when not_possible (why: string):
+			    _event$undefer()
+			    signal not_possible(why)
+		       end
+	_event$undefer()
+	end grindp
+
+    % untested for pmax version, may work
+    pgrind = proc [t: type] (tab: gcd_tab, x: t)
+		where t has _gcd: proctype (t, gcd_tab) returns (int)
+	t$_gcd(x, tab)
+	iq: ainf := down(tab).iq
+	oq: aobj := down(tab).oq
+	idx: int := 0
+	while true do
+	    idx := idx + 1
+	    tagcase iq[idx]
+	       tag a_bvec:
+	       tag b_vec (p: gproc):
+		   v: seqo := _cvt[_obj, seqo](oq[idx])
+		   for e: _obj in seqo$elements(v) do
+		       p(e, tab)
+		       end
+	       tag c_sel (l: gproclist):
+		   v: seqo := _cvt[_obj, seqo](oq[idx])
+		   for i: int in seqo$indexes(v) do
+		       l[i](v[i], tab)
+		       end
+	       tag d_cell (l: gproclist):
+		   i: int, e: _obj := tago$get(_cvt[_obj, tago](oq[idx]))
+		   l[i](e, tab)
+	       tag e_sell (p: gproc):
+		   i: int, e: _obj := tago$get(_cvt[_obj, tago](oq[idx]))
+		   p(e, tab)
+	       tag f_adv (inf: _obj):
+		   a: advo := _cvt[_obj, advo](oq[idx])
+		   v: veco := a.vector
+		   insert(tab, CLUREFSZ * (veco$size(v) + 1),
+			  _cvt[_obj, ginfo](inf), _cvt[veco, _obj](v))
+	       tag g_arp (p: gproc):
+		   v: seqo := _cvt[_obj, seqo](oq[idx])
+		   for e:_obj in seqo$elements(v) do
+		       if e ~= mz(nil)
+			  then p(e, tab) end
+		       end
+	       end
+	    end except when bounds: end
+	end pgrind
+
+    % reworked for pmax version of clu
+    mgrind = proc [t: type] (tab: gcd_tab, buf: wvec, ch: _chan, x: t)
+	       signals (not_possible(string))
+		where t has _gcd: proctype (t, gcd_tab) returns (int)
+	%logit("enter gcd_tab$mgrind")
+	gcd_store$init(buf, ch)
+	   resignal not_possible
+	gcd_store$store_id()
+	   resignal not_possible
+	val: int := t$_gcd(x, tab)
+	%logit("back from t$_gcd")
+	if val < 0
+	   then gcd_store$store_lit(_cvt[t, int](x))
+		   resignal not_possible
+	   else gcd_store$store_ref(val)
+		   resignal not_possible
+	   end
+	iq: ainf := down(tab).iq
+	oq: aobj := down(tab).oq
+	while true do
+	    tagcase ainf$reml(iq)
+	       tag a_bvec:
+		   % handle _bytevecs and strings
+		   b: bvec := _cvt[_obj, bvec](aobj$reml(oq))
+		   z: int := bvec$size(b)
+		   gcd_store$store_hdr(_bvechd, z)  %_bvechd is _bytevec header 8192
+		      resignal not_possible
+		   gcd_store$store_string(b)
+		      resignal not_possible
+	       tag b_vec (p: gproc):
+		   % handle _vecs and sequences
+		   v: seqo := _cvt[_obj, seqo](aobj$reml(oq))
+		   gcd_store$store_hdr(_seqhd, seqo$size(v))
+		      resignal not_possible
+		   for e: _obj in seqo$elements(v) do
+		       val := p(e, tab)
+		       if val < 0
+			  then gcd_store$store_lit(mi(e))
+				  resignal not_possible
+			  else gcd_store$store_ref(val)
+				  resignal not_possible
+			  end
+		       end
+	       tag c_sel (l: gproclist):
+		   % handle records and structs	
+		   v: seqo := _cvt[_obj, seqo](aobj$reml(oq))
+		   z: int := seqo$size(v)
+		   gcd_store$store_hdr(_seqhd, z)
+		      resignal not_possible
+		   for i: int in int$from_to(1, z) do
+		       e: _obj := v[i]
+		       val := l[i](e, tab)
+		       if val < 0
+			  then gcd_store$store_lit(mi(e))
+				  resignal not_possible
+			  else gcd_store$store_ref(val)
+				  resignal not_possible
+			  end
+		       end
+	       tag d_cell (l: gproclist):
+		   % handle oneofs and variants
+		   i: int, e: _obj := tago$get(_cvt[_obj, tago](aobj$reml(oq)))
+		   gcd_store$store_hdr(_cellhd, i)
+		      resignal not_possible
+		   val := l[i](e, tab)
+		   if val < 0
+		      then gcd_store$store_lit(mi(e))
+			      resignal not_possible
+		      else gcd_store$store_ref(val)
+			      resignal not_possible
+		      end
+	       tag e_sell (p: gproc):
+		   % handle _tagcells
+		   i: int, e: _obj := tago$get(_cvt[_obj, tago](aobj$reml(oq)))
+		   gcd_store$store_hdr(_cellhd, i)
+		      resignal not_possible
+		   val := p(e, tab)
+		   if val < 0
+		      then gcd_store$store_lit(mi(e))
+			      resignal not_possible
+		      else gcd_store$store_ref(val)
+			      resignal not_possible
+		      end
+	       tag f_adv (inf: _obj):
+		   % handle descriptors for _advs and arrays
+		   a: advo := _cvt[_obj, advo](aobj$reml(oq))
+		   v: veco := a.vector
+		   z: int := veco$size(v)
+		   val := insert(tab, (GCD_REF_SIZE * z) + 2*CLUREFSZ, 
+				 _cvt[_obj, ginfo](inf),
+				 _cvt[veco, _obj](v))
+		   gcd_store$store_array_desc(a)
+		      resignal not_possible
+		   if val < 0
+		      then 
+			   signal failure("gcd_tab: array store not a ref")
+			   % gcd_store$store_lit(mi(v))
+		      else gcd_store$store_ref(val)
+			      resignal not_possible
+		      end
+	       tag g_arp (p: gproc):
+		   % handle store objects for _advs and arrays
+		   v: seqo := _cvt[_obj, seqo](aobj$reml(oq))
+		   gcd_store$store_hdr(_seqhd, seqo$size(v))
+		      resignal not_possible
+		   for e:_obj in seqo$elements(v) do
+		       if e = mz(nil)
+			  then
+			       gcd_store$store_lit(0)
+				  resignal not_possible
+			  else
+			       val := p(e, tab)
+			       if val < 0
+				  then gcd_store$store_lit(mi(e))
+					  resignal not_possible
+				  else gcd_store$store_ref(val)
+					  resignal not_possible
+				  end
+			  end
+		       end
+	       end
+	    end
+	   resignal not_possible
+	   except when bounds: end
+	gcd_store$done()
+	   resignal not_possible
+   	%logit("exit gcd_tab$mgrind")
+	end mgrind
+
+    insert = proc (tab: cvt, z: int, inf: ginfo, x: _obj) returns (int)
+	% omit gc concerns for pmax version of clu
+	%    while tab.cnt ~= _gc$count() do
+	%	tab.cnt := _gc$count()
+	%	rehash(tab)
+	%	end
+	%logit("enter gcd_tab$insert")
+	i: int := hash_obj(x, nbuckets) + 1
+	xmb: _obj := tab.bucks[i]
+	mb: _obj := xmb
+	while mb ~= mz(nil) do
+	    if x = cb(mb).obj
+	       then return(cb(mb).addr) end
+	    mb := cb(mb).next
+	    end
+	addr: int := tab.next
+	tab.bucks[i] := _cvt[bucket, _obj](bucket${obj:  x,
+						   addr: addr,
+						   next: xmb})
+	aobj$addh(tab.oq, x)
+	ainf$addh(tab.iq, inf)
+	tab.next := addr + z
+	return(addr)
+	%logit("exit gcd_tab$insert")
+	end insert
+
+    % omit gc concerns for pmax version of clu
+    %rehash = proc (tab: rep)
+    %    bucks: veco := tab.bucks
+    %    chain: _obj := mz(nil)
+    %    for i: int in int$from_to(1, nbuckets) do
+    %	nchain: _obj := bucks[i]
+    %	if nchain = mz(nil)
+    %	   then continue end
+    %	bucks[i] := mz(nil)
+    %	buck: bucket := cb(nchain)
+    %	while buck.next ~= mz(nil) do
+    %	    buck := cb(buck.next)
+    %	    end
+    %	buck.next := chain
+    %	chain := nchain
+    %	end
+    %    while chain ~= mz(nil) do
+    %	nchain: _obj := cb(chain).next
+    %	hash: int := hash_obj(cb(chain).obj, nbuckets) + 1
+    %	cb(chain).next := bucks[hash]
+    %	bucks[hash] := chain
+    %	chain := nchain
+    %	end
+    %    end rehash
+
+    end gcd_tab
+
+gcd_store = cluster is init, store_id, store_lit, store_ref, store_hdr,
+		       store_array_desc, store_string, done
+
+    rep = null
+    advo = _adv[_obj]
+
+
+    own pos: int := 1
+    own buf: wvec
+    own ch: _chan
+
+    init = proc(w: wvec, c:_chan)
+	buf := w
+	ch  := c
+	pos := 1
+	end init
+
+    store_id = proc()
+
+	%logit("enter/exit gcd_store$store_id")
+	% the following is assumed to be a magic number (i.e. a meaningless number
+	%	except to distinguish the format of the gcd_tab output from other
+	%	versions)  034311, 043300 originally (x38c946c0)
+	% wvec$store2(buf, 1, 042127, 041461)    %4457,,4331
+	% 	wvec$store2(buf, 1, 030503, 053504)    %3143,,5744
+	bvec$store(w2b(buf), 1, 'D')
+	bvec$store(w2b(buf), 2, 'W')
+	bvec$store(w2b(buf), 3, 'C')
+	bvec$store(w2b(buf), 4, '1')
+	pos := 3
+	end store_id
+
+    store_lit = proc(i1: int) signals (not_possible (string))
+	%logit("enter/exit gcd_store$store_lit: " || int$unparse(GCD_CONST) || ", " ||
+	%      int$unparse(i1))
+	need(1)
+	   resignal not_possible
+	buf[pos]   := GCD_CONST
+	pos := pos + 1
+	need(1)
+	   resignal not_possible
+	buf[pos] := i1
+	pos := pos + 1
+	end store_lit
+
+    store_ref = proc(i1: int) signals (not_possible (string))
+	%logit("enter/exit gcd_store$store_ref: "  || int$unparse(GCD_REF) || ", " ||
+	%      int$unparse(i1))
+	need(1)
+	   resignal not_possible
+	buf[pos]   := GCD_REF
+	pos := pos + 1
+	need(1)
+	   resignal not_possible
+	buf[pos] := i1
+	pos := pos + 1
+	%	wvec$xstore(buf, 3, _userlo, val)
+	end store_ref
+
+    store_hdr = proc(hid, size: int) signals (not_possible (string))
+	%logit("enter/exit gcd_store$store_hdr: "  || int$unparse(hid) || ", " ||
+	%      int$unparse(size))
+	need(1)
+	   resignal not_possible
+	buf[pos] := hid
+	pos := pos + 1
+	need(1)
+	   resignal not_possible
+	buf[pos] := size
+	pos := pos + 1
+	%       wvec$store2(buf, pos, _bvechd, z)
+	%	   buf[pos] := seqo$size(v)
+	end store_hdr
+
+    store_array_desc = proc(a: advo) signals (not_possible (string))
+	%logit("entering gcd_store$store_array_desc: "  || int$unparse(_advhd) || ", " ||
+	%      int$unparse(6*CLUREFSZ + GCD_REF_SIZE) || int$unparse(a.size) ||
+	%      int$unparse(a.low)  || int$unparse(a.start)  || int$unparse(a.predict))
+	need(1)
+	   resignal not_possible
+	buf[pos] := _advhd	% header id
+        pos := pos + 1
+
+	need(1)
+	   resignal not_possible
+	buf[pos] := 6*CLUREFSZ + GCD_REF_SIZE % header size
+        pos := pos + 1
+
+	need(1)
+	   resignal not_possible
+	buf[pos] := a.size    % ext_size
+        pos := pos + 1
+
+	need(1)
+	   resignal not_possible
+	buf[pos] := a.low     % ext_low
+        pos := pos + 1
+
+	need(1)
+	   resignal not_possible
+	buf[pos] := a.start	% int_low
+        pos := pos + 1
+
+	need(1)
+	   resignal not_possible
+	buf[pos] := a.predict % int_size
+        pos := pos + 1
+	% ext_size can be computed as
+	%	ext_low + ext_size - 1
+	end store_array_desc
+
+    store_string = proc(s: bvec) signals (not_possible (string))
+	%logit("enter/exit gcd_store$store_string")
+	bsize: int := bvec$size(s)
+	%logit("  bsize = " || int$unparse(bsize))
+        bytes_to_go: int := bsize
+	total_bytes: int := bsize + 1
+	rounded_longs: int := ((total_bytes + CLUREFSZ-1)/CLUREFSZ)
+	total_longs: int := rounded_longs
+	%logit("  total_longs = " || int$unparse(total_longs))
+
+	total_output: int := 0
+	i: int := 1
+	while true do
+	    avail: int := need(rounded_longs)
+	       resignal not_possible
+	    copy_count: int := int$min(bytes_to_go, avail*CLUREFSZ)
+	    wvec$move_b2w(s, i, buf, (pos * CLUREFSZ)-(CLUREFSZ-1), copy_count)
+	    %logit("  wrote starting at byte " ||  int$unparse((pos * CLUREFSZ)-(CLUREFSZ-1)))
+	    %for i1:int in int$from_to(i, i+copy_count-1) do
+	    %  logit("    " || int$unparse(i1) || ":" || string$c2s(s[i1]))
+	    %end
+	    i := i + avail*CLUREFSZ
+	    bytes_to_go := bytes_to_go - copy_count
+	    pos := pos + avail
+	    total_output := total_output + avail
+	    if total_output = total_longs then exit done end
+	    rounded_longs := rounded_longs - avail
+	    end
+	   except when done: end
+	end store_string
+
+    done = proc() signals (not_possible (string))
+	%logit("enter/exit gcd_store$store_done")
+	_chan$putw(ch, buf, 1, CLUREFSZ * (pos-1), false)
+	   resignal not_possible
+	end done
+
+    need = proc(i:int) returns (int) signals (not_possible (string))
+	if CLUREFSZ*(pos + i - 1) <= bpagesz then return (i) end
+	if i = 1
+	   then
+		% store_fill()
+                %logit("  calling _chan$putw from need: 1, " || int$unparse(bpagesz))
+		_chan$putw(ch, buf, 1, bpagesz, false)
+		   resignal not_possible
+		pos := 1
+		return(i)
+	   else
+		if pos <= pagesz then return(pagesz-pos+1) end
+                %logit("  calling _chan$putw from need: 1, " || int$unparse(bpagesz))
+		_chan$putw(ch, buf, 1, bpagesz, false)
+		   resignal not_possible
+		pos := 1
+		return(int$min(i,pagesz))
+	   end
+	end need
+
+    % 8/21/90 removed store_fill, as it is unused
+    %    store_fill = proc()
+    %	% logit("entering store fill")
+    %	while true do
+    %	    buf[pos] := GCD_FILL
+    %	    pos := pos + 1
+    %	    end
+    %	   except when bounds: end
+    %	end store_fill
+
+    end gcd_store
+
+%if pos = pagesz
+%   then _chan$putw(ch, buf, 1, bpagesz, false)
+%	pos := 0
+%   end
+%pos := pos + 1
+%
+%		       if val < 0
+%			  then buf[pos] := mi(e)
+%			  else wvec$xstore(buf, pos, _userlo, val)
+%			  end
+%
+%	hval: int := _advhd
+%	lcnt: int := a.predict
+%	while lcnt > 255 do
+%	    hval := hval + 256
+%	    lcnt := lcnt / 2
+%	    end
+%	hval := hval + lcnt
+%	lcnt := a.start
+%	wvec$store2(buf, pos + 1, hval, z - lcnt - a.size + 2)
+%	buf[pos + 2] := a.low
+%	buf[pos + 3] := a.size
+%	wvec$xstore(buf, pos + 4, _userlo, val + 4 * lcnt)
+%	pos := pos + 5
+%	buf[pos] := lcnt
+logit = proc(s:string)
+    po: stream := stream$error_output()
+    stream$puts(po, s||"\n")
+    end logit

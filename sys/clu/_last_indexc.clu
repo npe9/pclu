@@ -1,0 +1,9 @@
+% Copyright Massachusetts Institute of Technology 1981, 1989
+
+_last_indexc = proc (c: char, s: string) returns (int)
+	for i: int in int$from_to_by(string$size(s), 1, -1) do
+		if s[i] = c
+		   then return(i) end
+		end
+	return(0)
+	end _last_indexc

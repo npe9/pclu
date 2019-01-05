@@ -1,0 +1,90 @@
+% Copyright Massachusetts Institute of Technology 1981, 1989
+
+_fixup_file_name = proc (fn: file_name, dirok: bool) returns (file_name)
+	d: string := fn.dir
+	dez: int := _dir_ent_size()
+	i: int
+	if ~dirok
+	   then if string$empty(d)  cor  d[1] ~= '/'
+		   then d := connected_dir() || d end
+		i := 0
+		while true do
+			j: int := _bytevec$indexc('/',
+						  _cvt[string, _bytevec](d),
+						  i + 1)
+			if j = 0
+			   then i := int$min(string$size(d) + 1, i + dez + 1)
+				break
+			elseif j - i > dez + 1
+			   then d := string$substr(d, 1, i + dez) ||
+				     string$rest(d, j)
+				j := i + dez + 1
+			end
+			i := j
+			while true do
+				if d[i + 1] ~= '.'
+				   then break end
+				c: char := d[i + 2]
+				if c = '/'
+				   then d := string$substr(d, 1, i) ||
+					     string$rest(d, i + 3)
+					continue
+				   end
+				if c ~= '.'
+				   then break end
+				j := i + 3
+				if j <= string$size(d)
+				   then if d[j] ~= '/'
+					   then break end
+					j := j + 1
+				   end
+				if i = 1
+				   then d := "/" || string$rest(d, j)
+					continue
+				   end
+				while true do
+					i := i - 1
+					if d[i] = '/'
+					   then break end
+					end
+				    except when bounds: d := string$rest(d, j)
+							break
+					   end
+				d := string$substr(d, 1, i) ||
+				     string$rest(d, j)
+				end
+			end except when bounds: end
+		if i = 1
+		   then d := "/"
+		elseif i > 1
+		   then d := string$substr(d, 1, i - 1) end
+	   end
+	n: string := fn.name
+	if n = "."
+	   then return(file_name$parse(d))
+	elseif n = ".."
+	   then return(file_name$parse
+			   (string$substr
+				(d,
+				 1,
+				 int$max(_last_indexc('/', d) - 1, 1))))
+	end
+	s: string := fn.suffix
+	o: string := fn.other
+	i := string$size(n) + string$size(s) + string$size(o)
+	if ~string$empty(o)
+	   then i := i + 2
+	elseif ~string$empty(s)
+	   then i := i + 1
+	end
+	if i > dez
+	   then if ~string$empty(s)  cor  ~string$empty(o)
+		   then n := string$append(n, '.') || s end
+		if ~string$empty(o)
+		   then n := string$append(n, '.') || o end
+		fn := file_name$parse(string$append(d, '/') ||
+				      string$substr(n, 1, dez))
+	elseif d ~= fn.dir
+	   then fn := file_name$create(d, n, s, o) end
+	return(fn)
+	end _fixup_file_name

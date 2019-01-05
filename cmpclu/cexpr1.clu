@@ -1,0 +1,399 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	CEXPR1 CLU
+%
+%	CLU Compiler Version 3: expression checker
+
+c_expr = proc (e: c_env, x: expr) returns (typespec)
+	t: typespec
+	tagcase x.abs
+	   tag null_:
+		t := e.null_type
+	   tag bool_:
+		t := e.bool_type
+	   tag int_:
+		t := e.int_type
+	   tag real_:
+		t := e.real_type
+	   tag char_:
+		t := e.char_type
+	   tag str:
+		t := e.str_type
+	   tag idn (xa: idn):
+		t := c_idn(e, x, xa)
+	   tag infix (xa: infix):
+		t := c_infix(e, x, xa)
+	   tag not (xa: expr):
+		t := c_xsugar(e, x, "not", exprlist$e2s(xa))
+	   tag minus (xa: expr):
+		t := c_xsugar(e, x, "minus", exprlist$e2s(xa))
+	   tag get (xa: get_sugar):
+		t := c_sugar(e, x, "get_" || xa.sel, exprlist$e2s(xa.object))
+	   tag fetch (xa: fetch_sugar):
+		t := c_sugar(e, x, "fetch", exprlist$[xa.object, xa.index])
+	   tag invoke (xa: invoke):
+		t := c_xinvoke(e, xa, eval_first)
+	   tag cand_ (xa: condop):
+		t := c_condop(e, xa, "cand")
+	   tag cor_ (xa: condop):
+		t := c_condop(e, xa, "cor")
+	   tag a_cons (xa: arraycons):
+		t := c_arraycons(e, x, xa)
+	   tag s_cons (xa: selectcons):
+		t := c_selectcons(e, x, xa)
+	   tag apply (xa: clutype):
+		t := c_apply_ref(e, x, xa)
+	   tag op (xa: clusterop):
+		t := c_clusterop(e, xa)
+	   tag force_ (xa: typespec):
+		t := c_force(e, x, xa)
+	   tag up_ (xa: expr):
+		t := c_up(e, xa)
+	   tag down_ (xa: expr):
+		t := c_down(e, xa)
+	   tag ref (xa: bracketref):
+		t := c_bracketref(e, x, xa)
+	   tag type_ (xa: typespec):
+		t := c_expr_type(e, x, xa)
+	   tag any_ (xa: expr):
+		t := c_anyize(e, xa)
+	   tag type_of_ (xa: expr):
+		t := c_type_of(e, xa)
+	   others:
+		t := e.unknown_type
+	   end
+	x.typespec := t
+	return(t)
+	end c_expr
+
+c_idn = proc (e: c_env, x: expr, i: idn) returns (typespec)
+	tagcase i.kind
+	   tag var, ownvar (k: typespec):
+		return(k)
+	   tag tparm, tconst:
+		if c_env$types_illegal(e)
+		   then c_env$err(e, qs$["use of type parameter '", i.str,
+						"' as expression"])
+		   end
+		x.abs := exprabs$make_type_(c_env$get_type(e, typeabs$make_idn(i)))
+		return(e.type_type)
+	   tag vparm (k: typespec):
+		return(k)
+	   tag expr (k: expr):
+		x.abs := k.abs
+		t: typespec := k.typespec
+		if t = e.type_type  cand  c_env$types_illegal(e)
+		   then c_env$err(e, qs$["'", i.str, "' names a type"]) end
+		return(t)
+	   tag opgen (k: name):
+		cop: clusterop := clusterop${type_: e.up_type,
+					     name:  k,
+					     parms: exprlist$new()}
+		x.abs := exprabs$make_op(cop)
+		return(c_clusterop1(e, cop))
+	   tag typeset:
+		c_env$err(e, qs$["'", i.str, "' names a type_set"])
+	   tag gen:
+		c_env$err(e, qs$["use of generator '", i.str, "' as expression"])
+	   tag unknown:
+		c_env$lookup(e, i, want_val)
+		return(c_idn(e, x, i))
+	   end
+	return(e.unknown_type)
+	end c_idn
+
+c_infix = proc (e: c_env, x: expr, fix: infix) returns (typespec)
+	if fix.neg
+	   then	fix.neg := false
+		x1: expr := expr$create(x.abs, e.unknown_type)
+		return(c_xsugar(e, x, "not", exprlist$e2s(x1)))
+	   else	return(c_xsugar(e, x, fix.op, exprlist$[fix.left, fix.right]))
+	   end
+	end c_infix
+
+c_sugar = proc (e: c_env, x: expr, n: name, args: exprlist) returns (typespec)
+	t: typespec := c_expr(e, exprlist$bottom(args))
+	op: clusterop := clusterop${type_: t,
+				    name:  n,
+				    parms: exprlist$new()}
+	inv: invoke := invoke${apply: expr$create(exprabs$make_op(op), e.unknown_type),
+			       args:  args}
+	x.abs := exprabs$make_invoke(inv)
+	return(c_xinvoke(e, inv, first_done))
+	end c_sugar
+
+c_xsugar = proc (e: c_env, x: expr, n: name, args: exprlist) returns (typespec)
+	t: typespec := c_expr(e, exprlist$bottom(args))
+	op: clusterop := clusterop${type_: t,
+				    name:  n,
+				    parms: exprlist$new()}
+	inv: invoke := invoke${apply: expr$create(exprabs$make_op(op), e.unknown_type),
+			       args:  args}
+	x.abs := exprabs$make_invoke(inv)
+	t := c_xinvoke(e, inv, first_done)
+	for xx: expr in exprlist$elements(args) do
+		tagcase xx.abs
+		   tag null_, bool_, int_, real_, char_, str:
+		   others:
+			return(t)
+		   end
+		end
+	x.typespec := t
+	xx: expr := e_expr(e, x)
+	x.abs := xx.abs
+	return(t)
+	end c_xsugar
+
+c_xinvoke = proc (e: c_env, inv: invoke, done_first: bool) returns (typespec)
+	types: typelist := c_invoke(e, inv, done_first)
+	if typelist$size(types) = 1
+	   then return(typelist$bottom(types)) end
+	c_env$err(e, qs$["'", get_inv_print(inv),
+			 "' returns ", int$unparse(typelist$size(types)),
+			 " values, 1 expected"])
+	return(e.unknown_type)
+	end c_xinvoke
+
+c_condop = proc (e: c_env, cx: condop, op: str) returns (typespec)
+	t: typespec := e.bool_type
+	if typespec$mismatch(t, c_expr(e, cx.left))
+	   then c_env$errt(e, qs$["argument 1 to ", op, " operator"],
+					e.bool_type, cx.left.typespec)
+	   end
+	if typespec$mismatch(t, c_expr(e, cx.right))
+	   then c_env$errt(e, qs$["argument 2 to ", op, " operator"],
+					e.bool_type, cx.right.typespec)
+	   end
+	return(t)
+	end c_condop
+
+c_arraycons = proc (e: c_env, x: expr, cons: arraycons) returns (typespec)
+	at: typespec := c_type(e, cons.type_)
+	cons.type_ := at
+	t: typespec, is_array: bool := c_element_type(e, at)
+	    except when abstract: return(c_acons_sugar(e, x, cons)) end
+	tagcase cons.low
+	   tag one (low: expr):
+		 if ~is_array
+		    then c_env$err1(e, "sequence constructor cannot have low bound")
+		 elseif typespec$mismatch(e.int_type, c_expr(e, low))
+		    then c_env$errt(e, qs$["low bound of array constructor"],
+					e.int_type, low.typespec)
+		 end
+	   tag none:
+	   end
+	elts: exprlist := cons.elts
+	for i: int in exprlist$indexes(elts) do
+	     if typespec$mismatch(t, c_expr(e, elts[i]))
+		then c_env$errt(e, qs$["element ", int$unparse(i),
+				       " of array/sequence constructor"],
+					t, elts[i].typespec)
+		end
+		except when anyize: z: expr := expr$create(exprabs$make_any_(elts[i]),
+							   e.any_type)
+				    cons.elts := exprlist$replace(cons.elts, i, z)
+		       end
+	     end
+	return(at)
+	end c_arraycons
+
+c_acons_sugar = proc (e: c_env, x: expr, cons: arraycons) returns (typespec)
+	at: typespec := cons.type_
+	elts: exprlist := cons.elts
+	op: name
+	args: exprlist
+	if exprlist$empty(elts)
+	   then tagcase cons.low
+		   tag one (low: expr):
+			op := "create"
+			args := exprlist$e2s(low)
+		   tag none:
+			op := "new"
+			args := exprlist$new()
+		   end
+	   else t: typespec := c_expr(e, exprlist$bottom(elts))
+		nx: expr := expr$create(exprabs$make_type_(t), e.type_type)
+		clut: clutype := clutype${gen:  e.seq_,
+					  parms: exprlist$e2s(nx)}
+		cons.type_ := c_env$get_type(e, typeabs$make_cluster_(clut))
+		nx := expr$create(x.abs, e.unknown_type)
+		tagcase cons.low
+		   tag one (low: expr):
+			op := "cons2"
+			args := exprlist$[low, nx]
+			cons.low := mexpr$make_none(nil)
+		   tag none:
+			op := "cons"
+			args := exprlist$e2s(nx)
+		   end
+	   end
+	cop: clusterop := clusterop${type_: at,
+				     name:  op,
+				     parms: exprlist$new()}
+	nx: expr := expr$create(exprabs$make_op(cop), e.unknown_type)
+	inv: invoke := invoke${apply: nx,
+			       args:  args}
+	x.abs := exprabs$make_invoke(inv)
+	return(c_xinvoke(e, inv, eval_first))
+	end c_acons_sugar
+
+c_element_type = proc (e: c_env, t: typespec) returns (typespec, bool)
+					      signals (abstract)
+	tagcase t.abs
+	   tag cluster_ (ta: clutype):
+		is_array: bool := ta.gen = e.array_
+		if is_array  cor  ta.gen = e.seq_
+		   then x: expr := exprlist$bottom(ta.parms)
+			tagcase x.abs
+			   tag type_ (xa: typespec):
+				return(xa, is_array)
+			   others:
+			   end
+		   end
+	   tag unknown:
+		return(t, true)
+	   others:
+	   end
+	if c_env$is_hacked(e)
+	   then signal abstract end
+	c_env$err(e, qs$["constructor has illegal type_spec: ",
+			 get_type_print(t)])
+	return(e.unknown_type, true)
+	end c_element_type
+
+c_selectcons = proc (e: c_env, x: expr, cons: selectcons) returns (typespec)
+	t: typespec := c_type(e, cons.type_)
+	cons.type_ := t
+	specs: fieldspeclist := c_select_specs(e, t)
+	    except when abstract: return(c_scons_sugar(e, x, cons)) end
+	used: flaglist := flaglist$fill(1, fieldspeclist$size(specs), false)
+	for fld: field in fieldlist$elements(cons.fields) do
+	   e.line := fld.line
+	   t1: typespec := c_expr(e, fld.val)
+	   for sel: name in namelist$elements(fld.sels) do
+	      nt: typespec := c_sel(e, specs, used, sel)
+	      if typespec$mismatch(nt, t1)
+		 then c_env$errt(e, qs$["value of '", sel, "' field"], nt, t1)
+		 end
+		 except when anyize: fld.val := expr$create(exprabs$make_any_(fld.val),
+							    nt)
+			end
+	      end
+	   end
+	q: qs := qs$[]
+	sep: str := "fields missing in record/struct constructor: "
+	for i: int in flaglist$indexes(used) do
+		if ~used[i]
+		   then q := qs$addh(q, sep)
+			q := qs$addh(q, specs[i].sel)
+			sep := ", "
+		   end
+		end
+	if ~qs$empty(q)
+	   then c_env$err(e, q) end
+	return(t)
+	end c_selectcons
+
+c_scons_sugar = proc (e: c_env, x: expr, cons: selectcons) returns (typespec)
+	afspec = array[fieldspec]
+	fspecs: afspec := afspec$new()
+	for fld: field in fieldlist$elements(cons.fields) do
+		e.line := fld.line
+		t: typespec := c_expr(e, fld.val)
+		for sel: name in namelist$elements(fld.sels) do
+			fs: fieldspec := fieldspec${sel:   sel,
+						    type_: t}
+			afspec$addh(fspecs, fs)
+			for i: int in afspec$indexes(fspecs) do
+				if sel < fspecs[i].sel
+				   then z: int := afspec$high(fspecs)
+					while z > i do
+						fspecs[z] := fspecs[z - 1]
+						z := z - 1
+						end
+					fspecs[i] := fs
+					break
+				   end
+				end
+			end
+		end
+	selt: seltype := seltype${gen:   e.struct_,
+				  parms: fieldspeclist$a2s(fspecs)}
+	st: typespec := c_env$get_type(e, typeabs$make_select(selt))
+	cop: clusterop := clusterop${type_: cons.type_,
+				     name:  "create",
+				     parms: exprlist$new()}
+	cons.type_ := st
+	nx: expr := expr$create(exprabs$make_op(cop), e.unknown_type)
+	inv: invoke := invoke${apply: nx,
+			       args:  exprlist$e2s(expr$create(x.abs, st))}
+	x.abs := exprabs$make_invoke(inv)
+	return(c_xinvoke(e, inv, first_done))
+	end c_scons_sugar
+
+c_select_specs = proc (e: c_env, t: typespec) returns (fieldspeclist)
+					      signals (abstract)
+	tagcase t.abs
+	   tag select (ta: seltype):
+		if ta.gen = e.record_  cor  ta.gen = e.struct_
+		   then return(ta.parms)
+		elseif ta.gen ~= e.oneof_  cand  ta.gen ~= e.variant_
+		   then signal abstract end
+	   tag unknown:
+		return(fieldspeclist$new())
+	   others:
+		if c_env$is_hacked(e)
+		   then signal abstract end
+	   end
+	c_env$err(e, qs$["constructor has illegal type_spec: ",
+			 get_type_print(t)])
+	return(fieldspeclist$new())
+	end c_select_specs
+
+c_sel = proc (e: c_env, specs: fieldspeclist, used: flaglist, n: name)
+							returns (typespec)
+	for i: int in fieldspeclist$indexes(specs) do
+		spec: fieldspec := specs[i]
+		if n = spec.sel
+		   then	if used[i]
+			   then c_env$err(e, qs$["duplicate selector '", n, "'"])
+			   else used[i] := true
+			   end
+			return(spec.type_)
+		   end
+		end
+	if ~fieldspeclist$empty(specs)
+	   then c_env$err(e, qs$["'", n, "' not a legal selector"]) end
+	return(e.unknown_type)
+	end c_sel
+
+c_clusterop = proc (e: c_env, op: clusterop) returns (typespec)
+	op.type_ := c_type(e, op.type_)
+	op.parms := c_constlist(e, op.parms)
+	return(c_clusterop1(e, op))
+	end c_clusterop
+
+c_clusterop1 = proc (e: c_env, op: clusterop) returns (typespec)
+	tagcase op.type_.abs
+	   tag cluster_ (ta: clutype):
+		return(c_cluster_op(e, ta, op))
+	   tag select (ta: seltype):
+		return(c_select_op(e, ta, op))
+	   tag idn (ta: idn):
+		return(c_idn_op(e, ta, op))
+	   tag apply (ta: applytype):
+		return(c_apply_op(e, ta, op))
+	   tag other (ta: othertype):
+		if othertype$is_return_(ta)
+		   then return(c_env$get_type(e,
+					typeabs$make_other(othertype$make_op(op))))
+		   else c_env$err(e, qs$["'", get_clusterop_print(op),
+							"' does not exist"])
+		   end
+	   tag any_:
+		c_env$err1(e, "type 'any' has no operations")
+	   tag type_ (ta: clutype):
+		return(c_cluster_op(e, ta, op))
+	   others:
+	   end
+	return(e.unknown_type)
+	end c_clusterop1

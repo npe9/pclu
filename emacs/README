@@ -1,0 +1,173 @@
+
+	     ***    Emacs support for CLU --  Version 1.1    ***
+	     ---------------------------------------------------
+
+Authors:  S. Blau (clu-mode), February 1987
+          Boaz Ben-Zvi (clu-doc), January 31, 1991 <boaz@lcs.mit.edu>
+Modified by Stephen Garland, December 15, 1991 <garland@lcs.mit.edu<
+
+  This directory contains the files needed to define a clu-mode for Emacs and
+to put the CLU manual online by extending the Emacs help facility.  The
+directory contains the following files.
+
+File		Description
+----		-----------
+README          This file.
+.emacs          Material to be inserted in the user's .emacs file
+clu.el          The Emacs-lisp functions that support clu-mode and CLU help.
+CLU-DOC         The CLU manual in a format similar to the Emacs DOC file.
+CLU-DOC-keys.el Keys and indexes for the CLU-DOC file (can be generated from
+	        a CLU-DOC file by calling clu-doc-snarf-file).
+
+--------------------------------------------------------------------------
+
+TO INSTALL:
+
+     Copy the contents of the .emacs file in this directory into your .emacs
+file.  If you ever want to modify the CLU-DOC file for some reason, you'll have
+to regenerate the CLU-DOC-keys.el file by calling  M-x clu-doc-snarf-file.
+
+--------------------------------------------------------------------------
+
+CLU-MODE:
+
+The following keys are defined in clu-mode:
+
+Key	Function
+---	--------
+TAB     at beginning of line, reindents the line, but sometimes poorly
+        with prefix-arg, indents all following lines, but slowly
+RET     new-line-and-indent
+ESC-TAB indents the entire buffer (works better than TAB)
+ESC-&   runs interactive CLU compiler
+^X`     finds the next error message
+^X^K    kills the compiler
+
+The following variables control the indentation style:
+
+Variable		Purpose
+--------		-------
+clu-indent		If nil, turns off automatic language-directed indent.
+			Default is t.
+clu-indent-size		Each indentation level offsets text by this much.
+   			Default is 4.
+clu-cluster-indent	If nil, turns off indent for cluster bodies.
+   			Default is t.
+clu-except-offset	Extra indentation for line beginning with except.
+   			Default is 1.
+clu-when-offset		Extra indentation for line beginning with when.
+   			Default is -1.
+-------------------------------------------------------------------------------
+
+CLU HELP:
+
+Just call help (normally by hitting Control-h) followed by one of the keys:
+
+1. 'd' -- for help on CLU symbols (types or operations. Examples: int$mul, 
+	  array, ARRAY$FILL, FILE_NAME, stream$primary_output, string$s2ac)
+2. 'g' -- for general CLU documentation topics (Examples: TERMINAL_I/O, FILE,
+	  own_variables, CLUSTERS, syntactic_sugar).
+3. '/' -- for CLU apropos (give partial name, like FILE, and get a list of all
+	  the CLU symbols and topics that include that name).
+
+EXAMPLE:
+  You type  		 C-h d
+  Emacs prompts with	 Describe CLU symbol: 
+  You type		 oneof$make_  <RETURN>
+  Emacs splits your screen and gives help about the operation ONEOF$MAKE_
+
+Note that:
+- case is unimportant. 
+- The help text is taken from the CLU manual (Appendix A in the Liskov-Guttag
+  book).
+- Symbol completion works (hit the TAB key); for example, if you type ARRAY$
+  followed by TAB, you'll get a list of possible completions (all the 
+  operations of ARRAY in this case).
+- If the cursor is placed on a CLU symbol when you call C-h d, emacs will 
+  propose that symbol as default; for example, if your cursor is placed 
+  someplace on "ARRAY[foo]$FILL" in your file, and you type C-h d, emacs 
+  will prompt with "Describe CLU symbol (default ARRAY$FILL): "; simply
+  type RETURN to select this default.
+
+---------------------------------------------------------------------------
+
+HELP ON USE: (a short version of this file)
+
+When in clu-mode, type M-x (i.e., META x) describe-mode for help on clu-mode.
+For help on the CLU help facility, type M-x (i.e., META x) clu-doc-help.
+
+---------------------------------------------------------------------------
+
+ADDING USER-DEFINED ABSTRACTIONS TO THE MANUAL:
+
+     You can add your CLU files to the current session of the CLU on-line
+manual by calling M-x (i.e., META x) clu-doc-add-file and giving it a name of
+one of your CLU files.  Calling clu-doc-add-directory instead takes a directory
+and adds all the CLU files in that directory to the current session of the CLU
+manual.  Emacs "knows" which files are CLU files by matching the their suffixes
+with the content of the Emacs variable clu-doc-file-suffix (normally ".clu").
+You can change this variable (M-x set-variable) if you want (e.g., when adding
+".spc" files).  You cannot change the specification you added, but they will
+disappear once you exit Emacs.
+
+DUMPING AND LOADING:
+
+     You can also dump the specifications of your CLU files into dump files and
+then load these dump files (with same effect as adding these CLU files to the
+current session of the CLU on-line manual).  Use M-x clu-doc-dump-file to dump
+a CLU file into a dump file.  This operation actually appends to the dump file,
+so you can dump CLU files again and again to the same dump file.  (This call
+also asks you about adding the dumped spec to the current session of the CLU
+manual).
+
+     Use  M-x clu-doc-load-file  to load a dump file.
+   
+     To make life easy: when Emacs initializes a new session of the CLU manual,
+it loads all the dump files listed in the list clu-doc-dumped-files-to-load.
+Thus, by setting this variable to the list of your dump files, you do not have
+to load them by hand.
+
+EXAMPLE:
+
+I make my dump files
+
+  M-x clu-doc-dump-file  <RETURN>
+  Give name of a CLU file: /mit/boaz/project/graph.clu  <RETURN>
+  File to append this dump to: /mit/boaz/project/PROJECT-DUMP  <RETURN>
+  Also add to current CLU manual? (y or n)   <n>
+  M-x clu-doc-dump-file  <RETURN>
+  Give name of a CLU file: /mit/boaz/project/table.clu  <RETURN>
+  File to append this dump to: /mit/boaz/project/PROJECT-DUMP  <RETURN>
+  Also add to current CLU manual? (y or n)   <n>
+  ...............................
+  ................................
+  M-x clu-doc-dump-file   <RETURN>
+  Give name of a CLU file: /mit/boaz/6.170/part1.clu  <RETURN>
+  File to append this dump to: /mit/boaz/project/PS-DUMP  <RETURN>
+  Also add to current CLU manual? (y or n)   <n>
+  ................................
+
+and I put the following line in my .emacs file
+
+  (setq clu-doc-load-file '("~/project/PROJECT-DUMP" "~/6.170/PS-DUMP"))
+
+After starting emacs, I hit C-h d and can get to my types (clusters),
+procedures, iterators, etc., as well as the CLU built-in definitions.
+
+TOTAL DUMPING:
+
+  You can create a new version of CLU-DOC that includes some of your user
+defined abstractions by:
+-- Starting the CLU on-line manual.
+-- Adding your definitions ( M-x clu-doc-add-file, clu-doc-add-directory )
+-- dump the whole current session using  M-x clu-doc-total-dump.  This
+   creates a new CLU-DOC style file and the appropriate -keys.el file.
+
+You can set your  clu-doc-file-name variable (in .emacs) so that the new
+version will be used. Thus you'll have your definitions as part of the manual.
+
+---------------------------------------------------------------------------
+
+Please send comments, complaints, bug reports etc. to Boaz Ben-Zvi at
+boaz@athena.mit.edu (or boaz@lcs.mit.edu)
+

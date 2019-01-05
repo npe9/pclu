@@ -1,0 +1,261 @@
+% Copyright Massachusetts Institute of Technology 1982, 1989
+
+istream = cluster is	open, can_read, can_write, empty, reset, flush,
+			get_date, set_date, get_name, close, abort,
+			is_closed, equal, similar, copy
+    
+str	= string
+fname	= file_name
+
+rep	= record[buf:  buf,
+		 name: fname]
+
+buf	= oneof[read: rbuf,
+		write: wbuf,
+		closed: null]
+
+rbuf	= record[chan: _chan,
+		 wvec: _wordvec,
+		 idx:  int,
+		 max:  int]
+
+wbuf	= record[chan: _chan,
+		 wvec: _wordvec,
+		 idx:  int]
+
+bufsiz	= 256		% words in buffer
+bufbsiz	= bufsiz * 8
+
+open = proc (f: fname, access: str) returns (cvt) signals (not_possible(str))
+	if access ~= "read"  cand  access ~= "write"  cand  access ~= "append"
+	   then signal not_possible("bad access mode") end
+	ch: _chan := _chan$open(f, access, 0)
+	   resignal not_possible
+	wvec: _wordvec := _wordvec$create(bufsiz)
+	b: buf
+	if access = "read"
+	   then b := buf$make_read(rbuf${chan: ch,
+					 wvec: wvec,
+					 idx:  1,
+					 max:  0})
+	   else b := buf$make_write(wbuf${chan: ch,
+					  wvec: wvec,
+					  idx:  0})
+	   end
+	return(rep${buf:  b,
+		    name: ch.name})
+	end open
+    
+can_read = proc (ist: cvt) returns (bool)
+	return(buf$is_read(ist.buf))
+	end can_read
+
+can_write = proc (ist: cvt) returns (bool)
+	return(buf$is_write(ist.buf))
+	end can_write
+
+empty = proc (ist: cvt) returns (bool) signals (not_possible(str))
+	tagcase ist.buf
+	   tag read (rb: rbuf):
+		if rb.idx > rb.max
+		   then rb.max := _chan$getw(rb.chan, rb.wvec) / 8
+			rb.idx := 1
+		   end
+		return(false)
+	   others:
+		signal not_possible("cannot read from this istream")
+	   end resignal not_possible
+	       except when end_of_file: return(true) end
+	end empty
+    
+reset = proc (ist: cvt) signals (not_possible(str))
+	tagcase ist.buf
+	   tag read (rb: rbuf):
+		_chan$reset(rb.chan)
+		rb.idx := 1
+		rb.max := 0
+	   tag write( wb: wbuf):
+		_chan$reset(wb.chan)
+		wb.idx := 0
+	   others:
+	   end resignal not_possible
+	end reset
+    
+flush = proc (ist: cvt) signals (not_possible(str))
+	tagcase ist.buf
+	   tag write (wb: wbuf):
+		_chan$putw(wb.chan, wb.wvec, 1, 8 * wb.idx, false)
+		wb.idx := 0
+	   others:
+	   end resignal not_possible
+	end flush
+    
+get_date = proc (ist: cvt) returns (date) signals (not_possible(str))
+	tagcase ist.buf
+	   tag read (rb: rbuf):
+		return(rb.chan.date)
+	   tag write (wb: wbuf):
+		return(wb.chan.date)
+	   others:
+		signal not_possible("cannot get date")
+	   end resignal not_possible
+	end get_date
+    
+set_date = proc (ist: cvt, new_date: date) signals (not_possible(str))
+	signal not_possible("cannot set date")
+	end set_date
+    
+get_name = proc (ist: cvt) returns (fname) signals (not_possible(str))
+	return(ist.name)
+	end get_name
+    
+close = proc (ist: cvt) signals (not_possible(str))
+	tagcase ist.buf
+	   tag read (rb: rbuf):
+		_chan$close(rb.chan)
+	   tag write (wb: wbuf):
+		_chan$putw(wb.chan, wb.wvec, 1, 8 * wb.idx, false)
+		wb.idx := 0
+		_chan$close(wb.chan)
+	   others:
+	   end resignal not_possible
+	ist.buf := buf$make_closed(nil)
+	end close
+    
+abort = proc (ist: cvt)
+	tagcase ist.buf
+	   tag read (rb: rbuf):
+		_chan$abort(rb.chan)
+	   tag write (wb: wbuf):
+		_chan$abort(wb.chan)
+	   others:
+	   end except when not_possible (*): end
+	ist.buf := buf$make_closed(nil)
+	end abort
+    
+is_closed = proc (ist: cvt) returns (bool)
+	return(buf$is_closed(ist.buf))
+	end is_closed
+    
+equal = proc (ist1, ist2: cvt) returns (bool)
+	return(ist1 = ist2)
+	end equal
+    
+similar = proc (ist1, ist2: cvt) returns (bool)
+	return(ist1 = ist2)
+	end similar
+    
+copy = proc (ist: istream) returns (istream)
+	return(ist)
+	end copy
+
+% internal operations
+
+get_chan = proc(ist: cvt) returns(_chan) signals(not_possible(str))
+	tagcase ist.buf
+	   tag read (rb: rbuf):
+	   	return(rb.chan)
+	   tag write (wb: wbuf):
+	   	return(wb.chan)
+	   others:
+	   	signal not_possible("no channel attached to istream")
+	   end
+	end get_chan
+
+geti = proc (ist: cvt) returns (int) signals (end_of_file, not_possible(str))
+	tagcase ist.buf
+	   tag read (rb: rbuf):
+		if rb.idx > rb.max
+		   then rb.max := _chan$getw(rb.chan, rb.wvec) / 8
+			rb.idx := 1
+		   end
+		i: int := rb.wvec[rb.idx]
+		rb.idx := rb.idx + 1
+		return(i)
+	   others:
+		signal not_possible("cannot read from this istream")
+	   end resignal end_of_file, not_possible
+	       except when overflow: signal not_possible("bad format") end
+	end geti
+
+puti = proc (ist: cvt, i: int) signals (not_possible(str))
+	tagcase ist.buf
+	   tag write (wb: wbuf):
+		if wb.idx = bufsiz
+		   then _chan$putw(wb.chan, wb.wvec, 1, bufbsiz, false)
+			wb.idx := 0
+		   end
+		wb.idx := wb.idx + 1
+		wb.wvec[wb.idx] := i
+	   others:
+		signal not_possible("cannot write to this istream")
+	   end resignal not_possible
+	end puti
+
+getbv = proc (ist: cvt) returns (_bytevec)
+			signals (end_of_file, not_possible(str))
+	tagcase ist.buf
+	   tag read (rb: rbuf):
+		if rb.idx > rb.max
+		   then rb.max := _chan$getw(rb.chan, rb.wvec) / 8
+			rb.idx := 1
+		   end
+		z: int := rb.wvec[rb.idx]
+		rb.idx := rb.idx + 1
+		if z = 0
+		   then return(_cvt[str, _bytevec]("")) end
+		bvec: _bytevec := _bytevec$create(z)
+		i: int := 1
+		while z > 0 do
+			if rb.idx > rb.max
+			   then rb.max := _chan$getw(rb.chan, rb.wvec) / 8
+				rb.idx := 1
+			   end
+			bidx: int := (rb.idx - 1) * 8
+			cnt: int := rb.max * 8 - bidx
+			if z < cnt
+			   then cnt := z end
+			_wordvec$move_w2b(rb.wvec, bidx + 1, bvec, i, cnt)
+			z := z - cnt
+			i := i + cnt
+			rb.idx := rb.idx + (cnt + 7) / 8
+			end
+		return(bvec)
+	   others:
+		signal not_possible("cannot read from this istream")
+	   end resignal end_of_file, not_possible
+	       except when overflow, toobig: signal not_possible("bad format")
+		      end
+	end getbv
+
+putbv = proc (ist: cvt, bvec: _bytevec) signals (not_possible(str))
+	tagcase ist.buf
+	   tag write (wb: wbuf):
+		z: int := _bytevec$size(bvec)
+		if wb.idx = bufsiz
+		   then _chan$putw(wb.chan, wb.wvec, 1, bufbsiz, false)
+			wb.idx := 0
+		   end
+		wb.idx := wb.idx + 1
+		wb.wvec[wb.idx] := z
+		i: int := 1
+		while z > 0 do
+			if wb.idx = bufsiz
+			   then _chan$putw(wb.chan, wb.wvec, 1, bufbsiz, false)
+				wb.idx := 0
+			   end
+			bidx: int := wb.idx * 8
+			cnt: int := bufbsiz - bidx
+			if z < cnt
+			   then cnt := z end
+			_wordvec$move_b2w(bvec, i, wb.wvec, bidx + 1, cnt)
+			z := z - cnt
+			i := i + cnt
+			wb.idx := wb.idx + (cnt + 7) / 8
+			end
+	   others:
+		signal not_possible("cannot write to this istream")
+	   end resignal not_possible
+	end putbv
+
+end istream

@@ -1,0 +1,7 @@
+% Copyright Massachusetts Institute of Technology 1980, 1989
+
+open_read = proc (name: string) returns (stream)
+				signals (bad_format, not_possible(string))
+	return(stream$open(file_name$parse(name), "read"))
+	    resignal bad_format, not_possible
+	end open_read

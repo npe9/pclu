@@ -1,0 +1,18 @@
+% Copyright Massachusetts Institute of Technology 1980, 1989
+
+string_lindexs = proc (pat: string, s: string) returns (int)
+	minus1 = -1
+	z: int := string$size(pat)
+	for i: int in int$from_to_by(string$size(s), z, minus1) do
+		ok: bool := true
+		for j: int in int$from_to_by(z - 1, 0, minus1) do
+			if pat[z - j] ~= s[i - j]
+			   then ok := false
+				break
+			   end
+			end
+		if ok
+		   then return(i - z + 1) end
+		end
+	return(string$size(s) + 1)
+	end string_lindexs

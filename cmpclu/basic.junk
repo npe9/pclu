@@ -1,0 +1,52 @@
+
+Creating DU specs from /u2/cludist/cmp/basic.types
+
+
+time = 14.270
+
+
+
+Undefined     Referencing Modules
+______________________________________________________________________
+
+gcd_tab       equates(/u2/cludist/cmp/basic.types)
+
+
+External            Referencing Modules
+______________________________________________________________________
+
+array               array equates(/u2/cludist/cmp/basic.types)
+                    sequence string
+bool                bool equates(/u2/cludist/cmp/basic.types)
+char                char equates(/u2/cludist/cmp/basic.types)
+date                date equates(/u2/cludist/cmp/basic.types) now
+delete_file         delete_file equates(/u2/cludist/cmp/basic.types)
+e_form              e_form equates(/u2/cludist/cmp/basic.types)
+f_form              equates(/u2/cludist/cmp/basic.types) f_form
+file_name           delete_file equates(/u2/cludist/cmp/basic.types)
+                    file_name istream rename_file stream
+file_spec           equates(/u2/cludist/cmp/basic.types) file_spec
+g_form              equates(/u2/cludist/cmp/basic.types) g_form
+int                 equates(/u2/cludist/cmp/basic.types) int
+istream             date equates(/u2/cludist/cmp/basic.types) istream
+itertype            equates(/u2/cludist/cmp/basic.types) itertype
+now                 equates(/u2/cludist/cmp/basic.types) now
+null                equates(/u2/cludist/cmp/basic.types) null
+oneof               equates(/u2/cludist/cmp/basic.types) oneof
+proctype            equates(/u2/cludist/cmp/basic.types) proctype
+pstream             date equates(/u2/cludist/cmp/basic.types) pstream
+real                equates(/u2/cludist/cmp/basic.types) real
+record              equates(/u2/cludist/cmp/basic.types) record
+rename_file         equates(/u2/cludist/cmp/basic.types) rename_file
+sequence            array equates(/u2/cludist/cmp/basic.types)
+                    sequence string
+set_working_dir     equates(/u2/cludist/cmp/basic.types)
+                    set_working_dir
+stream              equates(/u2/cludist/cmp/basic.types) pstream
+                    stream
+string              equates(/u2/cludist/cmp/basic.types) string
+struct              equates(/u2/cludist/cmp/basic.types) struct
+type                equates(/u2/cludist/cmp/basic.types) type
+user_name           equates(/u2/cludist/cmp/basic.types) user_name
+variant             equates(/u2/cludist/cmp/basic.types) variant
+working_dir         equates(/u2/cludist/cmp/basic.types) working_dir

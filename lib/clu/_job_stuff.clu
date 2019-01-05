@@ -1,0 +1,72 @@
+% Copyright Massachusetts Institute of Technology 1982, 1989
+
+_job_stuff = proc (fn: file_name, jcl: string)
+				returns (_wordvec, _bytevec, string)
+				signals (not_possible(string))
+	as = array[string]
+	own init: bool := false
+	own dirs: as
+	fn := file_name_fill(fn, "")
+	fs: string := file_name$unparse(fn)
+	if string$empty(fn.dir)
+	   then if ~init
+		   then s: string := _environ("PATH")
+			    except when not_found: s := ":/bin:/usr/bin" end
+			dirs := as$new()
+			j: int := 0
+			while true do
+				i: int := j + 1
+				j := _bytevec$indexc(':',
+						     _cvt[string, _bytevec](s),
+						     i)
+				if j = 0
+				   then j := string$size(s) + 1 end
+				ws: string := string$substr(s, i, j - i)
+				if ws = "."
+				   then ws := ""
+				   else ws := string$append(ws, '/')
+				   end
+				as$addh(dirs, ws)
+				end except when bounds: end
+			init := true
+		   end
+		for s: string in as$elements(dirs) do
+			s := s || fs
+			if _file_access(s, 1)  cand  ~_file_exists(s, 4)
+			   then fs := s
+				exit found
+			   end
+			end resignal not_possible
+		signal not_possible("no such executable file")
+	   end except when found: end
+	fs := string$append(fs, '\000')
+	b: _bytevec := _cvt[string, _bytevec](fs || string$append(jcl, '\000'))
+	chars: string := " \t\000"
+	if string$indexc('\000', jcl) > 0
+	   then chars := "\000" end
+	cnt: int := 0
+	i: int := string$size(fs)
+	while true do
+		cnt := cnt + 1
+		while string$indexc(b[i], chars) = 0 do
+			i := i + 1
+			end
+		while string$indexc(b[i], chars) > 0 do
+			b[i] := '\000'
+			i := i + 1
+			end
+		end except when bounds: end
+	v: _wordvec := _wordvec$create(cnt + 2)
+	v[1] := cnt
+	cnt := 1
+	i := 1
+	while true do
+		cnt := cnt + 1
+		v[cnt] := i
+		i := _bytevec$indexc('\000', b, i)
+		while b[i] = '\000' do
+			i := i + 1
+			end
+		end except when bounds: end
+	return(v, b, fs)
+	end _job_stuff

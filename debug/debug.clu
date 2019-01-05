@@ -1,0 +1,1658 @@
+%
+%	ISSUE: is state kept here or in debug_c or both???
+%
+
+as = array[string]
+vo = _vec[_obj]
+
+debug = cluster is cli, teval
+
+    ENTER_PROC = 0
+    LEAVE_PROC = 1
+    BEGIN_LINE = 2
+    GENESIS    = 4
+    ENTER_FORBODY = 5
+    LEAVE_FORBODY = 6
+    ENTER_PROC_FAULT = 7
+    YIELDING = 8
+
+    act = oneof[none, cont, step: null]
+
+    rep = state
+
+    state = record[current_module: string,
+		   nframes: int, 
+		   current_frame: int,
+		   current_line: int,
+		   next_counter: int
+		   ]
+
+    display_state = record[stack_index: int,
+			   current_module: string,
+			   current_line: int]
+
+    ac = array[char]
+    ai = array[int]
+    so = sequence[_obj]
+
+    str = string
+
+    cmd = record[name, info: string]
+    acmd = array[cmd]
+
+    own cmd_desc: acmd := acmd$[1: cmd${name: "quit:    ", info: "leave pclu debugger"},
+				   cmd${name: "restart: ", info: "restart current program"},
+				   cmd${name: "rebuild: ", info: "run make and then execute current program"},
+				   cmd${name: "help:    ", info: "some clues to operating pclu debugger"},
+				   cmd${name: "break:   ", info: "set a breakpoint at a function or line"},
+				   cmd${name: "trace:   ", info: "trace the specified signal"},
+				   cmd${name: "untrace: ", info: "stop tracing the specified signal"},
+				   cmd${name: "step:    ", info: "single step a function or line"},
+				   cmd${name: "unstep:  ", info: "stop single step a function or line"},
+				   cmd${name: "print:   ", info: "print value of a variable"},
+				   cmd${name: "width:   ", info: "show/change width of p(rinting)stream"},
+				   cmd${name: "depth:   ", info: "show/change depth of p(rinting)stream"},
+				   cmd${name: "where:   ", info: "show stack of active procedures"},
+				   cmd${name: "continue:", info: "continue running program (stops single stepping)"},
+				   cmd${name: "run:     ", info: "continue running program (stops single stepping)"},
+				   cmd${name: "delete:  ", info: "remove a breakpoint"},
+				   cmd${name: "show:    ", info: "show existing breakpoints"},
+				   cmd${name: "execute: ", info: "read and execute commands from a file"},
+				   cmd${name: "eval:    ", info: "evaluate an expression"},
+				   cmd${name: "alias:   ", info: "associate a name with a string"},
+				   cmd${name: "unalias: ", info: "remove an alis"},
+				   cmd${name: "up:      ", info: "move up the stack of active procedures"},
+				   cmd${name: "func:    ", info: "select procedure for listing"},
+				   cmd${name: "list:    ", info: "list source code for current procedure"},
+				   cmd${name: "down:    ", info: "move down the stack of active procedures"},
+				   cmd${name: "next:    ", info: "step to next line in procedure"}]
+
+    own current_state: rep := state${current_module: "start_up", 
+				     nframes: 0,
+				     current_frame: 0,
+				     current_line: 1,
+				     next_counter: -1}
+
+    own display: display_state := display_state${stack_index: 1,
+						 current_module: "start_up",
+						 current_line: 1}
+    own tyo: stream := stream$primary_output()
+    own pst_tyo: pstream := pstream$primary_output()
+
+    cli = proc(source: int, opt1: int, opt2: string, opt3: string)
+	    returns (int)
+	current_state.nframes := debugOPframe_count()
+	sigcount: int := _signal$get(2)	% see if control-c happened
+	ctrlc: bool := false
+	if sigcount ~= 0 then
+	   stream$putl(tyo, "\nInterrupt...")
+	   ctrlc := true
+	   end
+	if source = GENESIS then
+	   if stream$is_terminal(tyo)
+	      then stream$puts(tyo, "\n\n***** PCLU DEBUGGER 0.2")
+		   stream$puts(tyo, " *****\n\n")
+	      end except when not_possible (*): end
+           pstream$set_max_width(pst_tyo, 10)
+           pstream$set_max_depth(pst_tyo, 10)
+	   sym$get_address("start_up")	% just prime the symbol table pump
+	   _signal$set(2, false)	% cause counting of ctrl-c's
+	   _signal$set(10, false)
+	   _signal$set(11, false)
+	   _signal$set_message(10, "oops: bus error")
+	   _signal$set_message(11, "oops: segmentation violation")
+	   dbg_env$load(tyo, pst_tyo)
+	   alias$init(tyo)
+	 elseif source = ENTER_PROC then
+	   if ctrlc cor ctl_pts$bp_exists(opt2, "a", 0) 
+	      then
+		   current_state.nframes := opt1
+		   current_state.current_frame := opt1
+		   if current_state.current_module ~= opt2 then
+		      current_state.current_module := opt2
+		      end
+		   display.current_module := opt2
+		   display.stack_index := opt1
+		   ri: rtn_info, l: int := debugOPframe_info(opt1)
+		   display.current_line := l
+		   stream$putl(tyo, "\nEntering: " || 
+				    externalize(current_state.current_module) || "\n")
+	      else
+		   return (0)
+	      end
+	 elseif source = ENTER_PROC_FAULT then
+	   current_state.nframes := opt1
+	   current_state.current_frame := opt1
+	   if current_state.current_module ~= opt2 then
+	      current_state.current_module := opt2
+	      end
+	   display.current_module := opt2
+	   display.stack_index := opt1
+	   ri: rtn_info, l: int := debugOPframe_info(opt1)
+	   display.current_line := l
+	   stream$putl(tyo, "\nEntering: " ||
+			    externalize(current_state.current_module))
+	   stream$putl(tyo, "FAULT: Argument " || opt3 || " uninitialized\n")
+	 elseif source = YIELDING then
+	   if ctrlc cor ctl_pts$bp_exists(opt2, "a", 0)
+	      then
+		   current_state.nframes := opt1
+		   current_state.current_frame := opt1
+		   if current_state.current_module ~= opt2 then
+		      current_state.current_module := opt2
+		      end
+		   display.current_module := opt2
+		   display.stack_index := opt1
+		   ri: rtn_info, l: int := debugOPframe_info(opt1)
+		   display.current_line := l
+		   stream$putl(tyo, "\nYielding: " || 
+				    externalize(current_state.current_module) || "\n")
+	      else
+		   return (0)
+	      end
+	 elseif source = ENTER_FORBODY then
+	   if ctrlc cor ctl_pts$bp_exists(opt2, "a", 0) 
+	      then
+		   current_state.nframes := opt1
+		   current_state.current_frame := opt1
+		   if current_state.current_module ~= opt2 then
+		      current_state.current_module := opt2
+		      end
+		   display.current_module := opt2
+		   display.stack_index := opt1
+		   ri: rtn_info, l: int := debugOPframe_info(opt1)
+		   display.current_line := l
+		   return (0)
+		   % stream$putl(tyo, "\nEntering forbody: " || 
+		   %		    externalize(current_state.current_module) || "\n")
+	      else
+		   return (0)
+	      end
+	 elseif source = LEAVE_PROC
+	   then
+		if current_state.current_module ~= opt2 then
+		   current_state.current_module := opt2
+		   end
+		signame: string := ""
+		if opt1 ~= 0 then signame := debugOPcvt_sig(opt1) end
+		if ctrlc cor ctl_pts$bp_exists(current_state.current_module, "a", 0)
+		     cor (opt1 ~= 0 cand ctl_pts$sig_exists(signame))
+		   then
+			display.current_module := opt2
+			display.stack_index := debugOPframe_count()
+			ri: rtn_info, l: int := debugOPframe_info(display.stack_index)
+			display.current_line := l
+			if opt1 = 0
+			   then
+				stream$putl(tyo, "\nLeaving: " ||
+						 externalize(current_state.current_module) || "\n")
+			   else
+				if signame = "failure" then stream$putl(tyo, "\nSignalling: failure (" || opt3 || ") : " ||
+									     externalize(current_state.current_module) || "\n")
+				   else
+					stream$putl(tyo, "\nSignalling: " || signame || ": " ||
+							 externalize(current_state.current_module) || "\n")
+					sigds: sigdesclist := ri.h_sigds
+					for sd: sigdesc in sigdesclist$elements(sigds) do
+					    if debugopcmp_sig(signame, sd.a_nm) then
+					       sigcnt: int := debugopget_sigvalcount(sd)
+					       for i: int in int$from_to(1, sigcnt) do
+						   val: _obj := debugopget_nth_sigval(i)
+						   vops: anop := debugopget_nth_sigvalops(sd, i, ri, -1, -1)
+						   print_result(pst_tyo, val, vops)
+						   end
+					       end
+					    end
+				   end
+			   end
+		   else
+			return (0)
+		   end
+	 elseif source = LEAVE_FORBODY
+	   then return (0)
+		if current_state.current_module ~= opt2 then
+		   current_state.current_module := opt2
+		   end
+		if ctrlc cor ctl_pts$bp_exists(current_state.current_module, "a", 0)
+		   then
+			display.current_module := opt2
+			display.stack_index := debugOPframe_count()
+			ri: rtn_info, l: int := debugOPframe_info(display.stack_index)
+			display.current_line := l
+			% stream$putl(tyo, "\nLeaving forbody: " ||
+		        %	 externalize(current_state.current_module) || "\n")
+			return (0)
+		   else
+			return (0)
+		   end
+	 elseif source = BEGIN_LINE then
+	   if opt2 ~= current_state.current_module 
+	      then
+		   current_state.current_module := opt2
+		   display.current_module := opt2
+	      end
+	   if ctrlc cor ctl_pts$bp_exists(current_state.current_module, "sl", opt1)
+	      then
+		   stream$puts(tyo, externalize(current_state.current_module) ||
+				    ": line " || int$unparse(opt1) || ": ")
+		   info: rtn_info, l: int := debugOPframe_info(debugOPframe_count())
+		   fnm: string := debugopget_fname(info)
+		   src$list(tyo, fnm, current_state.current_module, 
+			    opt1, opt1, -1, false, false)
+		   current_state.current_line := opt1
+		   display.stack_index := debugOPframe_count()
+		   display.current_line := opt1
+		   if current_state.next_counter ~= 0 then
+		      current_state.next_counter :=
+			  current_state.next_counter - 1
+		      if current_state.next_counter > 0 then return(0) end
+		      end
+	      else
+		   return (0)
+	      end
+	 end
+	tyi: stream := stream$primary_input()
+	line: string
+	while true do
+	    begin
+		tyi.prompt := "command: "
+		line := lineedit(tyi, "command: ")
+		   except others:
+			       line := stream$getl(tyi)
+			       stream$putl(tyo, line)
+			  end
+		stream$putl(tyo, "")
+		tyi.prompt := ""
+		process_commands(line)
+		end except 
+		       when cont:
+			    return(0)
+		       when failure (why: string):
+			    err_out(why)
+		       end
+	    end
+	end cli
+
+    process_commands = proc(line: string) signals (cont)
+	own last_command: string := ""
+	line := strip_blanks(line)
+	index :int := string$indexc(' ', line)
+	cmnd: string
+	args: string
+	if index = 0
+	   then
+		cmnd := line
+		args := ""
+	   else
+		cmnd := string$substr(line, 1, index - 1)
+		args := string$rest(line, index + 1)
+	   end
+	if prefix(cmnd, "break", 1)
+	   then last_command := "" break_cmd(args)
+	 elseif prefix(cmnd, "trace", 1)
+	   then last_command := "" trace_cmd(args)
+	 elseif prefix(cmnd, "untrace", 3)
+	   then last_command := "" untrace_cmd(args)
+	 elseif prefix(cmnd, "step", 1)
+	   then last_command := "" step_cmd(args)
+	 elseif prefix(cmnd, "unstep", 3)
+	   then last_command := "" unstep_cmd(args)
+	 elseif prefix(cmnd, "print", 1)
+	   then last_command := "" print_cmd(args)
+	 elseif prefix(cmnd, "reset", 5)
+	   then last_command := "" reset_cmd(args)
+	 elseif prefix(cmnd, "width", 2)
+	   then last_command := "" width_cmd(args)
+	 elseif prefix(cmnd, "depth", 2)
+	   then last_command := "" depth_cmd(args)
+	 elseif prefix(cmnd, "help", 1) cor prefix(cmnd, "?", 1)
+	   then last_command := "" help_cmd(args)
+	 elseif prefix(cmnd, "where", 1) cor prefix(cmnd, "frames", 1)
+	   then last_command := "" where_cmd(args)
+	 elseif prefix(cmnd, "continue", 1)
+	   then last_command := line
+		cont_cmd(cmnd, args)
+		signal cont
+	 elseif prefix(cmnd, "run", 1)
+	   then last_command := "" 
+		cont_cmd(cmnd, args)
+		signal cont
+	 elseif prefix(cmnd, "delete", 1)
+	   then last_command := "" delete_cmd(args)
+	 elseif prefix(cmnd, "show", 2)
+	   then last_command := "" show_cmd(args)
+		%	 elseif prefix(cmnd, "test", 1)
+		%	   then last_command := line
+		%		eval_test_cmd(args)
+	 elseif prefix(cmnd, "alias", 1)
+	   then last_command := ""
+		alias_cmd(args)
+	 elseif prefix(cmnd, "unalias", 3)
+	   then last_command := ""
+		unalias_cmd(args)
+	 elseif prefix(cmnd, "execute", 2)
+	   then last_command := line
+		execute_cmd(args)
+	 elseif prefix(cmnd, "eval", 1)
+	   then last_command := line
+		eval_cmd(args)
+	 elseif prefix(cmnd, "up", 1)
+	   then last_command := line
+		up_cmd(args)
+	 elseif prefix(cmnd, "func", 1)
+	   then last_command := "" func_cmd(args)
+	 elseif prefix(cmnd, "list", 1)
+	   then last_command := line
+		list_cmd(args)
+	 elseif prefix(cmnd, "down", 1)
+	   then last_command := line
+		down_cmd(args)
+	 elseif prefix(cmnd, "next", 1)
+	   then last_command := line
+		next_cmd(args)
+		signal cont
+	 elseif prefix(cmnd, "quit", 1)
+	   then quit_cmd(args)
+	 elseif prefix(cmnd, "restart", 3)
+	   then restart_cmd(args)
+	 elseif prefix(cmnd, "rebuild", 3)
+	   then rebuild_cmd(args)
+	 elseif string$empty(cmnd)
+	   then if ~string$empty(last_command)
+		   then
+			stream$putl(tyo, last_command)
+			process_commands(last_command)
+			   resignal cont
+			return
+		   end
+	 elseif string$size(cmnd) ~= 0
+	   then
+		if cmnd[1] = '%' then return end  % skip over comment character
+		stream$puts(tyo, "unknown command: ")
+		stream$puts(tyo, cmnd)
+		stream$puts(tyo, "\n")
+	 end
+	return
+	end process_commands
+
+    prefix = proc (s, cmnd: string, cnt: int) returns (bool)
+	return(_bytevec$nc_indexv(_cvt[str, _bytevec](s),
+				  _cvt[string, _bytevec](cmnd),
+				  1) = 1
+		 cand
+	       string$size(s) >= cnt)
+	end prefix
+
+    quit_cmd = proc(args: string)
+	arglist: as := parse_line(args)
+	if as$size(arglist) ~= 0 then
+	   stream$putl(tyo, "\nToo many arguments to quit command\n") end
+	_exit(0)
+	end quit_cmd
+
+    restart_cmd = proc(args: string)
+	arglist: as := parse_line(args)
+	if as$size(arglist) ~= 0 then
+	   stream$putl(tyo, "\nToo many arguments to restart command\n") end
+	save: sequence[_chan] := sequence[_chan]$[]
+	fn: file_name := file_name$create("/bin/", "csh", "", "")
+	_job$exec(fn, "-f -e -c " || _get_xjname(), save)
+	end restart_cmd
+
+    rebuild_cmd = proc(args: string)
+	arglist: as := parse_line(args)
+	if as$size(arglist) ~= 0 then
+	   stream$putl(tyo, "\nToo many arguments to quit command\n") end
+	save: sequence[_chan] := sequence[_chan]$[]
+	fn: file_name := file_name$create("/bin/", "csh", "", "")
+	%	_job$exec(fn, "-f -e -c 'make ; " || _get_xjname() || "'", save)
+	_job$exec(fn, "-f -e -c make;" || _get_xjname(), save)
+	end rebuild_cmd
+
+    reset_cmd = proc(args: string)
+	arglist: as := parse_line(args)
+	if as$size(arglist) ~= 0 then
+	   stream$putl(tyo, "\nToo many arguments to reset command\n") end
+	sym$clear_owns()
+	end reset_cmd
+
+    next_cmd = proc(args: string)
+	count: int := 1
+	arglist: as := parse_line(args)
+	if as$size(arglist) > 1 then
+	   stream$putl(tyo, "\nToo many arguments to next command\n") 
+	   return
+	   end
+	if as$size(arglist) = 1 then
+	   count := int$parse(arglist[1])
+	      except others (s:string):
+			  stream$putl(tyo, "\nBad argument to next command\n")
+			  return
+		     end
+	   if count < 1 then
+	      stream$putl(tyo, "\nBad argument to next command\n")
+	      return
+	      end
+	   end
+	current_state.next_counter := count
+	ctl_pts$bp_add(externalize(display.current_module), "t", 0)
+	end next_cmd
+
+
+    cont_cmd = proc(cmdl, args: string)
+	arglist: as := parse_line(args)
+	if as$size(arglist) ~= 0 then
+	   set_argv(sequence[string]$a2s(arglist)) end
+	%   stream$putl(tyo, "\nToo many arguments to " || cmdl || " command\n") end
+	ctl_pts$bp_remove(externalize(display.current_module), "t", 0)
+	   except when not_found: end
+	end cont_cmd
+
+
+    break_cmd = proc(args: string)
+	% error checking? non-existence?
+	% are all line numbers guaranteed to exist?
+	if string$size(args) = 0 then err_out("missing argument") return end
+	line: int
+	func: string
+	arglist: as := parse_line(args)
+	for arg: string in as$elements(arglist) do
+	    if string$indexc(arg[1], "0123456789") ~= 0
+	       then
+		    line := int$parse(arg)
+		    ctl_pts$bp_add(externalize(display.current_module), "l", line)
+	       else
+		    func := arg
+		    ctl_pts$bp_add(func, "f", 0)
+	       end
+	       except when
+		      not_found:
+			   stream$putl(tyo, arg || " not found")
+		      when error (why: string):
+			   err_out(why)
+		      end
+	    end
+	end break_cmd
+
+    trace_cmd = proc(args: string)
+	% error checking? non-existence?
+	if string$size(args) = 0 then err_out("missing argument") return end
+	arglist: as := parse_line(args)
+	for each_arg: string in as$elements(arglist) do
+	    signame: string := each_arg
+	    ctl_pts$sig_add(signame)
+	    end
+	end trace_cmd
+
+    untrace_cmd = proc(args: string)
+	% error checking? non-existence?
+	% are all line numbers guaranteed to exist?
+	if string$size(args) = 0 then err_out("missing argument") return end
+	arglist: as := parse_line(args)
+	for arg: string in as$elements(arglist) do
+	    arg := arg
+	    ctl_pts$sig_remove(arg)
+	       except when not_found:
+			   stream$putl(tyo, "\n" || arg || " not a traced signal\n")
+		      end
+	    end
+	end untrace_cmd
+
+    step_cmd = proc(args: string)
+	% error checking? non-existence?
+	% are all line numbers guaranteed to exist?
+	if string$size(args) = 0 then err_out("missing argument") return end
+	func: string
+	arglist: as := parse_line(args)
+	for arg: string in as$elements(arglist) do
+	    func := arg
+	    ctl_pts$bp_add(func, "s", 0)
+	       except when
+		      not_found:
+			   stream$putl(tyo, arg || " not found")
+		      when error (why: string):
+			   err_out(why)
+		      end
+	    end
+	end step_cmd
+
+    unstep_cmd = proc(args: string)
+	% error checking? non-existence?
+	% are all line numbers guaranteed to exist?
+	if string$size(args) = 0 then err_out("missing argument") return end
+	func: string
+	arglist: as := parse_line(args)
+	for arg: string in as$elements(arglist) do
+	    func := arg
+	    ctl_pts$bp_remove(func, "s", 0)
+	       except when
+		      not_found:
+			   stream$putl(tyo, arg || " not found")
+		      when error (why: string):
+			   err_out(why)
+		      end
+	    end
+	end unstep_cmd
+
+    print_cmd = proc(args: string)
+	% figure name
+	% ask debug_c for value & function
+	% invoke function on value
+	if string$size(args) = 0 then err_out("missing argument") return end
+	arglist: as := parse_line(slower(args))
+	for each_arg: string in as$elements(arglist) do
+	    pstream$start(pst_tyo, each_arg || ": ")
+	    % get debugger dexpr & use eval_dexpr to print it, if any
+	    begin
+		dval: dexpr := dvar$get_dexpr(each_arg)
+		eval_dexpr(dval)
+		end
+	       except when not_found:
+			   debugOPprint_val(pst_tyo, display.stack_index, 
+					    display.current_module, each_arg)
+			      except when not_found:
+					  pstream$text(pst_tyo, "??? unknown variable")
+				     when not_possible:
+					  pstream$text(pst_tyo, "??? no print function")
+				     end
+		      end
+	    pstream$stop(pst_tyo, "")
+	    pstream$pause(pst_tyo, "")
+	    end
+	end print_cmd
+
+    width_cmd = proc(args: string)
+	if string$size(args) = 0 
+	   then
+		pstream$start(pst_tyo, "width: ")
+		pstream$text(pst_tyo, int$unparse(pstream$get_max_width(pst_tyo)))
+		pstream$stop(pst_tyo, "")
+		pstream$pause(pst_tyo, "")
+	   else
+		arglist: as := parse_line(args)
+		if as$size(arglist) ~= 1 then
+		   stream$putl(tyo, "\nToo many arguments to width command\n")
+		   return
+		   end
+		pstream$set_max_width(pst_tyo, int$parse(arglist[1]))
+		dbg_env$dump()
+	   end
+	end width_cmd
+
+    depth_cmd = proc(args: string)
+	if string$size(args) = 0 
+	   then
+		pstream$start(pst_tyo, "depth: ")
+		pstream$text(pst_tyo, int$unparse(pstream$get_max_depth(pst_tyo)))
+		pstream$stop(pst_tyo, "")
+		pstream$pause(pst_tyo, "")
+	   else
+		arglist: as := parse_line(args)
+		if as$size(arglist) ~= 1 then
+		   stream$putl(tyo, "\nToo many arguments to depth command\n")
+		   return
+		   end
+		pstream$set_max_depth(pst_tyo, int$parse(arglist[1]))
+		dbg_env$dump()
+	   end
+	end depth_cmd
+
+    alias_cmd = proc(args: string)
+	arglist: as := parse_line(args)
+	if as$size(arglist) = 0 then
+	   alias$show_alias("all")
+	 elseif as$size(arglist) = 1 then
+	   alias$show_alias(arglist[1])
+	 else alias$add_alias(args, arglist)
+	 end
+	end alias_cmd
+
+    unalias_cmd = proc(args: string)
+	arglist: as := parse_line(args)
+	if as$size(arglist) = 0 then
+	   stream$putl(tyo, "\nToo few arguments to unalias command\n")
+	   end
+	alias$remove_alias(arglist)
+	end unalias_cmd
+
+    execute_cmd = proc(args: string)
+	arglist: as := parse_line(args)
+	if as$size(arglist) = 0 then
+	   stream$putl(tyo, "\nToo few arguments to execute command\n")
+	   end
+	if as$size(arglist) > 1 then
+	   stream$putl(tyo, "\nToo many arguments to execute command\n")
+	   end
+	fn: file_name := file_name$parse(arglist[1])
+	   except when bad_format:
+		       err_out("can't parse file name " || arglist[1])
+		       return
+		  end
+	st: stream := stream$open(fn, "read")
+	   except when not_possible (npstr: string):
+		       err_out("can't open file name " || arglist[1] ||
+			       ": " || npstr)
+		       return
+		  end
+	while true do
+	    line: string := stream$getl(st)
+	    stream$putl(tyo, line)
+	    line := strip_blanks(line)
+	    if string$empty(line) then continue end
+	    if line[1] = '%' cor line[1] = '#' then continue end
+	    process_commands(line)
+	       except when cont:
+			   err_out("run/continue not supported in command file")
+		      end
+	    end
+	   except when end_of_file: return end
+	end execute_cmd
+
+    eval_cmd = proc(args: string)
+	begin
+	    % logit(args)
+	    args := alias$expand_alias(pc_slower(args))
+	    % logit(args)
+	    e: dexpr := dparse(args)
+	       except others:
+			   err_out("error in parsing")
+			   return end
+	    eval_dexpr(e)
+	    end
+	   except when not_possible(np_str:string):
+		       err_out(np_str)
+		  when too_many:
+		       err_out("possible alias loop")
+		  others:
+		       err_out("evaluation aborted")
+		  end
+	end eval_cmd
+
+    %    let_cmd = proc(args: string)
+    %	% pick off name(s)
+    %	% skip over = or :=
+    %	e: dexpr := dparse(args)
+    %	sig: string, es: estack := eval_dexpr(e)
+    %	% if sig non-empty then done else
+    %	% 	save results from estack into name(s) 
+    %	end let_cmd
+
+    %    eval_test_cmd = proc(args: string)
+    %	e: dexpr := dparse_fake(args)
+    %	eval_dexpr(e)
+    %	end eval_test_cmd
+
+    %    dparse_fake = proc(s : string) returns (dexpr)
+    %	% totally artificial for now 1 => const, 2 => idn, 3 => int$add
+    %	opt1: int := int$parse(s)
+    %	d: dexpr
+    %	if opt1 = 1 then        % const
+    %	   d := dexpr$make_const(con$make_int_(99))
+    %	   return (d)
+    %	 elseif opt1 = 2 then   % idn
+    %	   d := dexpr$make_idn("i")
+    %	   return (d)
+    %	 elseif opt1 = 3 then   % int$add(1, 3)
+    %	   a: dexprlist := dexprlist$new()
+    %	   a := dexprlist$addh(a, dexpr$make_const(con$make_int_(1)))
+    %	   a := dexprlist$addh(a, dexpr$make_const(con$make_int_(3)))
+    %	   d := dexpr$make_apply(op${op: "int$add", tparms: list$new(),
+    %				     oparms: list$new(), args: d2l(a)})
+    %	   return (d)
+    %	 elseif opt1 = 4 then   % int$add(int$add(1,2), 3)
+    %	   a: dexprlist := dexprlist$new()
+    %	   a := dexprlist$addh(a, dexpr$make_const(con$make_int_(1)))
+    %	   a := dexprlist$addh(a, dexpr$make_const(con$make_int_(2)))
+    %	   d := dexpr$make_apply(op${op: "int$add", tparms: list$new(),
+    %				     oparms: list$new(), args: d2l(a)})
+    %	   a := dexprlist$new()
+    %	   a := dexprlist$addh(a, d)
+    %	   a := dexprlist$addh(a, dexpr$make_const(con$make_int_(3)))
+    %	   d := dexpr$make_apply(op${op: "int$add", tparms: list$new(),
+    %				     oparms: list$new(), args: d2l(a)})
+    %	   return (d)
+    %	 elseif  opt1 = 5 then  % i = 42
+    %	   d1: dexpr := dexpr$make_const(con$make_int_(42))
+    %	   r: dexprlist := dexprlist$[d1]
+    %	   d2: dexpr := dexpr$make_idn("i")
+    %	   l: dexprlist := dexprlist$[d2]
+    %	   d := dexpr$make_assign(assn${left: d2l(l), right: d2l(r)})
+    %	   return (d)
+    %	 elseif opt1 = 6 then   % int$add(2147483647, 1) => overflow
+    %	   a: dexprlist := dexprlist$new()
+    %	   a := dexprlist$addh(a, dexpr$make_const(con$make_int_(2147483647)))
+    %	   a := dexprlist$addh(a, dexpr$make_const(con$make_int_(3)))
+    %	   d := dexpr$make_apply(op${op: "int$add", tparms: list$new(),
+    %				     oparms: list$new(), args: d2l(a)})
+    %	   return (d)
+    %	 elseif opt1 = 7 then   % int$add(2147483647, 1) => overflow
+    %	   a: dexprlist := dexprlist$new()
+    %	   a := dexprlist$addh(a, dexpr$make_const(con$make_int_(1)))
+    %	   a := dexprlist$addh(a, dexpr$make_const(con$make_int_(3)))
+    %	   d := dexpr$make_apply(op${op: "int$from_to", tparms: list$new(),
+    %				     oparms: list$new(), args: d2l(a)})
+    %	   return (d)
+    %	 elseif opt1 = 8 then   % array[int]$print()
+    %	   a: dexprlist := dexprlist$new()
+    %	   an_array: ai := ai$[1:2,3,4]
+    %	   no_ops: anop := _vec[_obj]$create(0)
+    %	   a := dexprlist$addh(a, dexpr$make_object(
+    %				      odesc${value: _cvt[ai, _obj](an_array), ops: no_ops}))
+    %	   pst: pstream := pstream$primary_output()
+    %	   a := dexprlist$addh(a, dexpr$make_object(
+    %				      odesc${value: _cvt[pstream, _obj](pst), ops: no_ops}))
+    %	   parms: dexprlist := dexprlist$fill(1, dexpr$make_idn("int"))
+    %	   d := dexpr$make_apply(op${op: "array$print", tparms: d2l(parms),
+    %				     oparms: list$new(), args: d2l(a)})
+    %	   return (d)
+    %	 end
+    %	end dparse_fake
+
+    eval_dexpr = proc(e: dexpr) returns (string, estack) signals (not_possible (string))
+	es: estack := estack$create()
+	signame: string := ""
+	eval(e, es)
+	   resignal not_possible
+	   except when signalling (sig: string):
+		       signame := sig
+		       pstream$start(pst_tyo,  "Signal: ")
+		       pstream$text(pst_tyo, sig)
+		       pstream$stop(pst_tyo, "")
+		       pstream$pause(pst_tyo, "")
+		  end
+	% pstream$start(pst_tyo, "")
+	% pstream$stop(pst_tyo, "")
+	% pstream$pause(pst_tyo, "")
+	for x: dexpr in  estack$elements(es) do
+
+	    % see if we've got a debug var: if so, print its value
+	    tagcase x
+	       tag idn (i: ident):
+		   x := dvar$get_dexpr(i)
+	       others:
+	       end
+	       except when not_found: end
+	
+	    tagcase x
+	       tag const (c: con):
+		   pstream$start(pst_tyo,  ": ")
+		   tagcase c
+		      tag int_ (i: int):
+			  int$print(i, pst_tyo)
+		      tag bool_ (b: bool):
+			  bool$print(b, pst_tyo)
+		      tag null_:
+			  null$print(nil, pst_tyo)
+		      tag char_ (ch: char):
+			  char$print(ch, pst_tyo)
+		      tag str (s: string):
+			  string$print(s, pst_tyo)
+		      tag real_ (r: real):
+			  real$print(r, pst_tyo)
+		      end
+		   pstream$stop(pst_tyo, "")
+		   pstream$pause(pst_tyo, "")
+	       tag idn (i: ident):
+		   pstream$start(pst_tyo, i || ": ")
+		   debugOPprint_val(pst_tyo, display.stack_index, 
+				    display.current_module, i)
+		      except when not_found:
+				  pstream$text(pst_tyo, "??? unknown variable")
+			     when not_possible:
+				  pstream$text(pst_tyo, "??? no print function")
+			     end
+		   pstream$stop(pst_tyo, "")
+		   pstream$pause(pst_tyo, "")
+	       tag object (od: odesc):
+		   print_result(pst_tyo, od.value, od.ops)
+	       tag acons (a: acs):
+		   logit("acons: eval_dexpr")
+	       tag scons (s: scs):
+		   logit("scons: eval_dexpr")
+	       others:
+		   logit("others: eval_dexpr")
+	       end
+	    end
+	return(signame, es)
+	end eval_dexpr
+
+    eval = proc(e: dexpr, es: estack) signals (signalling (string), not_possible (string))
+	tagcase e
+	   tag assign (a: assn):
+	       for each_dexpr: dexpr in dexprlist$elements(l2d(a.right)) do
+		   eval(each_dexpr, es)
+		   end
+		  resignal signalling
+		  resignal not_possible
+	       for each_dexpr: dexpr in dexprlist$elements(l2d(a.left)) do
+		   eval(each_dexpr, es)
+		   end
+		  resignal signalling
+		  resignal not_possible
+	       eval_assn(es, dexprlist$size(l2d(a.left)))
+	   tag apply (o: op):
+	       for each_dexpr: dexpr in dexprlist$elements(l2d(o.args)) do
+		   eval(each_dexpr, es)
+		   end
+		  resignal signalling
+		  resignal not_possible
+	       exists: bool := true
+	       arg1: dexpr := l2d(o.args)[1]
+		  except when bounds:
+			      exists := false
+			      arg1 := dexpr$make_none(nil)
+			 end
+	       fixup_rep(o, exists, arg1)
+		  resignal not_possible
+	       argcount: int
+	       is_iter: bool
+	       is_sel: bool
+	       valops: ops
+	       valcount: int
+	       addr: int
+	       sigds: sigdesclist
+	       tops: int
+	       oops: int
+	       info: rtn_info
+	       if is_regular_apply(o.op)
+		  then
+		       info := find_rtn_info(o.op)
+			  resignal not_possible
+		       tops, oops := inst_from_info(info, o.tparms, o.oparms)
+		       argcount := info.f_nargs
+		       if  argcount > list$size(o.args) then signal not_possible ("too few arguments") end
+		       if  argcount < list$size(o.args) then signal not_possible ("too many arguments") end
+		       is_iter := info.c_is_iter
+		       is_sel := false
+		       valops := info.g_vals
+		       valcount := ops$size(valops)
+		       addr := info.e_addr
+		       sigds := info.h_sigds
+		  else
+		       % handle selectors and rep$ where rep is a selector
+		       loc: int := string$indexc('$', o.op)
+		       typ: string := string$substr(o.op, 1, loc - 1)
+		       opnm: string := string$rest(o.op, loc + 1)
+		       nm: string
+		       alt_op: int
+		       if typ = "rep"
+			  then
+			       arg1nm: string := dexpr$value_idn(arg1)
+			       arg1val: _obj
+			       begin
+				   arg1 := dvar$get_dexpr(arg1nm)
+				   arg1val := dexpr$value_object(arg1).value
+				   tops := _cvt[anop,int](dexpr$value_object(arg1).ops)
+				   end
+				  except when not_found:
+					      arg1val, tops :=
+						  debugopnm2val_ops(display.stack_index,
+								    display.current_module, arg1nm)
+					 end
+			       typ, valcount, valops, alt_op :=
+				   rep_find_valops(opnm, tops)
+				  except when not_found:
+					      signal not_possible ("operation >> " || opnm || " << does not exist")
+					 end
+			  else
+			       % instantiate the operations for the selector
+			       i: int := 0
+			       for d: dexpr in dexprlist$elements(l2d(o.tparms)) do
+				   each_f: fspec := dexpr$value_field(d)
+				   opsaddr: int := teval(o2d(each_f.typ))
+				   add_selector_info2(each_f.name, i, opsaddr)
+				   i := i + 1
+				   end
+			       tops := find_selector_ops2(typ, list$size(o.tparms))
+			       valcount, valops, alt_op :=
+				   find_valops(typ, opnm, tops)
+				  except when not_found:
+					      signal not_possible ("operation >> " || opnm || " << does not exist")
+					 end
+			  end
+		       if alt_op = 0
+			  then
+			       nm := typ || "OP" || opnm
+			  else
+			       jj: int := string$indexc('_', opnm)
+			       pref: string := string$substr(opnm, 1, jj)
+			       nm := typ || "OP" || pref || int$unparse(alt_op)
+			  end
+		       oops := tops
+		       argcount := list$size(o.args)
+		       is_iter := false
+		       is_sel := true
+		       addr := sym$get_address(nm)
+		       sigds := sigdesclist$new()
+		  end
+
+	       % transfer args from dexpr form to _obj form
+	       s: _vec[_obj] := _vec[_obj]$create(20)
+	       t: int := estack$size(es)
+	       j: int := 1
+
+	       for i: int in int$from_to(t - argcount + 1, t) do
+		   s[j] := dexpr2obj(es[i])
+		      resignal not_possible
+		   j := j + 1
+		   end
+	       estack$trim(es, 1, t - argcount)
+
+	       % go do it
+	       saved_current_module: string := current_state.current_module
+	       if is_iter then
+		  iter_yield$setup(valops, o.tparms, o.oparms, info, pst_tyo)
+		  end
+	       call_clu(addr, tops, oops, s, 1, is_iter,
+			is_sel, argcount, valcount)
+	       current_state.current_module := saved_current_module
+	       if s[1] ~= _cvt[int, _obj](0) then
+		  estack$trim(es, 1, 0)         % no more computation
+		  signm: string := _cvt[_obj,string](_pclu_erstr2(s[1]))
+		  for sd: sigdesc in sigdesclist$elements(sigds) do
+		      if debugOPcmp_sig(signm, sd.a_nm) then
+			 j := 2
+			 sz: int := debugopget_sigvalcount(sd)
+			 for i: int in int$from_to(1, sz) do
+			     sigvalops: anop := debugopget_nth_sigvalops(sd, i, info, tops, oops)
+			     estack$push(es, dexpr$make_object(
+						 odesc${value: s[j],
+							ops: sigvalops}))
+			     j := j + 1
+			     end
+			 end
+		      end
+		  signal signalling (signm)
+		  end
+	       % put results onto dexpr stack
+	       if ~is_iter then
+		  j := 2
+		  for i: int in int$from_to(1, valcount) do
+		      ithops: anop
+		      if is_sel
+			 then
+			      ithops := _cvt[ops, anop](valops)
+			 else
+			      ithops := debugopget_nth_op(valops, i, info, tops, oops)
+				 except when not_found (ops_name:string):
+					     ithops := _cvt[int, anop](inst_from_name(ops_name, info,
+										      o.tparms, o.oparms))
+					end
+			 end
+		      estack$push(es, dexpr$make_object(odesc${value:s[j], ops: ithops}))
+		      j := j + 1
+		      end
+		  end
+	   tag acons(a: acs):
+	       if a.typ = "array"
+		  then
+		       % cons an array with the specified lower bound
+		       start: int := _cvt[_obj,int](dexpr2obj(_cvt[_obj,dexpr](a.start)))
+			  resignal not_possible
+		       ao: array[_obj] := array[_obj]$predict(start, list$size(a.vals))
+	       
+		       % eval each val and addh it to the array
+		       for each_val: dexpr in dexprlist$elements(l2d(a.vals)) do
+			   array[_obj]$addh(ao, dexpr2obj(each_val))
+			      resignal not_possible
+			   end
+		       % do instantiation work
+		       opers: int := teval(o2d(a.parm[1]))
+		       reqs: int := sym$get_address("array_of_t_reqs_actual")
+		       clu_add_parm_info_type(0, opers, reqs)
+		       opers := sym$get_address("array_ops_actual")
+		       ownreqs: int := sym$get_address("array_ownreqs")
+		       tops: int := clu_find_type_instance(opers, 1, ownreqs)
+
+		       % create odesc & put it on the stack
+		       estack$push(es, dexpr$make_object(
+					   odesc${value:_cvt[array[_obj],_obj](ao),
+						  ops: _cvt[int, _vec[_obj]](tops)}))
+		elseif a.typ = "sequence"
+		  then
+		       % create a sequence
+		       s: sequence[_obj] := sequence[_obj]$[]
+		       % put vals into it
+		       for each_val: dexpr in dexprlist$elements(l2d(a.vals)) do
+			   s := sequence[_obj]$addh(s, dexpr2obj(each_val))
+			      resignal not_possible
+			   end
+		       % do instantiation work
+		       opers: int := teval(o2d(a.parm[1]))
+		       reqs: int := sym$get_address("sequence_of_t_reqs_actual")
+		       clu_add_parm_info_type(0, opers, reqs)
+		       opers := sym$get_address("sequence_ops_actual")
+		       ownreqs: int := sym$get_address("sequence_ownreqs")
+		       tops: int := clu_find_type_instance(opers, 1, ownreqs)
+
+		       % create odesc & put it on  the stack
+		       estack$push(es, dexpr$make_object(
+					   odesc${value:_cvt[sequence[_obj],_obj](s),
+						  ops: _cvt[int, _vec[_obj]](tops)}))
+		else
+		     logit(" unexpected type " || a.typ || " in acons/eval")
+		end
+	   tag scons(s: scs):
+
+	       % make a blank record of the appropriate size
+	       sz: int := list$size(s.vals)
+	       r: vo := vo$create(sz)
+
+	       % stuff the values in it
+	       for i: int in list$indexes(s.vals) do
+		   r[i] := dexpr2obj(l2d(s.vals)[i])
+		      resignal not_possible
+		   end
+	       % instantiate the operations for the record
+	       i: int := 0
+	       for each_d: dexpr in dexprlist$elements(l2d(s.parms)) do
+		   each_f: fspec := dexpr$value_field(each_d)
+		   opsaddr: int := teval(o2d(each_f.typ))
+		   add_selector_info2(each_f.name, i, opsaddr)
+		   i := i + 1
+		   end
+	       tops: int := find_selector_ops2(s.typ, sz)
+	       % create odesc & put it on  the stack
+	       estack$push(es,
+			   dexpr$make_object(
+			       odesc${value:_cvt[vo,_obj](r),
+				      ops: _cvt[int, _vec[_obj]](tops)}))
+	   tag vcons(v: vcs):
+	       to = _tagcell[_obj]
+	       sz: int := list$size(v.parms)
+	       % create a tagcell
+	       tagc: to := to$create(v.tg, dexpr2obj(_cvt[_obj,dexpr](v.val)))
+		  resignal not_possible
+
+	       % instantiate the operations for the oneof/variant
+	       i: int := 0
+	       for each_d: dexpr in dexprlist$elements(l2d(v.parms)) do
+		   each_f: fspec := dexpr$value_field(each_d)
+		   opsaddr: int := teval(o2d(each_f.typ))
+		   add_selector_info2(each_f.name, i, opsaddr)
+		   i := i + 1
+		   end
+	       tops: int := find_selector_ops2(v.typ, sz)
+	       % create odesc & put it on the stack
+	       estack$push(es,
+			   dexpr$make_object(
+			       odesc${value:_cvt[to,_obj](tagc),
+				      ops: _cvt[int, _vec[_obj]](tops)}))
+	   tag const (c: con):
+	       estack$push(es, e)
+	   tag idn (i:ident):
+	       estack$push(es, e)
+	   tag object (o: odesc):
+	       estack$push(es, e)
+	   tag none, field:
+	       signal failure("no expr 1")
+	   others:
+	       signal failure("no expr 2")
+	   end
+	end eval
+
+    % if o.op is of the form rep$foo then change rep to a type
+
+    fixup_rep = proc(o: op, exists: bool, arg1: dexpr) signals (not_possible(string))
+	if ~exists then return end		% can't do anything without an argument
+	loc: int := string$indexc('$', o.op)
+	if loc = 0 then return end
+	typ: string := string$substr(o.op, 1, loc - 1)
+	opnm: string := string$rest(o.op, loc + 1)
+	nm: string
+	tops: int := 0
+	if typ = "rep"
+	   then
+		arg1 := l2d(o.args)[1]
+		arg1nm: string := dexpr$value_idn(arg1)
+		arg1val: _obj
+		begin
+		    % see if argument is a debugger variable
+		    arg1 := dvar$get_dexpr(arg1nm)
+		    arg1val := dexpr$value_object(arg1).value
+		    tops := _cvt[anop,int](dexpr$value_object(arg1).ops)
+		    end
+		   except when not_found:
+			       % arg is not a debugger variable
+			       % 	try to find it on the stack or in owns
+			       arg1val, tops :=
+				   debugopnm2val_ops(display.stack_index,
+						     display.current_module, arg1nm)
+				  except when not_found:
+					      signal not_possible ("no variable named >> " || arg1nm || " << found")
+					 end
+			  end
+		if tops = 0 then return end
+		% we've found the operations for the 1st argument
+		%	now see if we can find a name for the operations
+		%	this will give us the name of the type
+		actnm: string := sym$get_name(tops)
+		   except when not_found:
+			       % see if it's an instantiation of a parameterized type
+			       % abstract ops will yield (eventually) the name
+			       % the tparms can be put in o.tparms
+			       aops: ops, tparmcount: int, index: int := 
+				   find_tgen(_cvt[int, ops](tops))
+				  except when not_found: return end
+			       tparms: list := list$new()
+			       for ith: int in int$from_to(1, tparmcount) do
+				   ithparm: ops := find_tgen_parm(index, ith-1)
+				   tparms := list$addh(tparms, 
+						       d2o(dexpr$make_instance(instance${ops:
+											 _cvt[ops, anop](ithparm)})))
+				   end
+			       o.tparms := tparms
+			       actnm := sym$get_name(_cvt[ops, int](aops))
+			  end
+		loc := string_lindexs("_ops_actual", actnm)
+		acttyp: string := string$substr(actnm, 1, loc - 1)
+		nm := acttyp || "OP" || opnm
+		o.op := nm
+	   else
+		% typ is not "rep", so do nothing
+		return
+	   end
+	end fixup_rep
+
+
+    teval = proc(t:dexpr) returns (int)
+	tagcase t
+	   tag idn(id: ident):
+	       return(sym$get_address(id || "_ops_actual"))
+	   tag tgen (tg: tgen):
+	       % get formals for type generator
+	       tformals: as := as$new()
+	       aname: string := "tformals_" || tg.name
+	       a: int := sym$get_address(aname)
+	       for i: int in int$from_to(1, list$size(tg.parms)) do
+		   as$addh(tformals, debugopget_nth_formal(a, i))
+		   end
+	       opers: int
+	       i: int := 0
+	       for each_parm: dexpr in dexprlist$elements(l2d(tg.parms)) do
+		   opers := teval(each_parm)
+		   reqs: int := sym$get_address(tg.name || "_of_" ||
+						tformals[i+1] || "_reqs_actual")
+		   clu_add_parm_info_type(i, opers, reqs)
+		   i := i + 1
+		   end
+	       opers := sym$get_address(tg.name || "_ops_actual")
+	       ownreqs: int := sym$get_address("array_ownreqs")
+	       tops: int := clu_find_type_instance(opers, 1, ownreqs)
+	       return (tops)
+	   tag sel(sl: sel):
+	       i: int := 0
+	       for d: dexpr in dexprlist$elements(l2d(sl.parms)) do
+		   each_f: fspec := dexpr$value_field(d)
+		   opsaddr: int := teval(o2d(each_f.typ))
+		   add_selector_info2(each_f.name, i, opsaddr)
+		   i := i + 1
+		   end
+	       tops: int := find_selector_ops2(sl.name, list$size(sl.parms))
+	       return (tops)
+	   tag instance (it: instance):
+	       return (_cvt[anop,int](it.ops))
+	   others:
+	       logit(" losing in teval ")
+	   end
+	end teval
+
+    is_regular_apply = proc(opnm: string) returns (bool)
+	loc: int := string$indexc('O', opnm)
+	if loc = 0 then loc := string$indexc('$', opnm) end
+	if loc = 0 then return (true) end
+	typ: string := string$substr(opnm, 1, loc-1)
+	if typ = "record" cor typ = "struct"
+	     cor typ = "oneof" cor typ = "variant"
+	     cor typ = "rep"
+	   then return (false) else return (true) end
+	end is_regular_apply
+
+    dexpr2obj = proc(d: dexpr) returns (_obj) signals (not_possible (string))
+	tagcase d
+	   tag const(c: con):
+	       tagcase c
+		  tag int_(m: int):
+		      return(_cvt[int, _obj](m))
+		  tag bool_(b: bool):
+		      return(_cvt[bool, _obj](b))
+		  tag char_(ch: char):
+		      return(_cvt[char, _obj](ch))
+		  tag str(st: string):
+		      return(_cvt[string, _obj](st))
+		  tag real_(r: real):
+		      return(_cvt[real, _obj](r))
+		  tag null_(n: null):
+		      return(_cvt[null, _obj](n))
+		  end
+	   tag object (ob: odesc):
+	       return(ob.value)
+	   tag idn (id: string):
+	       return(dvar$get_value(id))
+		  except when not_found:
+			      return(debugopget_val(display.stack_index,
+						    display.current_module,
+						    slower(id)))
+				 except when not_found:
+					     signal not_possible ("no variable named >> " || id || " << found")
+					end
+			 end
+	   others:
+	       logit("dexpr2obj losing")
+	       return(_cvt[int,_obj](0))
+	   end
+	end dexpr2obj
+
+    eval_assn = proc(a:estack, n: int) signals (not_possible)
+	j: int
+	for i: int in int$from_to(1, n) do
+	    j := i + n
+	    value: _obj := _cvt[int, _obj](0)
+	    tagcase a[i]
+	       tag const (c:con):
+		   tagcase c
+		      tag bool_ (b: bool):
+			  value := _cvt[bool,_obj](b)
+		      tag char_ (ch: char):
+			  value := _cvt[char,_obj](ch)
+		      tag int_ (m: int):
+			  value := _cvt[int,_obj](m)
+		      tag str (s: string):
+			  value := _cvt[string,_obj](s)
+		      tag real_ (r: real):
+			  value := _cvt[real,_obj](r)
+		      tag null_ (n1: null):
+			  value := _cvt[null,_obj](n1)
+		      end
+	       tag acons (a1: acs):
+		   logit("acons: eval_assn")
+	       tag scons (s: scs):
+		   logit("scons: eval_assn")
+	       tag object (o: odesc):
+		   value := o.value
+	       tag idn (id: string):
+		   value := dvar$get_value(id)
+		      except when not_found:
+				  value := debugopget_val(display.stack_index,
+						          display.current_module,
+							  slower(id))
+				     except when not_found:
+						 err_out(id || " not found")
+						 signal not_possible
+					    end
+			     end
+	       others:
+		   logit("others: eval_assn 2")
+	       end
+	    tagcase a[j]
+	       tag idn (id: string):
+		   debugopset_val(display.stack_index, display.current_module, slower(id), value)
+		      except when not_found:
+				  % begin new code 1/4/94: i = 3 ; j = i
+				  d: dexpr := a[i]
+				  if dexpr$is_idn(d) then
+				     d := dvar$get_dexpr(dexpr$value_idn(d))
+				     end
+				     except when not_found: end
+				  % end new code
+				  dvar$set_value(id, d)
+				     except when not_found:
+						 pstream$start(pst_tyo, "")
+						 pstream$text(pst_tyo, id)
+						 pstream$text(pst_tyo, ": ??? Unknown variable")
+						 pstream$stop(pst_tyo, "")
+						 pstream$pause(pst_tyo, "")
+						 estack$trim(a, 1, i - 1)
+						 return
+					    end
+			     when not_possible:
+				  pstream$start(pst_tyo, "")
+				  pstream$text(pst_tyo, id)
+				  pstream$text(pst_tyo, ": ??? no print function")
+				  pstream$stop(pst_tyo, "")
+				  pstream$pause(pst_tyo, "")
+				  estack$trim(a, 1, i - 1)
+				  return
+			     end
+	       others:
+		   logit("others: eval_assn 3")
+	       end
+	    a[i] := a[j]
+	    end
+	estack$trim(a, 1, n)
+	end eval_assn
+
+    find_normal_ops = proc(nm: string) returns (ops) signals (not_possible (string))
+	r: rtn_info := find_rtn_info(nm) resignal not_possible
+	return (r.g_vals)
+	end find_normal_ops
+
+    find_signal_ops = proc(sig: string, nm: string) returns (ops) signals (not_possible (string))
+	r: rtn_info := find_rtn_info(nm) resignal not_possible
+	for each_d: sigdesc in sigdesclist$elements(r.h_sigds) do
+	    if sig = each_d.a_nm then return (each_d.b_vals) end
+	    end
+	end find_signal_ops
+
+    find_rtn_info = proc(nm: string) returns (rtn_info) signals (not_possible (string))
+	ri: rtn_info := _cvt[int, rtn_info] (sym$get_address
+						 ("dbg_info_" || nm || "_data"))
+	   except when not_found:
+		       signal not_possible("proc/iter >> " || externalize(nm) || " << does not exist ")
+		  end
+	return (ri)
+	end find_rtn_info
+
+    help_cmd = proc(args: string)
+	arglist: as := parse_line(args)
+	if as$size(arglist) = 0
+	   then
+		stream$putl(tyo, "")
+		stream$putl(tyo, "Category:\tCommands")
+		stream$putl(tyo, "")
+		stream$putl(tyo, "Breakpoints:\tbreak, step, unstep, show, delete")
+		stream$putl(tyo, "Signal Tracing:\ttrace, untrace, show, delete")
+		stream$putl(tyo, "Running:\tcontinue, run, next, restart, rebuild")
+		stream$putl(tyo, "Display:\tprint, width, depth, help, where, up, down, list, func")
+		stream$putl(tyo, "Invocation:\teval, alias, unalias, execute                             ")
+		stream$putl(tyo, "Other:\t\tquit")
+		stream$putl(tyo, "")
+	   else
+		% look up command in list
+		% print corresponding info
+		% handle command not in list
+		stream$putl(tyo, "")
+		for each_arg: string in as$elements(arglist) do
+		    found: bool := false
+		    for each_cmd: cmd in acmd$elements(cmd_desc) do
+			if string$indexs(each_arg, each_cmd.name) = 1
+			     cor each_arg = "all" then
+			   found := true
+			   stream$putl(tyo, each_cmd.name || " " || each_cmd.info) end
+			end
+		    if ~found then
+		       stream$putl(tyo, "sorry, no information about " || each_arg)
+		       end
+		    end
+		stream$putl(tyo, "")
+	   end
+	end help_cmd
+
+    where_cmd = proc(args: string)
+	arglist: as := parse_line(args)
+	if as$size(arglist) > 1 then
+	   stream$putl(tyo, "\nToo many arguments to where command\n")
+	   return
+	   end
+
+	% top: int := current_state.nframes
+	top: int := debugOPframe_count()        % for segv stack trace
+	if as$size(arglist) = 1 then
+	   utop: int := int$parse(arglist[1])
+	      except others (s:string):
+			  stream$putl(tyo, "\nBad argument to where command\n")
+			  return
+		     end
+	   if utop < 1 then
+	      stream$putl(tyo, "\nBad argument to where command\n")
+	      return
+	      end
+	   if utop < top cand utop > 0 then top := utop end
+	   end
+
+	% look at the stack once to compute some formatting info
+	leadsp: int := digits(top)
+	maxlineno: int := 0
+	maxnm: int := 0
+	ri: rtn_info
+	line: int
+	for i: int in int$from_to_by(1, top, 1) do
+	    ri, line := debugOPframe_info(i)
+	       except when none:
+			   continue
+		      end
+	    nmlen: int := string$size(externalize(debugopget_name(ri)))
+	    if nmlen > maxnm then maxnm := nmlen end
+	    lineln: int := digits(line)
+	    if lineln > maxlineno then maxlineno := lineln end
+	    end
+
+	% look at the stack again and really print it out
+	stream$puts(tyo, "\n")
+	for i: int in int$from_to_by(1, top, 1) do
+	    ri, line := debugOPframe_info(i)
+	       except when none:
+			   stream$puts(tyo, "  ")
+			   stream$putspace(tyo, leadsp - digits(i))
+			   stream$puts(tyo, int$unparse(i))
+			   stream$putl(tyo, ": OWN INIT PROC")
+			   continue
+		      end
+	    nm: string := debugOPget_name(ri)
+	    % 3/15/94: dcurtis: make * behave better during recursion
+	    if i = display.stack_index
+	       then
+		    stream$puts(tyo, "*>")
+	       else
+		    stream$puts(tyo, "  ")
+	       end
+	    nm := externalize(nm)
+	    stream$putspace(tyo, leadsp - digits(i))
+	    stream$puts(tyo, int$unparse(i))
+	    stream$puts(tyo, ": ")
+	    stream$puts(tyo, nm)
+	    stream$putspace(tyo, 1 + maxnm - string$size(nm) +
+				 maxlineno - digits(line))
+	    src$list(tyo, debugOPget_fname(ri), nm, line, line, -1, true, false)
+	    end
+	stream$puts(tyo, "\n")
+	end where_cmd
+
+    digits = proc(num: int) returns (int)
+	sign: int := 0
+	if num < 0 then sign := 1 num := -num end
+	count: int := 1
+	while true do
+	    if num > int$power(10,count) then count := count + 1 continue
+	       else break end
+	    end
+	return (count + sign)
+	end digits
+
+    func_cmd = proc(args: string)
+	arglist: as := parse_line(args)
+	if as$size(arglist) = 0 then
+	   stream$putl(tyo, "\nToo few arguments to func command\n")
+	   return
+	 elseif as$size(arglist) > 1 then
+	   stream$putl(tyo, "\nToo many arguments to func command\n")
+	   return
+	 end
+	func: string := internalize(args)
+	info: rtn_info := find_rtn_info(args)
+	fnm: string := debugopget_fname(info)
+	display.current_module := args
+	display.current_line := src$find_module(fnm, func)
+	end func_cmd
+
+    up_cmd = proc(args: string)
+	arglist: as := parse_line(args)
+	if ~(as$size(arglist) = 0 cor as$size(arglist) = 1) then
+	   stream$putl(tyo, "\nToo many arguments to up command\n")
+	   return
+	   end
+	delta: int
+	if string$size(args) = 0 then delta := 1
+	   else delta := int$parse(args) end
+	   except others:
+		       err_out("can't parse argument")
+		  end
+	new_frame: int := display.stack_index - delta
+	while true do
+	    if new_frame < 1 cor new_frame > current_state.nframes
+	       then
+		    err_out("not that many frames")
+		    return
+	       else
+		    ri: rtn_info line: int
+		    ri, line := debugopframe_info(new_frame)
+		       except when none:
+				   new_frame := new_frame - 1
+				   stream$putl(tyo, "skipping over an own init procedure")
+				   continue
+			      end
+		    display.stack_index := new_frame
+		    display.current_module := debugopget_name(ri)
+		    display.current_line := line
+		    fnm: string := debugopget_fname(ri)
+		    stream$putspace(tyo, 2)
+		    stream$puts(tyo, int$unparse(new_frame))
+		    stream$puts(tyo, ": ")
+		    stream$puts(tyo, externalize(display.current_module))
+		    stream$putspace(tyo, 2)
+		    src$list(tyo, fnm, display.current_module, line, line, -1,
+			     true, false)
+		    return
+	       end
+	    end
+	end up_cmd
+
+    down_cmd = proc(args: string)
+	arglist: as := parse_line(args)
+	if ~(as$size(arglist) = 0 cor as$size(arglist) = 1) then
+	   stream$putl(tyo, "\nToo many arguments to down command\n")
+	   return
+	   end
+	delta: int
+	if string$size(args) = 0 then delta := 1
+	   else delta := int$parse(args) end
+	   except others:
+		       err_out("parse argument")
+		  end
+	new_frame: int := display.stack_index + delta
+	if new_frame < 1 cor new_frame > current_state.nframes
+	   then
+		err_out("not that many frames")
+	   else
+		while true do
+		    display.stack_index := new_frame
+		    ri: rtn_info line: int
+		    ri, line := debugopframe_info(new_frame)
+		       except when none:
+				   new_frame := new_frame + 1
+				   stream$putl(tyo, "skipping over an own init procedure")
+				   continue
+			      end
+		    display.current_module := debugopget_name(ri)
+		    display.current_line := line
+		    fnm: string := debugopget_fname(ri)
+		    stream$putspace(tyo, 2)
+		    stream$puts(tyo, int$unparse(new_frame))
+		    stream$puts(tyo, ": ")
+		    stream$puts(tyo, externalize(display.current_module))
+		    stream$putspace(tyo, 2)
+		    src$list(tyo, fnm, display.current_module, line, line, -1,
+			     true, false)
+		    return
+		    end
+	   end
+	end down_cmd
+
+    list_cmd = proc(args: string)
+	own save_fn: string := ""
+	own save_mod: string := ""
+
+	mod: string := display.current_module
+	line: int := display.current_line
+	fn: string
+	if mod ~= save_mod
+	   then
+		ri: rtn_info := find_rtn_info(mod)
+		fn := debugOPget_fname(ri)
+		save_fn := fn
+		save_mod := mod
+	   else
+		fn := save_fn
+	   end
+	first, last: int
+	if string$empty(args)
+	   then
+		first := line - 5
+		if first < 1 then first := 1 end
+		last := first + 10
+	   else
+		arglist: as := parse_line(args)
+		if as$size(arglist) = 1
+		   then
+			first := int$parse(arglist[1])
+			last := first + 10
+		 elseif as$size(arglist) = 2
+		   then
+			first := int$parse(arglist[1])
+			last := int$parse(arglist[2])
+		 else
+		      pstream$text(pst_tyo, "??? unknown variable")
+		 end
+	   end
+	src$list(tyo, fn, mod, first, last, line, true, true)
+	end list_cmd
+
+    delete_cmd = proc(args: string)
+	% decipher which break point(s) to delete
+	% delete from our list
+	% tell debug_c
+	line: int
+	func: string
+	arglist: as := parse_line(args)
+	if as$size(arglist) = 1 cand arglist[1] = "all"
+	   then
+		ctl_pts$clear()
+		return
+	   end
+	for arg: string in as$elements(arglist) do
+	    if string$indexc(arg[1], "0123456789") ~= 0
+	       then
+		    line := int$parse(arg)
+		    ctl_pts$bp_remove(externalize(display.current_module), "l", line)
+	       else
+		    func := arg
+		    ctl_pts$bp_remove(func, "f", 0)
+	       end
+	       except when not_found:
+			   stream$putl(tyo, arg || " not found ")
+		      when error (why: string):
+			   err_out(why)
+		      end
+	    end
+	end delete_cmd
+
+    show_cmd = proc(args: string)
+	arglist: as := parse_line(args)
+	if as$size(arglist) ~= 0 then
+	   stream$putl(tyo,
+		       "\nToo many arguments to the show command\n")
+	   end
+	ctl_pts$print(tyo)
+	end show_cmd
+
+    err_out = proc(why: string)
+	own pe: stream := stream$error_output()
+	stream$puts(pe, "\nERROR: ")
+	stream$puts(pe, why)
+	stream$puts(pe, "\n\n")
+	end err_out
+
+    end debug
+
+pc_slower = proc (s: string) returns (string)
+    ac = array[char]
+    a: ac := string$s2ac (s)
+    active: bool := true
+    for i: int in ac$indexes (a) do
+	if a[i] = '\'' cor a[i] = '\"'
+	   then active := ~active  end
+	if active then a[i] := lower (a[i]) end
+	end
+    return (string$ac2s (a))
+    end pc_slower
+

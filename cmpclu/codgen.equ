@@ -1,0 +1,57 @@
+%	CODGEN	EQUATE
+% Copyright Massachusetts Institute of Technology 1982, 1989
+%	CLU Compiler Version 3: machine dependent definitions
+
+# extend
+
+locate	= oneof[a:	null,		% nothing (must be first tag!)
+		rparm,			% routine parameter
+		cparm,			% cluster parameter
+		rown,			% routine own
+		cown,			% cluster own
+		prown,			% parameterized routine own
+		pcown:	mref,		% parameterized cluster own
+		var,			% variable
+		ivar,			% variable indirect
+		reg:	int,		% register
+		disp,			% offset register
+		index:	regdisp,	% offset register indexed
+		tos:	null]		% top of stack
+
+regdisp	= struct[reg:  int,
+		 disp: int]		% disp <= 0 --> indirect
+
+reglist	= array[locate]
+
+calloc	= oneof[use,			% routine
+		var,			% variable
+		temp,			% temporary variable
+		parm: int]		% parameter
+
+mref	= oneof[ref, val: int]		% reference, integer, or oneof
+
+qv	= sequence[mref]
+av	= array[mref]
+
+reglocs = sequence[locate]$[locate$make_reg(1),
+			    locate$make_reg(2),
+			    locate$make_reg(3),
+			    locate$make_reg(4),
+			    locate$make_reg(5),
+			    locate$make_reg(6),
+			    locate$make_reg(7),
+			    locate$make_reg(8),
+			    locate$make_reg(9),
+			    locate$make_reg(10),
+			    locate$make_reg(11)]
+
+_simple	= -1
+_border	= 0
+_medium	= 1
+_hard	= 2
+
+_cause	= 0
+_wexit	= 1
+_cexit	= 2
+_oexit	= 3
+_resig	= 4

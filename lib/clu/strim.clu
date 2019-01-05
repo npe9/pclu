@@ -1,0 +1,52 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+% String trimming routines for general consumption
+
+trim_head = proc (s: string) returns (string)
+   len: int := string$size (s)
+   if len = 0 then return (s) end
+   idx: int := 1
+   while true do
+      c: char := s[idx]
+      if c ~= ' ' cand c ~= '\t' then
+	    return (string$rest (s, idx))
+	 end
+      idx := idx + 1
+      if idx > len then return ("") end
+      c := s[idx]
+      end
+   end trim_head
+
+trim_tail = proc (s: string) returns (string)
+   len: int := string$size (s)
+   if len = 0 then return (s) end
+   idx: int := len
+   while true do
+      c: char := s[idx]
+      if c ~= ' ' cand c ~= '\t' then
+	    return (string$substr (s, 1, idx))
+	 end
+      idx := idx - 1
+      if idx = 0 then return ("") end
+      c := s[idx]
+      end
+   end trim_tail
+
+trim_both = proc (s: string) returns (string)
+   len: int := string$size (s)
+   if len = 0 then return (s) end
+   idx: int := 1
+   while true do
+      c: char := s[idx]
+      if c ~= ' ' cand c ~= '\t' then break end
+      idx := idx + 1
+      if idx > len then return ("") end
+      c := s[idx]
+      end
+   while true do
+      c: char := s[len]
+      if c ~= ' ' cand c ~= '\t' then
+	    return (string$substr (s, idx, len-idx+1))
+	 end
+      len := len - 1
+      end
+   end trim_both

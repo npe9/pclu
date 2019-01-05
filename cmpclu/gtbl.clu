@@ -1,0 +1,989 @@
+
+%  Copyright    Massachusetts Institute of Technology     1990,1991
+
+%%%
+%%% Cluster to generate tables for records and other selectors and parameters
+%%%
+
+g_tbl = cluster is Find_Tables, Build_Tables, G_Field_Tables, Exist, Prune
+
+    rep = null
+    own cum_pbl: pblist := pblist$new()
+
+    exist = proc() returns (bool)
+	if pblist$size(cum_pbl) = 0
+	   then
+		return (false)
+	   else
+		return (true)
+	   end
+	end exist
+
+    % actually finds selectors and generates decls
+
+    find_tables = proc(e: g_env, bod: stmtlist, d: definition)
+	pbl: pblist := pblist$new()
+	if dbg_info$active() then
+	   if definition$is_apply(d) then
+	      find_tbls_in_signature(definition$value_apply(d), pbl)
+	      else
+		   for each_ap: applydefn in applydefnlist$elements(
+						 definition$value_cluster_(d).body) do
+		       find_tbls_in_signature(each_ap, pbl)
+		       end
+	      end
+	   end
+	find_tbls(bod, pbl)
+	pbl := tbl_uniq(pbl)
+        cum_pbl := pbl
+	% logit("g_tbl size: " || int$unparse(pblist$size(cum_pbl)))
+	g_field_tables(e, static)
+	return
+	end find_tables
+
+    find_tbls_in_signature = proc(ap: applydefn, pbl: pblist)
+	find_tbl_decllist(ap.args, pbl)
+	% 4/5/94: dcurtis: reinstated for debugging only
+   	if dbg_info$active() then
+	% 2/14/94: dcurtis: removed the following statements, as there
+	%	are no names for these exprs and other supporting structures
+	%	were missing
+	  find_tbl_typelist(ap.vals, pbl)
+	  for e: exception in exceptionlist$elements(ap.sigs) do
+	    find_tbl_typelist(e.types, pbl)
+	  end
+	end
+	end find_tbls_in_signature
+
+    %    combs the parse tree of stmts for exprs that might have selectors or
+    %			parameterized exprs
+
+    find_tbls = proc(bod:stmtlist, pbl: pblist)
+	for s: stmt in stmtlist$elements(bod) do
+	    % logit("\n/**** " || int$unparse(s.line) || " ****/\n")
+	    % stmt_print(s)
+	    tagcase s.abs
+	       tag declinit(di: declinit):
+		   find_tbl_exprs(di.expr, pbl)
+		   find_tbl_decllist(di.anys, pbl)
+	       tag assn(as: assn):
+		   find_tbl_exprlist(as.right, pbl)
+	       tag sugarassn(as: sugarassn):
+		   find_tbl_exprs(as.left, pbl)
+		   find_tbl_exprs(as.right, pbl)
+	       tag invoke(inv:invoke):
+		   find_tbl_exprs(inv.apply, pbl)
+		   find_tbl_exprlist(inv.args, pbl)
+	       tag while_(w: whilestmt):
+		   find_tbl_exprs(w.test, pbl)
+		   find_tbls(w.body.stmts, pbl)
+	       tag for_ (f: forstmt):
+		   if dbg_info$active() then
+		      tagcase f.vars
+		         tag new (dl:decllist):
+			     find_tbl_decllist(dl, pbl)
+		         tag old:
+		         end
+		      end
+		   find_tbl_exprs(f.call.apply, pbl)
+		   find_tbl_exprlist(f.call.args, pbl)
+		   find_tbls(f.body.stmts, pbl)
+	       tag if_ (i: ifstmt):
+		   for arm: ifarm in ifarmlist$elements (i.arms) do
+		       find_tbl_exprs(arm.test, pbl)
+		       find_tbls (arm.body.stmts, pbl)
+		       end % for
+		   tagcase i.else_
+		      tag body (b:body):
+			  find_tbls(b.stmts, pbl)
+		      others:
+		      end
+	       tag tag_ (t: tagstmt):
+		   find_tbl_exprs(t.obj, pbl)
+		   for arm: tagarm in tagarmlist$elements(t.arms) do
+		       find_tbls(arm.body.stmts, pbl)
+		       end % for
+		   tagcase t.others_
+		      tag body (b: body):
+			  find_tbls(b.stmts, pbl)
+		      others:
+		      end
+	       tag return_(el: exprlist):
+		   find_tbl_exprlist(el, pbl)
+	       tag yield_(el: exprlist):
+		   find_tbl_exprlist(el, pbl)
+	       tag signal_(c: condition):
+		   find_tbl_exprlist(c.args, pbl)
+	       tag exit_(c: condition):
+		   find_tbl_exprlist(c.args, pbl)
+	       tag body (b: body):
+		   find_tbls(b.stmts, pbl)
+	       tag except_ (e: exceptstmt):
+		   find_tbls(stmtlist$fill(1, e.stmt), pbl)
+		   for a: handler in handlerlist$elements(e.arms) do
+		       find_tbls(a.body.stmts, pbl)
+		       end % for
+
+		   tagcase e.others_
+		      tag arm (a: othersarm):
+			  find_tbls(a.body.stmts, pbl)
+		      others:
+		      end
+	       tag resignal_ (r: resignalstmt):
+		   find_tbls(stmtlist$fill(1, r.stmt), pbl)
+	       tag force_ (f: forcestmt):
+		   find_tbl_exprs(f.expr, pbl)
+	       tag decl (d: decl):
+		   if dbg_info$active() then
+		      find_tbl_decl(d, pbl)
+		      end
+	       others:
+	       end
+	    end % for
+	end find_tbls
+
+    find_tbl_decllist = proc(dl: decllist, pbl: pblist)
+	for each_d: decl in decllist$elements(dl) do
+	    find_tbl_decl(each_d, pbl)
+	    end % for
+	end find_tbl_decllist
+
+    find_tbl_decl = proc(d: decl, pbl: pblist)
+	find_tbl_type_(d.type_, pbl)
+	end find_tbl_decl
+
+    find_tbl_typelist = proc(tys: typelist, pbl:pblist)
+	for ty: typespec in typelist$elements(tys) do
+	    find_tbl_type_(ty, pbl)
+	    end
+	end find_tbl_typelist
+
+    find_tbl_type_ = proc(type_: typespec, pbl: pblist)
+	tagcase type_.abs
+	   tag cluster_ (ct: clutype):
+	       find_tbl_exprlist(ct.parms, pbl)
+	       if exprlist$size(ct.parms) > 0
+		  then
+		       pblist$addh(pbl, pb$make_apply(ct))
+		       % logit(98, "1 adding apply " || ct.gen.common)
+		  else
+		       if parmd_dus(ct.gen) then
+			  %logit("adding apply")
+			  % logit(98, "2 adding apply " || ct.gen.common)
+			  pblist$addh(pbl, pb$make_apply(ct)) end
+		  end
+	   tag select (xt: seltype):
+	       find_tbl_fieldspeclist(xt.parms, pbl)
+	       pblist$addh(pbl, pb$make_selinfo(
+				    selectinfo${name: xt.gen.common,
+						fields: xt.parms}))
+	   tag apply (ap: applytype):
+	       % track through DU to applyinfo
+	       % pblist$addh(pbl, pb$make_ainfo)
+	       % occurs when a variable is declared to be of type proctype
+	       % 10/4/91 dcurtis: removed logit
+	       %        this case occurs when a variable is declared to be
+	       % 	of type proctype
+	       %	actual work may be necessary here sometime
+	       %	but, for now, no problems are occurring.
+	       % logit("time to fix apply in type_ in find_tbls: " || ap.gen.common)
+	   tag idn (i: idn):
+	       % should be a parm of current type: ?check : yes
+	       % no extern should be needed: ?other reason to add to pblist
+	       % clusterop should be possible?
+	       % 10/4/91 dcurtis: removed logit
+	       %        this case occurs when a variable is declared to be
+	       % 	the type of a parameter
+	       %	actual work may be necessary here sometime
+	       %	but, for now, no problems are occurring.
+	       % logit("time to fix idn in type_ in find_tbls: " || i.str)
+	   tag type_ (ct: clutype):
+	       find_tbl_exprlist(ct.parms, pbl)
+	       % logit(98, "3 adding apply " || ct.gen.common)
+	       pblist$addh(pbl, pb$make_apply(ct))
+	   tag cvt_:
+	       % should be fixable by looking at down_
+	       %    	& makeing a clusterop
+	       % occurs when a variable is declared to be of type proctype
+	       % 10/4/91 dcurtis: removed logit
+	       %        this case has not yet occurred.
+	       %	actual work may be necessary here sometime
+	       %	but, for now, no problems are occurring.
+	       % logit("time to fix cvt_ in type_ in find_tbls")
+	   tag any_:
+	       % may need fixing sometime: just suppress message for now
+	       % logit(" yes we get here ")
+	   others:
+	       logit(700, "find_tbl_type_: others")
+	       typespec_print(type_)
+	   end
+	end find_tbl_type_
+
+    %    iterates over exprlists
+
+    find_tbl_exprlist = proc(el: exprlist, pbl: pblist)
+	for each_e: expr in exprlist$elements(el) do
+	    find_tbl_exprs(each_e, pbl)
+	    end % for
+	end find_tbl_exprlist
+
+    %    iterates over fieldspeclists
+
+    find_tbl_fieldspeclist = proc(fl: fieldspeclist, pbl: pblist)
+	for each_f: fieldspec in fieldspeclist$elements(fl) do
+	    find_tbl_field(each_f, pbl)
+	    end % for
+	end find_tbl_fieldspeclist
+
+    % actually looks at exprs for selectors (recurses on exprs as well)
+    %		and parameterized exprs
+
+    find_tbl_exprs = proc(exp: expr, pbl: pblist)
+
+	% any_ and type_of_ MAY BE MISSING FROM FOLLOWING TAGCASE
+
+	% expr_print(exp, 10)
+	tagcase exp.abs
+	   tag apply(ct: clutype):
+	       if ~base_apply_test(ct) then             % skip _cvt
+		  find_tbl_exprlist(ct.parms, pbl)
+		  if exprlist$size(ct.parms) > 0
+		     then
+			  % logit(98, "4 adding apply " || ct.gen.common)
+			  pblist$addh(pbl, pb$make_apply(ct))
+			  %logit("adding apply")
+		     else
+			  if parmd_dus(ct.gen) then
+			     %logit("adding apply")
+			     % logit(98, "5 adding apply " || ct.gen.common)
+			     pblist$addh(pbl, pb$make_apply(ct)) end
+		     end
+		  end
+	   tag op(cop: clusterop):
+	       tagcase cop.type_.abs
+		  tag select (sel:seltype):
+		      if dbg_info$active() cor parmd_op(sel.gen, cop.name) then
+			 find_tbl_fieldspeclist(sel.parms, pbl)
+			 %logit("adding select")
+			 pblist$addh(pbl, pb$make_selinfo(
+					      selectinfo${name:sel.gen.common,
+							  fields:sel.parms}))
+			 end
+		  tag apply (a:applytype):
+		      if parmd_op(a.gen, "") then
+			 find_tbl_exprlist(cop.parms, pbl)
+			 %logit("adding op")
+			 pblist$addh(pbl, pb$make_op(cop)) end
+		  tag cluster_, type_ (ct:clutype):
+		      if dbg_info$active() cor
+			 (parmd_dus(ct.gen) cand ~base_cluster_test(cop, ct))
+			 then
+			      find_tbl_exprlist(cop.parms, pbl)
+			      find_tbl_exprlist(ct.parms, pbl)
+			      % logit(98, "6 adding apply " || ct.gen.common)
+			      pblist$addh(pbl, pb$make_apply(ct))
+			      pblist$addh(pbl, pb$make_op(cop))
+			 end
+		  tag idn:
+		  others:
+		      % logit("op: unhandled typespec")
+		      % typespec_print(cop.type_)
+		  end
+	   tag s_cons(s: selectcons):
+	       if typeabs$is_select(s.type_.abs) then
+		  if dbg_info$active() then
+		     find_tbl_type_(s.type_, pbl) end
+		  sel : seltype := typeabs$value_select(s.type_.abs)
+		  for this_field: field in fieldlist$elements(s.fields) do
+		      find_tbl_exprs(this_field.val, pbl)
+		      end % for
+		  %  1/30/90: omit this: let op and type_ clauses carry the load
+		  %	  pblist$addh(pbl, pb$make_selinfo(selectinfo${name:sel.gen.common,
+		  %						       fields: typeabs$value_select(s.type_.abs).parms}))
+		  if dbg_info$active() then
+		     pblist$addh(pbl, pb$make_selinfo(selectinfo${name:sel.gen.common,
+								  fields: typeabs$value_select(s.type_.abs).parms}))
+		     end
+		  else
+		       logit(701, "find_tbl_exprs: s_cons not select")
+		       typespec_print(s.type_)
+		  end % if
+	   tag a_cons(a: arraycons):
+	       if dbg_info$active() then
+		  find_tbl_type_(a.type_, pbl) end
+	       find_tbl_exprlist(a.elts, pbl)
+	       if dbg_info$active() then
+		  pblist$addh(pbl, pb$make_a_cons(a)) end
+	   tag cand_(c: condop):
+	       find_tbl_exprs(c.left, pbl)
+	       find_tbl_exprs(c.right, pbl)
+	   tag cor_ (c: condop):
+	       find_tbl_exprs(c.left, pbl)
+	       find_tbl_exprs(c.right, pbl)
+	   tag invoke (inv: invoke):
+	       find_tbl_exprs(inv.apply, pbl)
+	       find_tbl_exprlist(inv.args, pbl)
+	   tag up_ (e: expr):
+	       find_tbl_exprs(e, pbl)
+	   tag down_ (e: expr):
+	       find_tbl_exprs(e, pbl)
+	   tag type_ (t: typespec):
+	       tagcase t.abs
+		  tag select (sel:seltype):
+		      find_tbl_fieldspeclist(sel.parms, pbl)
+		      %logit("adding type_/select")
+		      pblist$addh(pbl, pb$make_selinfo(
+					   selectinfo${name:sel.gen.common,
+						       fields:sel.parms}))
+		  tag apply (a:applytype):
+		      if parmd_dus(a.gen) then
+			 %logit("gtbl FIND_EXPRS: apply found in type_")
+			 % this occurs when an array is parmd by a proctype
+			 % it seems that nothing need be done
+			 %logit(a.gen.common)
+			 %pblist$addh(pbl, pb$make_op(cop)) end
+			 end
+		  tag cluster_, type_ (ct:clutype):
+		      if dbg_info$active() cor parmd_dus(ct.gen) then
+			 find_tbl_exprlist(ct.parms, pbl)
+			 %logit("adding type_/cluster")
+			 % logit(98, "7 adding apply " || ct.gen.common)
+			 pblist$addh(pbl, pb$make_apply(ct))
+			 end
+		  tag idn:
+		  tag any_:
+		  others:
+		      logit(703, "type_: unhandled typespec")
+		      typespec_print(t)
+		  end
+	   tag any_ (ex: expr):
+	       find_tbl_exprs(ex, pbl)
+	       find_tbl_type_(ex.typespec, pbl)
+	       pblist$addh(pbl, pb$make_any_(ex))
+	   tag force_ (ty: typespec):
+	       find_tbl_type_(ty, pbl)
+	       % logit(704, "adding force")
+	       % typespec_print(ty)
+	       pblist$addh(pbl, pb$make_force_(ty))
+	   tag type_of_ (ex: expr):
+	       logit(705, "type_of_")
+	       expr_print(exp, 9)
+	   tag idn:
+	       if dbg_info$active() then
+		  find_tbl_type_(exp.typespec, pbl)
+		  end
+	   others:
+	       % expr_print(exp, 10)
+	   end % tag
+	end find_tbl_exprs
+
+    % actually looks for parameterized types in record components
+
+    find_tbl_field = proc(f: fieldspec, pbl: pblist)
+	tagcase f.type_.abs
+	   tag cluster_, type_ (ct: clutype):
+	       find_tbl_exprlist(ct.parms, pbl)
+	       if exprlist$size(ct.parms) > 0
+		  then
+		       %logit("adding field/cluster_/type_")
+		       % logit(98, "8 adding apply " || ct.gen.common)
+		       pblist$addh(pbl, pb$make_apply(ct))
+		  else
+		       if parmd_dus(ct.gen) cor dbg_info$active()
+			  then
+			       %logit("adding field/apply")
+			       % logit(98, "9 adding apply " || ct.gen.common)
+			       pblist$addh(pbl, pb$make_apply(ct))
+			  end
+		  end
+	   tag select (sel:seltype):
+	       %logit("f_t_f: adding select")
+	       find_tbl_fieldspeclist(sel.parms, pbl)
+	       %logit("adding field/select")
+	       pblist$addh(pbl, pb$make_selinfo(
+				    selectinfo${name:sel.gen.common,
+						fields:sel.parms}))
+	   tag apply (a: applytype):
+	       %logit("unimplemented find_tbl_field arm: apply")
+	   tag idn, any_, cvt_, unknown, xsel, xclu, other:
+	   end
+	end find_tbl_field
+    
+    tbl_uniq = proc(pbl: pblist) returns (pblist)
+	low: int := pblist$low(pbl)
+	size: int := pblist$size(pbl)
+	if size <= 1 then return (pbl) end
+	newpbl: pblist := pblist$new()
+	pblist$addh(newpbl, pbl[low])
+	% logit(" UNIQ ")
+	% pb_print(pbl[low])
+	for index:int in int$from_to(low+1, size) do
+	    % pb_print(pbl[index])
+	    possible_pb: pb := pbl[index]
+	    possible_formals: idnlist
+	    possible_actuals: exprlist
+	    possible_fl: fieldspeclist
+	    possible_name: name
+	    possible_type: typespec
+	    tagcase possible_pb
+	       tag selinfo:
+		   possible_fl := pb$value_selinfo(possible_pb).fields
+		   possible_name := pb$value_selinfo(possible_pb).name
+	       tag any_:
+		   possible_type := pb$value_any_(possible_pb).typespec
+	       tag force_:
+		   possible_type := pb$value_force_(possible_pb)
+	       others:
+		   possible_formals := pb_formals(possible_pb)
+		   possible_actuals := pb_actuals(possible_pb)
+	       end
+	    for each_pb: pb in pblist$elements(newpbl) do
+		tagcase each_pb
+		   tag op, a_cons, apply, ainfo, tinfo:
+		       if pb$is_selinfo(possible_pb) then continue end
+		       if pb$is_any_(possible_pb) then continue end
+		       if pb$is_force_(possible_pb) then continue end
+		       formals: idnlist := pb_formals(each_pb)
+		       actuals: exprlist := pb_actuals(each_pb)
+		       if idnlist$similar(possible_formals, formals) cand
+			  exprlist$similar(possible_actuals, actuals)
+			  then exit cont end
+		   tag selinfo (s:selectinfo):
+		       if ~pb$is_selinfo(possible_pb) then continue end
+		       if s.name ~= possible_name then continue end
+		       each_fl : fieldspeclist := s.fields
+		       if fieldspeclist$similar(possible_fl, each_fl)
+			  then exit cont end
+		   tag any_ (ex: expr):
+		       if ~pb$is_any_(possible_pb) then continue end
+		       if typespec$similar(ex.typespec, possible_type)
+			  then exit cont end
+		   tag force_ (ty: typespec):
+		       if ~pb$is_force_(possible_pb) then continue end
+		       if typespec$similar(ty, possible_type)
+			  then exit cont end
+		   end
+		end % for
+	       except when cont: continue end
+	    pblist$addh(newpbl, possible_pb)
+	    end % for
+	return(newpbl)
+	end tbl_uniq
+
+
+    % declares _table and _ops structures, invokes g_field_externs
+
+    g_field_tables = proc(e: g_env, pass: int)
+	
+	% logit(336, "g_field_tables pass: " || int$unparse(pass) || ", size: " || int$unparse(pblist$size(cum_pbl)))
+	for each_pb: pb in pblist$elements(cum_pbl) do
+	    % pb_print(each_pb)
+	    if pass = static
+	       then
+		    tagcase each_pb
+		       tag selinfo (s: selectinfo):
+			   g_sel_extern(e, s.fields)
+		       others:
+			   g_parm_extern(e, each_pb)
+		       end
+	       end
+	    test: bool := test_pb(each_pb)
+	    % test is true if table changes dynamically 
+	    %			=> put in owns block (pass = dynamic)
+	    %         false if table is constant 
+	    %			=> make it static (pass = static)
+	    % if test then logit(337, "field_tables test: true")
+	    % else logit(337, "field_tables test: false") end
+	    if test cand pass = static then continue end
+	    if ~test cand pass = dynamic then continue end
+	    tagcase each_pb
+	       tag selinfo (s: selectinfo):
+		   g_sel_table(e, s.name, s.fields)
+	       others:
+		   g_parm_table(e, each_pb)
+	       end
+	    end % for
+	end g_field_tables
+
+    g_sel_table = proc(e: g_env, fn: name, fl: fieldspeclist)
+	sel_name: string := make_sel_name(fl)
+	nm: string := fn || "_" || sel_name || "_ops"
+	if own_defn$test(nm) then
+	   % logit(98, "g_sel_table " || nm)
+	   dbg_info$add_own(nm)
+	   g_env$putl(e, "struct OPS  *" || nm || ";")
+	   end
+	end g_sel_table
+
+    % generates extern statements
+
+    g_sel_extern = proc(e: g_env, each_fl: fieldspeclist)
+	for each_field:fieldspec in fieldspeclist$elements(each_fl) do
+	    doit: bool := true
+	    if typeabs$is_idn(each_field.type_.abs) then doit := false end
+	    if doit then
+	       % TYPE OPERATIONS TABLE
+	       tname : string := s_name_typespec(each_field.type_) || "_ops"
+	       if g_env$add_extern(tname) then
+		  g_env$putl(e, "extern struct OPS *" || tname || ";")
+		  end
+	       end % for
+	    end
+	end g_sel_extern
+
+    build_tables = proc(e: g_env, pass: int)
+
+	% logit("pblist size: " || int$unparse(pblist$size(cum_pbl)) || ", pass = " || int$unparse(pass))
+	for each_pb: pb in pblist$elements(cum_pbl) do
+
+	    if pass = 0 then g_parm_table_inst_info(e, each_pb) continue end
+
+	    test: bool := test_pb(each_pb)
+	    % test is true if table changes dynamically 
+	    %			=> build on every invocation (pass = 2)
+	    %         false if table is constant 
+	    %			=> build with owns (pass = 1)
+	    if test cand pass = 1 then continue end
+	    if ~test cand pass = 2 then continue end
+	    tagcase each_pb
+	       tag selinfo (s: selectinfo):
+		   build_one_selector_table(e, s.name, s.fields)
+		   % logit("building selector info: " || s.name)
+	       others:
+		   g_own_build_one(e, each_pb)
+		   g_parm_build_one(e, each_pb)
+	       end
+	    end % for
+	if pass = 2 then cum_pbl := pblist$new() end
+	end build_tables
+
+    % returns true if this pb depends on a parameter (== pb is dynamic)
+
+    test_pb = proc(p: pb) returns (bool)
+	tagcase p
+	   tag op (cop: clusterop):
+	       % logit("op")
+	       return(test_pb_exprs_asst(cop.parms))
+	   tag apply (ct: clutype):
+	       % logit("apply")
+	       return(test_pb_exprs_asst(ct.parms))
+	   tag a_cons (a: arraycons):
+	       % logit("a_cons")
+	       if dbg_info$active() then
+		  tagcase a.type_.abs
+		     tag cluster_, type_ (ct: clutype):
+			 if test_pb_exprs_asst(ct.parms)
+			    then return (true) end
+		     others:
+			 logit(707, "test_pb: others")
+		     end
+		  end
+	       return(test_pb_exprs_asst(a.elts))
+	   tag selinfo (s: selectinfo):
+	       % logit("selinfo")
+	       return(test_pb_fields_asst(s.fields))
+	   tag any_ (ex: expr):
+	       return(test_pb_exprs_asst(exprlist$fill(1, ex)))
+	   tag force_ (ty: typespec):
+	       tagcase ty.abs
+		  tag idn:
+		      return (true)
+		  tag type_, cluster_ (ct: clutype):
+		      return(test_pb_exprs_asst(ct.parms))
+		  tag select (s: seltype):
+		      return(test_pb_fields_asst(s.parms))
+		  others:
+		      logit (708, "test_pb: force: others")
+		      typespec_print(ty)
+		      return (false)
+		  end
+	   others:
+	       logit (709, "test_pb: others")
+	       pb_print(p)
+	       return (false)
+	   end
+	end test_pb
+
+    % returns true if this exprlist depends on a parameter (== exprlist is dynamic)
+    %    5/31/90: adjusted to not return false prematurely
+    %    6/7/90:  adjusted to not return false prematurely, again
+
+    test_pb_exprs_asst = proc(el: exprlist) returns (bool)
+
+	% logit("exprlist$size : " || int$unparse(exprlist$size(el)))
+	% logit ("entering test_pb_exprs_asst")
+	for each_e: expr in exprlist$elements(el) do
+	    % logit ("next expr")
+	    % expr_print(each_e, 52)
+	    tagcase each_e.abs
+	       tag type_(ty: typespec):
+		   if test_pb_exprs_type_asst(ty) then return (true) end
+	       tag null_:
+	       tag int_, str, bool_, char_, real_:
+		   %		   return (true)  % chucked 6/18/90
+	       tag idn(i:idn):
+		   % 8/3/92 formerly: kind checked only if dbg active otherwise true
+		   %			 this caused bad any behavior
+		   %			possibly should be false if dbg inactive
+		   tagcase i.kind
+		      % 5/1/91 restricted true return to only those idns related to parameters
+		      tag tparm, vparm:
+			  % logit ("returning true (idn/dbg &tparm or vparm)")
+			  return (true)
+		      others:
+		      end
+	       tag s_cons (sc: selectcons):
+		   for each_field: field in fieldlist$elements(sc.fields) do
+		       new_el: exprlist := exprlist$fill(1, each_field.val)
+		       if test_pb_exprs_asst(new_el) then
+			  % logit ("returning true (s_cons)")
+			  return (true) end
+		       end
+	       tag up_, down_ (ex: expr):
+		   if test_pb_exprs_type_asst(each_e.typespec) then return (true) end
+		   % 3/1/94: dcurtis: added this clause (related to anys)
+	       tag invoke (inv: invoke):
+		   if test_pb_exprs_asst(inv.args) then return (true) end
+		   new_el: exprlist := exprlist$fill(1, inv.apply)
+		   return(test_pb_exprs_type_asst(each_e.typespec))
+	       others:
+		   logit(710, "test_pb_expr_asst: exprabs not type_ or constant")
+		   expr_print(each_e, 40)
+		   % logit ("returning false (others)")
+		   return (false)
+	       end % tag
+	    end % for
+	% logit ("returning false (default)")
+	return(false)
+
+	end test_pb_exprs_asst
+
+    test_pb_exprs_type_asst = proc(ty: typespec) returns (bool)
+	tagcase ty.abs
+	   tag idn (i:idn):
+	       % logit ("returning true (type_/idn)")
+	       return (true)
+	   tag type_, cluster_ (ct: clutype):
+	       if test_pb_exprs_asst(ct.parms) then
+		  % logit ("returning true (type_/type_ or cluster_)")
+		  return (true) end
+	   tag select (s: seltype):
+	       if test_pb_fields_asst(s.parms) then
+		  % logit ("returning true (type_/select)")
+		  return (true) end
+	   others:
+	   end % tag
+	return (false)
+	end test_pb_exprs_type_asst
+
+    % returns true if base type without owns and op has no restrict clause
+
+    base_cluster_test = proc(cop: clusterop, ct: clutype) returns (bool)
+	if (ct.gen.common = "array"
+	      cor ct.gen.common = "sequence"
+	      cor ct.gen.common = "_vec")
+	     cand ~parmd_op(ct.gen, cop.name)
+	   then return (true) end
+	return(false)
+	end base_cluster_test
+
+    base_apply_test = proc(ct:clutype) returns (bool)
+	if ct.gen.common = "_cvt"
+	   then return (true)
+	   end
+	return (false)
+	end base_apply_test
+
+    % returns true if this fieldspeclist depends on a parameter (== fieldspeclist is dynamic)
+    %    5/31/90: adjusted to not return false prematurely
+
+    test_pb_fields_asst = proc(fl: fieldspeclist) returns (bool)
+
+	for each_f: fieldspec in fieldspeclist$elements(fl) do
+	    ty: typespec := each_f.type_
+	    tagcase ty.abs
+	       tag idn (i: idn):
+		   % logit("tpfa: idn " || i.str)
+		   return (true)
+	       tag type_, cluster_ (ct: clutype):
+		   % logit("tpfa: type/ct " || ct.gen.common)
+		   if(test_pb_exprs_asst(ct.parms)) then return (true) end
+	       tag select (s: seltype):
+		   % logit("tpfa: select " || s.gen.common)
+		   if(test_pb_fields_asst(s.parms)) then return (true) end
+	       tag any_:
+	       tag apply:
+	       others:
+		   logit(711, "test_pb_fields_asst: unexpected typespec")
+		   typespec_print(each_f.type_)
+	       end
+	    end % for
+	return(false)
+
+	end test_pb_fields_asst
+
+    % generates code to invoke procedures to initialize contents of _table
+    %		and _ops structures
+
+    build_one_selector_table = proc(e: g_env, each_fn:name, each_fl:fieldspeclist)
+	ind: int := 0
+	for each_field:fieldspec in fieldspeclist$elements(each_fl) do
+	    g_env$puts(e, "add_selector_info(")
+
+	    % Field Name
+	    g_env$puts(e, "\"" || each_field.sel || "\", ")
+
+	    % Field Index
+	    g_env$puts(e, int$unparse(ind) || ", ")
+
+	    % TYPE OPERATIONS TABLE
+	    g_ref_name_typespec(e, each_field.type_)                            %%% refer to ops in owns if appropriate
+	    g_env$putl(e, "_ops); ")
+
+	    ind := ind + 1
+	    end % for
+	prefix: string := s_owns_prefix_fieldlist(each_fl)
+	sel_name: string := make_sel_name(each_fl)
+	g_env$putl(e, "find_selector_ops(\"" || each_fn || "\", " ||
+		      int$unparse(fieldspeclist$size(each_fl)) ||
+		      ", &(" || prefix || each_fn || "_" || sel_name || "_ops));")
+	end build_one_selector_table
+
+    % remove pbs that depend on parameters of operations
+    %	leaving on pbs that depend on parameters of type
+    prune = proc()
+	new: pblist := pblist$new()
+	for each_pb: pb in pblist$elements(cum_pbl) do
+	    % pb_print(each_pb)
+	    tagcase each_pb
+	       tag selinfo (si: selectinfo):
+		   if fl_cont_op_parm(si.fields) then continue
+		      else pblist$addh(new, each_pb) end
+	       tag a_cons (ac: arraycons):
+		   if type_cont_op_parm(ac.type_)
+			cor el_cont_op_parm(ac.elts)
+		      then continue
+		      else pblist$addh(new, each_pb) end
+	       tag op (cop: clusterop):
+		   tagcase cop.type_.abs
+		      tag select (xt:seltype):
+			  if fl_cont_op_parm(xt.parms) then continue
+			     else pblist$addh(new, each_pb) end
+		      tag apply (ap: applytype):
+			  if el_cont_op_parm(cop.parms) then continue
+			     else pblist$addh(new, each_pb) end
+		      tag cluster_, type_ (ct:clutype):
+			  if el_cont_op_parm(cop.parms)
+			       cor el_cont_op_parm(ct.parms)
+			     then continue
+			     else pblist$addh(new, each_pb) end
+		      tag idn:
+		      others:
+		      end
+	       tag apply (ct: clutype):
+		   if el_cont_op_parm(ct.parms)
+		      then continue
+		      else pblist$addh(new, each_pb) end
+	       tag ainfo (ai: applyinfo):
+		   % appears unused
+	       tag tinfo (ti: typeinfo):
+		   % appears unused
+	       tag any_ (ex: expr):
+		   if el_cont_op_parm(exprlist$fill(1, ex)) then continue
+		      else pblist$addh(new, each_pb) end
+	       tag force_ (ty: typespec):
+		   if type_cont_op_parm(ty) then continue
+		      else pblist$addh(new, each_pb) end
+	       end
+	    end
+	cum_pbl := new
+	end prune
+
+    end g_tbl
+
+make_sel_name = proc(fl: fieldspeclist) returns (string)
+
+    af = array[fieldspeclist]
+    own table: af := af$predict(1, 100)
+
+    nth: int := 0	% count of entries with matching names but not types
+    already_here: bool := false
+    for ithfl: fieldspeclist in af$elements(table) do
+	if fieldspeclist$size(fl) ~= fieldspeclist$size(ithfl)
+	   then continue end
+	if fieldspeclist$similar(ithfl, fl) then exit found end
+	for i: int in fieldspeclist$indexes(fl) do
+	    if fl[i].sel ~= ithfl[i].sel
+	       then exit cont end
+	    end
+	   except when cont: continue end
+	nth := nth + 1
+	end
+       except when found:
+		   already_here := true
+	      end
+    if ~already_here then af$addh(table, fl) end
+    
+    nm: string := ""
+    first: bool := true
+    for each_field: fieldspec in fieldspeclist$elements(fl) do
+	if first then first := false
+	   else nm := nm || "_" end
+	nm := nm || each_field.sel
+	end
+    if nth ~= 0 then nm := nm || "_" || int$unparse(nth) end
+    return(nm)
+
+    end make_sel_name
+
+% add instance information to inst_info struct
+% invoke routine to find owns, given instance information
+
+g_own_build_one = proc(e: g_env, each_pb:pb)
+    index: int
+    % pb_print(each_pb)
+    tagcase each_pb
+       tag apply, op:
+	   formals: idnlist := pb_formals(each_pb)
+	   actuals: exprlist := pb_actuals(each_pb)
+	   gen: DU := pb_gen(each_pb)
+	   if idnlist$size(formals) = exprlist$size(actuals) then
+	      index := 1
+	      for each_parm:idn in idnlist$elements(formals) do
+		  op_name: string := ""
+		  if pb$is_op (each_pb) then
+		     if is_op_parmd(each_pb) then
+			tail: string := pb$value_op(each_pb).name
+			if tail[1] = '%' then
+			   tail := string$rest(tail, 2) end
+			op_name := "_op_" || tail end
+		     end
+		  inst_table_name: string := gen.common || op_name || "_of"
+		  for each_e: expr in exprlist$elements(actuals) do
+		      inst_table_name := inst_table_name || "_" || s_expr4(each_e)
+		      end
+
+		  % INSTANCE INFO FOR Nth PARAMETER: Nth, value or ops, (reqs for type parms)
+		  tagcase actuals[index].abs
+		     tag type_:
+	 		 % logit("add_parm_info_type: type_")
+			 g_env$puts(e, "add_parm_info_type(" || int$unparse(index - 1) || ", ")
+			 g_env$puts(e, s_expr5(actuals[index]) || "_ops, ")
+			 g_env$puts(e, gen.common)
+			 if index > cluster_parm_count(gen) then
+			    g_env$puts(e, op_name)
+			    end
+			 g_env$puts(e, "_of_")
+			 g_idnlit(e, formals[index])
+			 g_env$putl(e, "_reqs);")
+		     tag null_, int_, real_, char_, bool_, str, idn:
+			 g_env$puts(e, "add_parm_info_const(" || int$unparse(index - 1) || ", ")
+			 g_expr_arg(e, actuals[index])
+			 g_env$putl(e, ");")
+		     others:
+			 logit(712, "add_parm_info: probably wrong")
+		     end % tag
+		  index := index + 1
+		  end % for
+	      end
+       tag a_cons(a: arraycons):
+	   if dbg_info$active() then
+	      tagcase (a.type_.abs)
+		 tag cluster_(ct: clutype):
+
+		     % INVOCATION, 0TH (ONLY) PARAMETER
+		     g_env$puts(e, "add_parm_info_type(0, ")
+
+		     % OPS FOR PARAMETER
+		     g_expr5(e, ct.parms[1])    % actual
+		     g_env$puts(e, "_ops, ")
+
+		     % TABLE OF REQS
+		     g_typespec(e, a.type_)
+		     g_env$putl(e, "_of_t_reqs);")
+
+		     g_env$newline(e)
+		 others:
+		     logit(713, "g_parm_blocks array type unhandled")
+		     typespec_print(a.type_)
+		 end % tag
+              end
+
+       tag any_(ex: expr):
+	   % INVOCATION, 0TH (ONLY) PARAMETER
+	   g_env$puts(e, "add_parm_info_type(0, ")
+
+	   % OPS FOR PARAMETER
+	   g_env$puts(e, s_owns_prefix_type(ex.typespec))
+	   g_name_typespec(e, ex.typespec)    % actual
+	   g_env$puts(e, "_ops, ")
+
+	   % TABLE OF REQS
+	   g_env$putl(e, "_anyize_of_t_reqs);")
+	   g_env$newline(e)
+
+       tag force_(ty: typespec):
+	   % INVOCATION, 0TH (ONLY) PARAMETER
+	   g_env$puts(e, "add_parm_info_type(0, ")
+
+	   % OPS FOR PARAMETER
+	   g_env$puts(e, s_owns_prefix_type(ty))
+	   g_name_typespec(e, ty)    % actual
+	   g_env$puts(e, "_ops, ")
+
+	   % TABLE OF REQS
+	   g_env$putl(e, "_anyize_of_t_reqs);")
+	   g_env$newline(e)
+
+       others:
+	   logit(714, "g_parm_blocks: t/ainfo 4")
+       end % tag
+    end g_own_build_one
+
+own_defn = cluster is start, test, stop
+
+    rep = null
+    as = array[string]
+    own old: as   :=  as $new()
+    own active: bool := false
+
+    start = proc()
+	old := as$new()
+	active := true
+	return
+	end start
+
+    test = proc(s: string) returns (bool)
+	% logit("own_defn$test of " || s)
+	if ~active then return (true) end
+	for each_s: string in as$elements(old) do
+	    if each_s = s then return (false) end
+	    end % for
+	as$addh(old, s)
+	return (true)
+	end test
+
+    stop = proc()
+	active := false
+	end stop
+
+    end own_defn
+
+% returns true if base type without owns and op has no restrict clause
+
+base_cluster_test = proc(cop: clusterop, ct: clutype) returns (bool)
+    if (ct.gen.common = "array"
+	  cor ct.gen.common = "sequence"
+	  cor ct.gen.common = "_vec")
+	 cand ~parmd_op(ct.gen, cop.name)
+       then return (true) end
+    return(false)
+    end base_cluster_test
+
+base_apply_test = proc(ct:clutype) returns (bool)
+    if ct.gen.common = "_cvt"
+       then return (true)
+       end
+    return (false)
+    end base_apply_test
+

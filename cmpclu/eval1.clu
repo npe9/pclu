@@ -1,0 +1,395 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	EVAL1 CLU
+%
+%	CLU Compiler Version 3: constant evaluator
+
+e_expr = proc (e: c_env, x: expr) returns (expr)
+	tagcase x.abs
+	   tag idn (i: idn):
+		tagcase i.kind
+		   tag tparm, vparm, tconst:
+			return(x)
+		   others:
+		   end
+	   others:
+	   end
+	return(e_expr1(e, x))
+	end e_expr
+
+e_expr1 = proc (e: c_env, x: expr) returns (expr)
+	if typeabs$is_unknown(x.typespec.abs)
+	   then return(x) end
+	tagcase x.abs
+	   tag null_, bool_, int_, real_, char_, str, type_, apply, op, force_:
+		return(x)
+	   tag idn (xa: idn):
+		return(e_idn(e, x, xa))
+	   tag cand_ (xa: condop):
+		return(e_condop(e, xa, "cand"))
+	   tag cor_ (xa: condop):
+		return(e_condop(e, xa, "cor"))
+	   tag invoke (xa: invoke):
+		return(e_invoke(e, x, xa))
+	   tag a_cons (xa: arraycons):
+		return(e_arraycons(e, x, xa))
+	   tag s_cons (xa: selectcons):
+		return(e_selectcons(e, x, xa))
+	   tag up_:
+		c_env$err1(e, "UP expression not a legal constant")
+	   tag down_:
+		c_env$err1(e, "DOWN expression not a legal constant")
+	   tag any_:
+		c_env$err1(e, "ANY expression not a legal constant")
+	   tag bad:
+	   others:
+	   end
+	return(e.bad_expr)
+	end e_expr1
+
+e_idn = proc (e: c_env, x: expr, i: idn) returns (expr)
+	tagcase i.kind
+	   tag tparm, vparm, tconst:
+		c_env$err(e, qs$["use of parameter '", i.str,
+				 "' as argument in constant expression"])
+	   tag var, ownvar:
+		c_env$err(e, qs$["use of variable '", i.str, "' as constant"])
+	   others:
+	   end
+	return(e.bad_expr)
+	end e_idn
+
+e_arraycons = proc (e: c_env, x: expr, cons: arraycons) returns (expr)
+	tagcase cons.type_.abs
+	   tag cluster_ (ta: clutype):
+		if ta.gen ~= e.seq_
+		   then c_env$err1(e, "constructor not a legal constant")
+			return(e.bad_expr)
+		   end
+	   tag unknown:
+		return(e.bad_expr)
+	   others:
+		c_env$err1(e, "constructor not a legal constant")
+		return(e.bad_expr)
+	   end
+	elts: exprlist := cons.elts
+	same: bool := true
+	for i: int in exprlist$indexes(elts) do
+		elt: expr := elts[i]
+		nelt: expr := e_expr1(e, elt)
+		if nelt ~= elt
+		   then elts := exprlist$replace(elts, i, nelt)
+			same := false
+		   end
+		end
+	if same
+	   then return(x) end
+	cons := arraycons${type_: cons.type_,
+			   low:   mexpr$make_none(nil),
+			   elts:  elts}
+	return(expr$create(exprabs$make_a_cons(cons), cons.type_))
+	end e_arraycons
+
+e_selectcons = proc (e: c_env, x: expr, cons: selectcons) returns (expr)
+	tagcase cons.type_.abs
+	   tag select (ta: seltype):
+		if ta.gen ~= e.struct_
+		   then c_env$err1(e, "constructor not a legal constant")
+			return(e.bad_expr)
+		   end
+	   tag unknown:
+		return(e.bad_expr)
+	   others:
+		c_env$err1(e, "constructor not a legal constant")
+		return(e.bad_expr)
+	   end
+	fields: fieldlist := cons.fields
+	same: bool := true
+	for i: int in fieldlist$indexes(fields) do
+		f: field := fields[i]
+		nval: expr := e_expr1(e, f.val)
+		if nval ~= f.val
+		   then f := field${sels: f.sels,
+				    val:  nval,
+				    line: f.line}
+			fields := fieldlist$replace(fields, i, f)
+			same := false
+		   end
+		end
+	if same
+	   then return(x) end
+	cons := selectcons${type_:  cons.type_,
+			    fields: fields}
+	return(expr$create(exprabs$make_s_cons(cons), cons.type_))
+	end e_selectcons
+
+e_invoke = proc (e: c_env, x: expr, inv: invoke) returns (expr)
+	p: expr := e_expr1(e, inv.apply)
+	args: exprlist := inv.args
+	args := e_exprlist(e, args)
+	tagcase p.abs
+	   tag op (pa: clusterop):
+		op: name := pa.name
+		t: typespec := pa.type_
+		tagcase t.abs
+		   tag cluster_ (ta: clutype):
+			if op = "encode"  cor  op = "decode"  cor  op = "print"
+			   then exit illegal
+			elseif t = e.null_type
+			   then return(e_nullop(e, op, args))
+			elseif t = e.bool_type
+			   then return(e_boolop(e, op, args))
+			elseif t = e.int_type
+			   then return(e_intop(e, op, args))
+			elseif t = e.real_type
+			   then return(e_realop(e, op, args))
+			elseif t = e.char_type
+			   then return(e_charop(e, op, args))
+			elseif t = e.str_type
+			   then return(e_strop(e, op, args))
+			elseif ta.gen = e.seq_
+			   then return(e_seqop(e, x, pa, args)) end
+		   tag select (ta: seltype):
+			if ta.gen = e.oneof_
+			   then return(e_oneofop(e, x, pa, args))
+			elseif ta.gen = e.struct_
+			   then return(e_structop(e, x, pa, args)) end
+		   tag apply (ta: applytype):
+			if ta.gen = e.proc_  cor  ta.gen = e.iter_
+			   then return(e_applyop(e, op, args)) end
+		   others:
+		   end
+	   tag apply, force_:
+	   others:
+		return(e.bad_expr)
+	   end except when illegal:
+		      when bad:
+			    return(e.bad_expr)
+		      when error (err: str):
+			    c_env$err(e, qs$["invocation of '",
+					     get_inv_print(inv),
+					     "' evaluates to '",
+					     err, "' exception"])
+			    return(e.bad_expr)
+		      end
+	c_env$err(e, qs$["invocation of '", get_inv_print(inv),
+					"' illegal in constant"])
+	return(e.bad_expr)
+	end e_invoke
+
+e_exprlist = proc (e: c_env, exprs: exprlist) returns (exprlist)
+	nexprs: exprlist := exprlist$new()
+	for x: expr in exprlist$elements(exprs) do
+		nexprs := exprlist$addh(nexprs, e_expr1(e, x))
+		end
+	return(nexprs)
+	end e_exprlist
+
+e_n2e = proc (e: c_env) returns (expr)
+	return(expr$create(exprabs$make_null_(nil), e.null_type))
+	end e_n2e
+
+e_b2e = proc (e: c_env, b: bool) returns (expr)
+	return(expr$create(exprabs$make_bool_(b), e.bool_type))
+	end e_b2e
+
+e_i2e = proc (e: c_env, i: int) returns (expr)
+	return(expr$create(exprabs$make_int_(i), e.int_type))
+	end e_i2e
+
+e_r2e = proc (e: c_env, r: real) returns (expr)
+	return(expr$create(exprabs$make_real_(r), e.real_type))
+	end e_r2e
+
+e_h2e = proc (e: c_env, h: char) returns (expr)
+	return(expr$create(exprabs$make_char_(h), e.char_type))
+	end e_h2e
+
+e_s2e = proc (e: c_env, s: str) returns (expr)
+	return(expr$create(exprabs$make_str(s), e.str_type))
+	end e_s2e
+
+e_condop = proc (e: c_env, args: condop, op: name) returns (expr)
+	begin
+	x1: expr := e_expr1(e, args.left)
+	b: bool := e_e2b(x1)
+	if (op = "cand"  cand  ~b) cor (op = "cor"  cand  b)
+	   then return(x1) end
+	x2: expr := e_expr1(e, args.right)
+	e_e2b(x2)
+	return(x2)
+	end
+	   except when bad: return(e.bad_expr) end
+	end e_condop
+
+e_applyop = proc (e: c_env, op: name, args: exprlist) returns (expr)
+	if exprlist$size(args) = 1
+	   then return(exprlist$bottom(args)) end
+	a1: exprabs := args[1].abs
+	a2: exprabs := args[2].abs
+	if exprabs$is_bad(a1)  cor  exprabs$is_bad(a2)
+	   then return(e.bad_expr)
+	   else return(e_b2e(e, exprabs$similar(a1, a2)))
+	   end
+	end e_applyop
+
+e_nullop = proc (e: c_env, op: name, args: exprlist) returns (expr)
+	if op = "copy"
+	   then return(e_n2e(e))
+	   else return(e_b2e(e, true))
+	   end
+	end e_nullop
+
+e_boolop = proc (e: c_env, op: name, args: exprlist) returns (expr)
+						     signals (bad)
+	begin
+	b1: bool := e_e2b(args[1])
+	if op = "not"
+	   then b1 := ~b1
+	elseif op ~= "copy"
+	   then	b2: bool := e_e2b(args[2])
+		if op = "and"
+		   then b1 := b1  cand  b2
+		elseif op = "or"
+		   then b1 := b1  cor  b2
+		else b1 := b1 = b2 end
+	end
+	return(e_b2e(e, b1))
+	end resignal bad
+	end e_boolop
+
+e_intop = proc (e: c_env, op: name, args: exprlist)
+			returns (expr) signals (illegal, bad, error(str))
+	if op = "from_to_by"  cor  op = "from_to"
+	   then signal illegal end
+	begin
+	if op = "parse"
+	   then return(e_i2e(e, int$parse(e_e2s(args[1])))) end
+	i1: int := e_e2i(args[1])
+	if op = "unparse"
+	   then return(e_s2e(e, int$unparse(i1)))
+	elseif op = "minus"
+	   then i1 := -i1
+	elseif op = "abs"
+	   then i1 := int$abs(i1)
+	elseif op ~= "copy"
+	   then	i2: int := e_e2i(args[2])
+		if op = "add"
+		   then i1 := i1 + i2
+		elseif op = "sub"
+		   then i1 := i1 - i2
+		elseif op = "mul"
+		   then i1 := i1 * i2
+		elseif op = "div"
+		   then i1 := i1 / i2
+		elseif op = "power"
+		   then i1 := i1 ** i2
+		elseif op = "mod"
+		   then i1 := i1 // i2
+		elseif op = "min"
+		   then i1 := int$min(i1, i2)
+		elseif op = "max"
+		   then i1 := int$max(i1, i2)
+		else b: bool
+		     if op = "lt"
+			then b := i1 < i2
+		     elseif op = "le"
+			then b := i1 <= i2
+		     elseif op = "ge"
+			then b := i1 >= i2
+		     elseif op = "gt"
+			then b := i1 > i2
+		     else b := i1 = i2 end
+		     return(e_b2e(e, b))
+		end
+	end
+	return(e_i2e(e, i1))
+	end except when bad: signal bad
+		   others (err: str): signal error(err)
+		   end
+	end e_intop
+
+e_realop = proc (e: c_env, op: name, args: exprlist) returns (expr)
+						     signals (bad, error(str))
+	begin
+	a1: expr := args[1]
+	if op = "i2r"
+	   then return(e_r2e(e, real$i2r(e_e2i(a1))))
+	elseif op = "parse"
+	   then return(e_r2e(e, real$parse(e_e2s(a1)))) end
+	r1: real := e_e2r(args[1])
+	if op = "r2i"
+	   then return(e_i2e(e, real$r2i(r1)))
+	elseif op = "trunc"
+	   then return(e_i2e(e, real$trunc(r1)))
+	elseif op = "unparse"
+	   then return(e_s2e(e, real$unparse(r1)))
+	elseif op = "exponent"
+	   then return(e_i2e(e, real$exponent(r1)))
+	elseif op = "minus"
+	   then r1 := -r1
+	elseif op = "abs"
+	   then r1 := real$abs(r1)
+	elseif op = "mantissa"
+	   then r1 := real$mantissa(r1)
+	elseif op ~= "copy"
+	   then r2: real := e_e2r(args[2])
+		if op = "add"
+		   then r1 := r1 + r2
+		elseif op = "sub"
+		   then r1 := r1 - r2
+		elseif op = "mul"
+		   then r1 := r1 * r2
+		elseif op = "div"
+		   then r1 := r1 / r2
+		elseif op = "power"
+		   then r1 := r1 ** r2
+		elseif op = "min"
+		   then r1 := real$min(r1, r2)
+		elseif op = "max"
+		   then r1 := real$max(r1, r2)
+		else b: bool
+		     if op = "lt"
+			then b := r1 < r2
+		     elseif op = "le"
+			then b := r1 <= r2
+		     elseif op = "ge"
+			then b := r1 >= r2
+		     elseif op = "gt"
+			then b := r1 > r2
+		     else b := r1 = r2 end
+		     return(e_b2e(e, b))
+		end
+	   end
+	return(e_r2e(e, r1))
+	end except when bad: signal bad
+		   others (err: str): signal error(err)
+		   end
+	end e_realop
+
+e_charop = proc (e: c_env, op: name, args: exprlist) returns (expr)
+						     signals (bad, error(str))
+	begin
+	a1: expr := args[1]
+	if op = "i2c"
+	   then return(e_h2e(e, char$i2c(e_e2i(a1)))) end
+	h1: char := e_e2h(a1)
+	if op = "c2i"
+	   then return(e_i2e(e, char$c2i(h1)))
+	elseif op = "copy"
+	   then return(a1) end
+	h2: char := e_e2h(args[2])
+	b: bool
+	if op = "lt"
+	   then b := h1 < h2
+	elseif op = "le"
+	   then b := h1 <= h2
+	elseif op = "ge"
+	   then b := h1 >= h2
+	elseif op = "gt"
+	   then b := h1 > h2
+	else b := h1 = h2 end
+	return(e_b2e(e, b))
+	end except when bad: signal bad
+		   others (err: str): signal error(err)
+		   end
+	end e_charop

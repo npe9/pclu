@@ -1,0 +1,11 @@
+% Copyright Massachusetts Institute of Technology 1981, 1989
+
+_unquote = proc (s: string) returns (string)
+	i: int := 0
+	while true do
+		i := _bytevec$indexc('\\', _cvt[string, _bytevec](s), i + 1)
+		if i = 0  cor  i = string$size(s)
+		   then return(s) end
+		s := string$substr(s, 1, i - 1) || string$rest(s, i + 1)
+		end
+	end _unquote

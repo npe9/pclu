@@ -1,0 +1,1845 @@
+debug$own_init_proc:
+			stream$primary_output
+			pstream$primary_output
+			record$set_5
+			debugopframe_count
+			_signal$get
+			bool$not
+			int$equal
+			stream$putl
+			stream$is_terminal
+			stream$puts
+			pstream$set_max_width
+			pstream$set_max_depth
+			sym$get_address
+			_signal$set
+			_signal$set_message
+			dbg_env$load
+			alias$init
+			ctl_pts$bp_exists
+			record$set_1
+			string$equal
+			record$get_3
+			record$set_3
+			record$set_2
+			debugopframe_info
+			string$concat
+			externalize
+			debugopcvt_sig
+			ctl_pts$sig_exists
+			record$get_8
+			sequence$elements
+			debugopcmp_sig
+			record$get_1
+			debugopget_sigvalcount
+			int$from_to
+			debugopget_nth_sigval
+			debugopget_nth_sigvalops
+			print_result
+			int$unparse
+			debugopget_fname
+			src$list
+			record$get_4
+			record$set_4
+			int$sub
+			int$gt
+			stream$primary_input
+			stream$set_prompt
+			lineedit
+			stream$getl
+			debug$process_commands
+			debug$err_out
+			strip_blanks
+			string$indexc
+			string$substr
+			string$rest
+			int$add
+			debug$prefix
+			debug$break_cmd
+			debug$trace_cmd
+			debug$untrace_cmd
+			debug$step_cmd
+			debug$unstep_cmd
+			debug$print_cmd
+			debug$reset_cmd
+			debug$width_cmd
+			debug$depth_cmd
+			debug$help_cmd
+			debug$where_cmd
+			debug$cont_cmd
+			debug$delete_cmd
+			debug$show_cmd
+			debug$alias_cmd
+			debug$unalias_cmd
+			debug$execute_cmd
+			debug$eval_cmd
+			debug$up_cmd
+			debug$func_cmd
+			debug$list_cmd
+			debug$down_cmd
+			debug$next_cmd
+			debug$quit_cmd
+			debug$restart_cmd
+			debug$rebuild_cmd
+			string$empty
+			string$size
+			char$equal
+			string$fetch
+			_bytevec$nc_indexv
+			_cvt
+			int$ge
+			parse_line
+			array$size
+			_exit
+			file_name$create
+			_job$exec
+			_get_xjname
+			sym$clear_owns
+			int$parse
+			array$fetch
+			int$lt
+			ctl_pts$bp_add
+			record$get_2
+			set_argv
+			sequence$a2s
+			ctl_pts$bp_remove
+			array$elements
+			ctl_pts$sig_add
+			ctl_pts$sig_remove
+			slower
+			pstream$start
+			dvar$get_dexpr
+			debug$eval_dexpr
+			debugopprint_val
+			pstream$text
+			pstream$stop
+			pstream$pause
+			pstream$get_max_width
+			dbg_env$dump
+			pstream$get_max_depth
+			alias$show_alias
+			alias$add_alias
+			alias$remove_alias
+			file_name$parse
+			stream$open
+			alias$expand_alias
+			pc_slower
+			dparse
+			estack$create
+			debug$eval
+			estack$elements
+			int$print
+			bool$print
+			null$print
+			char$print
+			string$print
+			real$print
+			logit
+			debug$eval_assn
+			sequence$size
+			sequence$fetch
+			oneof$make_8
+			debug$fixup_rep
+			debug$is_regular_apply
+			debug$find_rtn_info
+			inst_from_info
+			record$get_6
+			record$get_7
+			record$get_5
+			oneof$value_6
+			oneof$value_9
+			debugopnm2val_ops
+			rep_find_valops
+			oneof$value_5
+			debug$teval
+			add_selector_info2
+			find_selector_ops2
+			find_valops
+			sequence$new
+			_vec$create
+			estack$size
+			_vec$store
+			debug$dexpr2obj
+			estack$fetch
+			estack$trim
+			iter_yield$setup
+			call_clu
+			_obj$equal
+			_vec$fetch
+			_pclu_erstr2
+			estack$push
+			oneof$make_9
+			debugopget_nth_op
+			inst_from_name
+			array$predict
+			array$addh
+			clu_add_parm_info_type
+			clu_find_type_instance
+			sequence$addh
+			sequence$indexes
+			_tagcell$create
+			sym$get_name
+			find_tgen
+			find_tgen_parm
+			oneof$make_7
+			string_lindexs
+			array$new
+			debugopget_nth_formal
+			dvar$get_value
+			debugopget_val
+			debugopset_val
+			oneof$is_6
+			dvar$set_value
+			estack$store
+			string$indexs
+			debug$digits
+			int$from_to_by
+			debugopget_name
+			stream$putspace
+			int$minus
+			int$power
+			internalize
+			src$find_module
+			ctl_pts$clear
+			ctl_pts$print
+			stream$error_output
+			debug_IB_1
+
+debug$cli:
+			record$set_5
+			debugopframe_count
+			_signal$get
+			bool$not
+			int$equal
+			stream$putl
+			stream$is_terminal
+			stream$puts
+			pstream$set_max_width
+			pstream$set_max_depth
+			sym$get_address
+			_signal$set
+			_signal$set_message
+			dbg_env$load
+			alias$init
+			ctl_pts$bp_exists
+			record$set_1
+			string$equal
+			record$get_3
+			record$set_3
+			record$set_2
+			debugopframe_info
+			string$concat
+			externalize
+			debugopcvt_sig
+			ctl_pts$sig_exists
+			record$get_8
+			sequence$elements
+			debugopcmp_sig
+			record$get_1
+			debugopget_sigvalcount
+			int$from_to
+			debugopget_nth_sigval
+			debugopget_nth_sigvalops
+			print_result
+			int$unparse
+			debugopget_fname
+			src$list
+			record$get_4
+			record$set_4
+			int$sub
+			int$gt
+			stream$primary_input
+			stream$set_prompt
+			lineedit
+			stream$getl
+			debug$process_commands
+			debug$err_out
+
+debug$process_commands:
+			strip_blanks
+			string$indexc
+			int$equal
+			string$substr
+			int$sub
+			string$rest
+			int$add
+			debug$prefix
+			debug$break_cmd
+			debug$trace_cmd
+			debug$untrace_cmd
+			debug$step_cmd
+			debug$unstep_cmd
+			debug$print_cmd
+			debug$reset_cmd
+			debug$width_cmd
+			debug$depth_cmd
+			debug$help_cmd
+			debug$where_cmd
+			debug$cont_cmd
+			debug$delete_cmd
+			debug$show_cmd
+			debug$alias_cmd
+			debug$unalias_cmd
+			debug$execute_cmd
+			debug$eval_cmd
+			debug$up_cmd
+			debug$func_cmd
+			debug$list_cmd
+			debug$down_cmd
+			debug$next_cmd
+			debug$quit_cmd
+			debug$restart_cmd
+			debug$rebuild_cmd
+			string$empty
+			bool$not
+			stream$putl
+			debug$process_commands
+			string$size
+			char$equal
+			string$fetch
+			stream$puts
+
+debug$prefix:
+			int$equal
+			_bytevec$nc_indexv
+			_cvt
+			int$ge
+			string$size
+
+debug$quit_cmd:
+			parse_line
+			bool$not
+			int$equal
+			array$size
+			stream$putl
+			_exit
+
+debug$restart_cmd:
+			parse_line
+			bool$not
+			int$equal
+			array$size
+			stream$putl
+			file_name$create
+			_job$exec
+			string$concat
+			_get_xjname
+
+debug$rebuild_cmd:
+			parse_line
+			bool$not
+			int$equal
+			array$size
+			stream$putl
+			file_name$create
+			_job$exec
+			string$concat
+			_get_xjname
+
+debug$reset_cmd:
+			parse_line
+			bool$not
+			int$equal
+			array$size
+			stream$putl
+			sym$clear_owns
+
+debug$next_cmd:
+			parse_line
+			int$gt
+			array$size
+			stream$putl
+			int$equal
+			int$parse
+			array$fetch
+			int$lt
+			record$set_4
+			ctl_pts$bp_add
+			externalize
+			record$get_2
+
+debug$cont_cmd:
+			parse_line
+			bool$not
+			int$equal
+			array$size
+			set_argv
+			sequence$a2s
+			ctl_pts$bp_remove
+			externalize
+			record$get_2
+
+debug$break_cmd:
+			int$equal
+			string$size
+			debug$err_out
+			parse_line
+			array$elements
+			bool$not
+			string$indexc
+			string$fetch
+			int$parse
+			ctl_pts$bp_add
+			externalize
+			record$get_2
+			stream$putl
+			string$concat
+
+debug$trace_cmd:
+			int$equal
+			string$size
+			debug$err_out
+			parse_line
+			array$elements
+			ctl_pts$sig_add
+
+debug$untrace_cmd:
+			int$equal
+			string$size
+			debug$err_out
+			parse_line
+			array$elements
+			ctl_pts$sig_remove
+			stream$putl
+			string$concat
+
+debug$step_cmd:
+			int$equal
+			string$size
+			debug$err_out
+			parse_line
+			array$elements
+			ctl_pts$bp_add
+			stream$putl
+			string$concat
+
+debug$unstep_cmd:
+			int$equal
+			string$size
+			debug$err_out
+			parse_line
+			array$elements
+			ctl_pts$bp_remove
+			stream$putl
+			string$concat
+
+debug$print_cmd:
+			int$equal
+			string$size
+			debug$err_out
+			parse_line
+			slower
+			array$elements
+			pstream$start
+			string$concat
+			dvar$get_dexpr
+			debug$eval_dexpr
+			debugopprint_val
+			record$get_3
+			record$get_2
+			pstream$text
+			pstream$stop
+			pstream$pause
+
+debug$width_cmd:
+			int$equal
+			string$size
+			pstream$start
+			pstream$text
+			int$unparse
+			pstream$get_max_width
+			pstream$stop
+			pstream$pause
+			parse_line
+			bool$not
+			array$size
+			stream$putl
+			pstream$set_max_width
+			int$parse
+			array$fetch
+			dbg_env$dump
+
+debug$depth_cmd:
+			int$equal
+			string$size
+			pstream$start
+			pstream$text
+			int$unparse
+			pstream$get_max_depth
+			pstream$stop
+			pstream$pause
+			parse_line
+			bool$not
+			array$size
+			stream$putl
+			pstream$set_max_depth
+			int$parse
+			array$fetch
+			dbg_env$dump
+
+debug$alias_cmd:
+			parse_line
+			int$equal
+			array$size
+			alias$show_alias
+			array$fetch
+			alias$add_alias
+
+debug$unalias_cmd:
+			parse_line
+			int$equal
+			array$size
+			stream$putl
+			alias$remove_alias
+
+debug$execute_cmd:
+			parse_line
+			int$equal
+			array$size
+			stream$putl
+			int$gt
+			file_name$parse
+			array$fetch
+			debug$err_out
+			string$concat
+			stream$open
+			stream$getl
+			strip_blanks
+			string$empty
+			char$equal
+			string$fetch
+			debug$process_commands
+
+debug$eval_cmd:
+			alias$expand_alias
+			pc_slower
+			dparse
+			debug$err_out
+			debug$eval_dexpr
+
+debug$eval_dexpr:
+			estack$create
+			debug$eval
+			pstream$start
+			pstream$text
+			pstream$stop
+			pstream$pause
+			estack$elements
+			dvar$get_dexpr
+			int$print
+			bool$print
+			null$print
+			char$print
+			string$print
+			real$print
+			string$concat
+			debugopprint_val
+			record$get_3
+			record$get_2
+			print_result
+			record$get_1
+			logit
+			debug$eval_dexpr_IB_1
+
+debug$eval:
+			sequence$elements
+			_cvt
+			record$get_2
+			debug$eval
+			record$get_1
+			debug$eval_assn
+			sequence$size
+			sequence$fetch
+			oneof$make_8
+			debug$fixup_rep
+			debug$is_regular_apply
+			debug$find_rtn_info
+			inst_from_info
+			record$get_4
+			record$get_3
+			record$get_6
+			int$gt
+			int$lt
+			record$get_7
+			record$get_5
+			record$get_8
+			string$indexc
+			string$substr
+			int$sub
+			string$rest
+			int$add
+			string$equal
+			oneof$value_6
+			dvar$get_dexpr
+			oneof$value_9
+			debugopnm2val_ops
+			rep_find_valops
+			string$concat
+			oneof$value_5
+			debug$teval
+			add_selector_info2
+			find_selector_ops2
+			find_valops
+			int$equal
+			int$unparse
+			sym$get_address
+			sequence$new
+			_vec$create
+			estack$size
+			int$from_to
+			_vec$store
+			debug$dexpr2obj
+			estack$fetch
+			estack$trim
+			iter_yield$setup
+			call_clu
+			record$set_3
+			bool$not
+			_obj$equal
+			_vec$fetch
+			_pclu_erstr2
+			debugopcmp_sig
+			debugopget_sigvalcount
+			debugopget_nth_sigvalops
+			estack$push
+			oneof$make_9
+			debugopget_nth_op
+			inst_from_name
+			array$predict
+			array$addh
+			clu_add_parm_info_type
+			clu_find_type_instance
+			sequence$addh
+			logit
+			sequence$indexes
+			_tagcell$create
+
+debug$fixup_rep:
+			bool$not
+			string$indexc
+			record$get_2
+			int$equal
+			string$substr
+			int$sub
+			string$rest
+			int$add
+			string$equal
+			sequence$fetch
+			_cvt
+			record$get_1
+			oneof$value_6
+			dvar$get_dexpr
+			oneof$value_9
+			debugopnm2val_ops
+			record$get_3
+			string$concat
+			sym$get_name
+			find_tgen
+			sequence$new
+			int$from_to
+			find_tgen_parm
+			sequence$addh
+			oneof$make_7
+			record$set_4
+			string_lindexs
+			record$set_2
+
+debug$teval:
+			sym$get_address
+			string$concat
+			array$new
+			record$get_1
+			int$from_to
+			sequence$size
+			record$get_2
+			array$addh
+			debugopget_nth_formal
+			sequence$elements
+			_cvt
+			debug$teval
+			array$fetch
+			int$add
+			clu_add_parm_info_type
+			clu_find_type_instance
+			oneof$value_5
+			add_selector_info2
+			find_selector_ops2
+			logit
+
+debug$is_regular_apply:
+			string$indexc
+			int$equal
+			string$substr
+			int$sub
+			string$equal
+
+debug$dexpr2obj:
+			_cvt
+			record$get_2
+			dvar$get_value
+			debugopget_val
+			record$get_3
+			slower
+			string$concat
+			logit
+
+debug$eval_assn:
+			int$from_to
+			int$add
+			_cvt
+			estack$fetch
+			logit
+			record$get_2
+			dvar$get_value
+			debugopget_val
+			record$get_3
+			slower
+			debug$err_out
+			string$concat
+			debugopset_val
+			oneof$is_6
+			dvar$get_dexpr
+			oneof$value_6
+			dvar$set_value
+			pstream$start
+			pstream$text
+			pstream$stop
+			pstream$pause
+			estack$trim
+			int$sub
+			estack$store
+
+debug$find_normal_ops:
+			debug$find_rtn_info
+			record$get_7
+
+debug$find_signal_ops:
+			debug$find_rtn_info
+			sequence$elements
+			record$get_8
+			string$equal
+			record$get_1
+			record$get_2
+
+debug$find_rtn_info:
+			_cvt
+			sym$get_address
+			string$concat
+			externalize
+
+debug$help_cmd:
+			parse_line
+			int$equal
+			array$size
+			stream$putl
+			array$elements
+			string$indexs
+			record$get_2
+			string$equal
+			string$concat
+			record$get_1
+			bool$not
+
+debug$where_cmd:
+			parse_line
+			int$gt
+			array$size
+			stream$putl
+			debugopframe_count
+			int$equal
+			int$parse
+			array$fetch
+			int$lt
+			debug$digits
+			int$from_to_by
+			debugopframe_info
+			string$size
+			externalize
+			debugopget_name
+			stream$puts
+			stream$putspace
+			int$sub
+			int$unparse
+			record$get_3
+			int$add
+			src$list
+			debugopget_fname
+
+debug$digits:
+			int$lt
+			int$minus
+			int$gt
+			int$power
+			int$add
+
+debug$func_cmd:
+			parse_line
+			int$equal
+			array$size
+			stream$putl
+			int$gt
+			internalize
+			debug$find_rtn_info
+			debugopget_fname
+			record$set_2
+			record$set_1
+			src$find_module
+
+debug$up_cmd:
+			parse_line
+			bool$not
+			int$equal
+			array$size
+			stream$putl
+			string$size
+			int$parse
+			debug$err_out
+			int$sub
+			record$get_3
+			int$lt
+			int$gt
+			record$get_5
+			debugopframe_info
+			record$set_3
+			record$set_2
+			debugopget_name
+			record$set_1
+			debugopget_fname
+			stream$putspace
+			stream$puts
+			int$unparse
+			externalize
+			record$get_2
+			src$list
+
+debug$down_cmd:
+			parse_line
+			bool$not
+			int$equal
+			array$size
+			stream$putl
+			string$size
+			int$parse
+			debug$err_out
+			int$add
+			record$get_3
+			int$lt
+			int$gt
+			record$get_5
+			record$set_3
+			debugopframe_info
+			record$set_2
+			debugopget_name
+			record$set_1
+			debugopget_fname
+			stream$putspace
+			stream$puts
+			int$unparse
+			externalize
+			record$get_2
+			src$list
+
+debug$list_cmd:
+			record$get_2
+			record$get_1
+			bool$not
+			string$equal
+			debug$find_rtn_info
+			debugopget_fname
+			string$empty
+			int$sub
+			int$lt
+			int$add
+			parse_line
+			int$equal
+			array$size
+			int$parse
+			array$fetch
+			pstream$text
+			src$list
+
+debug$delete_cmd:
+			parse_line
+			int$equal
+			array$size
+			string$equal
+			array$fetch
+			ctl_pts$clear
+			array$elements
+			bool$not
+			string$indexc
+			string$fetch
+			int$parse
+			ctl_pts$bp_remove
+			externalize
+			record$get_2
+			stream$putl
+			string$concat
+			debug$err_out
+
+debug$show_cmd:
+			parse_line
+			bool$not
+			int$equal
+			array$size
+			stream$putl
+			ctl_pts$print
+
+debug$err_out:
+			stream$error_output
+			stream$puts
+
+pc_slower:
+			string$s2ac
+			array$indexes
+			char$equal
+			array$fetch
+			bool$not
+			array$store
+			lower
+			string$ac2s
+
+estack$own_init_proc:
+		array$new
+		array$addh
+		array$bottom
+		array$fetch
+		array$store
+		array$size
+		array$trim
+		array$elements
+
+estack$create:
+		array$new
+
+estack$push:
+		array$addh
+
+estack$addh:
+		array$addh
+
+estack$top:
+		array$bottom
+
+estack$bottom:
+		array$bottom
+
+estack$fetch:
+		array$fetch
+
+estack$store:
+		array$store
+
+estack$size:
+		array$size
+
+estack$trim:
+		array$trim
+
+estack$elements:
+		array$elements
+
+logit:
+		stream$error_output
+		stream$putl
+
+sym$own_init_proc:
+		array$predict
+		_get_xjname
+		file_name$parse
+		extend_file_name
+		file_name$unparse
+		file_exists
+		file_date
+		date$gt
+		unix_cmd
+		string$concat
+		bool$not
+		sym$setup
+		string$indexc
+		int$equal
+		string$substr
+		int$sub
+		string$rest
+		int$add
+		string$size
+		array$elements
+		string$equal
+		record$get_2
+		record$get_1
+		stream$open
+		stream$getl
+		string$indexs
+		stream$close
+		i_hparse
+		array$addh
+		slower
+		i_hunparse
+		logit
+		int$unparse
+		string_lindexs
+		int$lt
+		debugopassign
+
+sym$setup:
+		_get_xjname
+		file_name$parse
+		extend_file_name
+		file_name$unparse
+		file_exists
+		file_date
+		date$gt
+		unix_cmd
+		string$concat
+
+sym$get_address:
+		bool$not
+		sym$setup
+		string$indexc
+		int$equal
+		string$concat
+		string$substr
+		int$sub
+		string$rest
+		int$add
+		string$size
+		array$elements
+		string$equal
+		record$get_2
+		record$get_1
+		stream$open
+		stream$getl
+		string$indexs
+		stream$close
+		i_hparse
+		array$addh
+
+sym$get_name:
+		bool$not
+		sym$setup
+		array$elements
+		int$equal
+		record$get_1
+		string$rest
+		record$get_2
+		int$add
+		string$size
+		slower
+		i_hunparse
+		stream$open
+		stream$getl
+		string$indexs
+		logit
+		string$concat
+		int$unparse
+		string_lindexs
+		stream$close
+		array$addh
+
+sym$clear_owns:
+		bool$not
+		sym$setup
+		stream$open
+		stream$getl
+		string$size
+		int$lt
+		int$equal
+		string_lindexs
+		int$sub
+		string$indexc
+		string$substr
+		i_hparse
+		debugopassign
+		stream$close
+
+internalize:
+		lower_case
+		string$indexc
+		bool$not
+		int$equal
+		string$concat
+		string$substr
+		int$sub
+		string$rest
+		int$add
+
+externalize:
+		string$indexs
+		bool$not
+		int$equal
+		string$concat
+		string$substr
+		int$sub
+		string$rest
+		int$add
+
+ctl_pts$own_init_proc:
+		array$predict
+		array$fill
+		array$elements
+		string$equal
+		record$get_1
+		bool$not
+		array$addh
+		record$get_2
+		ctl_pts$line_tracing_off
+		dbg_env$dump
+		internalize
+		ctl_pts$bp_exists
+		ctl_pts$line_tracing_on
+		oneof$make_3
+		oneof$make_4
+		ctl_pts$func_exists
+		oneof$make_1
+		oneof$make_2
+		array$indexes
+		array$fetch
+		array$size
+		array$store
+		array$trim
+		int$sub
+		int$equal
+		bool$equal
+		stream$putl
+		string$concat
+		externalize
+		int$unparse
+		stream$puts
+		sym$get_address
+		debugopassign
+
+ctl_pts$clear:
+		array$predict
+		array$elements
+		string$equal
+		record$get_1
+		bool$not
+		array$addh
+		record$get_2
+		ctl_pts$line_tracing_off
+		array$fill
+		dbg_env$dump
+
+ctl_pts$bp_add:
+		internalize
+		string$equal
+		bool$not
+		ctl_pts$bp_exists
+		ctl_pts$line_tracing_on
+		array$addh
+		oneof$make_3
+		oneof$make_4
+		ctl_pts$func_exists
+		oneof$make_1
+		oneof$make_2
+		dbg_env$dump
+
+ctl_pts$bp_remove:
+		internalize
+		array$indexes
+		array$fetch
+		string$equal
+		record$get_1
+		array$size
+		array$store
+		array$trim
+		int$sub
+		record$get_2
+		int$equal
+		bool$not
+		dbg_env$dump
+		ctl_pts$line_tracing_off
+
+ctl_pts$bp_exists:
+		array$elements
+		string$equal
+		record$get_2
+		int$equal
+		record$get_1
+
+ctl_pts$sig_add:
+		string$equal
+		bool$equal
+		dbg_env$dump
+		array$elements
+		array$addh
+
+ctl_pts$sig_exists:
+		bool$equal
+		array$elements
+		string$equal
+
+ctl_pts$sig_remove:
+		string$equal
+		bool$equal
+		dbg_env$dump
+		array$indexes
+		array$fetch
+		array$size
+		array$store
+		array$trim
+		int$sub
+
+ctl_pts$print:
+		stream$putl
+		array$elements
+		string$concat
+		externalize
+		record$get_1
+		record$get_2
+		int$unparse
+		stream$puts
+
+ctl_pts$sbp_elements:
+		array$elements
+		externalize
+		record$get_1
+
+ctl_pts$fbp_elements:
+		array$elements
+		externalize
+		record$get_1
+
+ctl_pts$lbp_elements:
+		array$elements
+		string$concat
+		externalize
+		record$get_2
+		int$unparse
+		record$get_1
+
+ctl_pts$sig_elements:
+		array$elements
+
+ctl_pts$func_exists:
+		sym$get_address
+
+ctl_pts$line_tracing_on:
+		sym$get_address
+		string$concat
+		debugopassign
+
+ctl_pts$line_tracing_off:
+		sym$get_address
+		string$concat
+		debugopassign
+
+opown2typeown:
+		string$indexs
+		int$equal
+		string$substr
+		int$sub
+		string_lindexs
+		string$rest
+		int$add
+		string$concat
+
+print_uninit:
+		pstream$text
+
+inst_from_info:
+		debugopget_name
+		externalize
+		string$indexc
+		bool$not
+		int$equal
+		string$substr
+		int$sub
+		string$rest
+		int$add
+		array$new
+		sequence$indexes
+		array$addh
+		debugopget_nth_type_formal
+		debugopget_nth_op_formal
+		inst
+
+inst_from_name:
+		string$indexc
+		string$substr
+		int$sub
+		array$new
+		string$rest
+		int$add
+		int$equal
+		string$equal
+		array$addh
+		sequence$indexes
+		debugopget_nth_type_formal
+		debugopget_nth_op_formal
+		array$empty
+		array$indexes
+		array$fetch
+		_cvt
+		sequence$fetch
+		debug$teval
+		logit
+		string$concat
+		sym$get_address
+		int$from_to
+		debugopget_count_formals
+		debugopget_nth_formal
+		sequence$new
+		array$elements
+		sequence$addh
+		oneof$make_6
+		inst
+
+inst:
+		sequence$elements
+		_cvt
+		logit
+		clu_add_parm_info_const
+		debug$teval
+		sym$get_address
+		string$concat
+		array$fetch
+		clu_add_parm_info_type
+		int$add
+		bool$not
+		int$equal
+		sequence$size
+		clu_find_type_instance
+		clu_find_typeop_instance
+		clu_find_prociter_instance
+
+iter_yield$own_init_proc:
+		debugopget_nth_op
+		record$get_7
+		_cvt
+		inst_from_name
+		print_result
+
+iter_yield$setup:
+
+iter_yield$print:
+		debugopget_nth_op
+		record$get_7
+		_cvt
+		inst_from_name
+		print_result
+
+print_result:
+		pstream$start
+		debugopprint_val2
+		pstream$stop
+		pstream$pause
+
+extend_file_name:
+		string$empty
+		file_name$get_other
+		file_name$get_suffix
+		file_name$create
+		file_name$get_dir
+		file_name$get_name
+		string$concat
+
+dparse:
+	strip_blanks
+	string$fetch
+	int$gt
+	string$indexc
+	int$equal
+	int$parse
+	oneof$make_4
+	oneof$make_3
+	real$parse
+	oneof$make_5
+	char$equal
+	bool$not
+	oneof$make_2
+	string$substr
+	i_oparse
+	char$i2c
+	int$sub
+	string$size
+	oneof$make_6
+	char$ge
+	char$le
+	string$rest
+	int$add
+	int$lt
+	sequence$new
+	dexpr_idn
+	sequence$addh
+	dparse
+	sequence$fill
+	_cvt
+	dparg
+	string_lindexs
+	split_tlist
+	string$equal
+	array$elements
+	dpfspec
+	dptype
+	string$concat
+	string$indexs
+	array$fetch
+	dpexprlist
+	oneof$make_1
+	dpfspeclist
+	dpfieldexpr
+	oneof$make_13
+	dpfieldexprlist
+	oneof$make_10
+	oneof$make_8
+
+dexpr_idn:
+	string$equal
+	oneof$make_4
+	oneof$make_1
+	oneof$make_6
+
+dparg:
+	string$size
+	int$from_to
+	string$fetch
+	char$equal
+	int$equal
+	int$add
+	int$sub
+	strip_blanks
+	string$substr
+	string$rest
+
+dpfieldexpr:
+	sequence$size
+	char$equal
+	string$fetch
+	string$rest
+	bool$not
+	string$empty
+	string$chars
+	int$add
+	string$size
+	string$append
+	strip_blanks
+	dparse
+	int$from_to
+	string$equal
+	record$get_1
+	oneof$value_5
+	sequence$fetch
+	dpfieldexpr_IB_1
+
+dpfieldexprlist:
+	sequence$size
+	oneof$make_4
+	oneof$make_3
+	array$fill
+	char$equal
+	string$fetch
+	string$rest
+	bool$not
+	string$empty
+	string$chars
+	int$add
+	string$size
+	string$append
+	strip_blanks
+	dparse
+	int$from_to
+	string$equal
+	record$get_1
+	oneof$value_5
+	sequence$fetch
+	array$store
+	sequence$a2s
+	dpfieldexprlist_IB_1
+
+dpexprlist:
+	char$equal
+	string$fetch
+	string$rest
+	sequence$new
+	bool$not
+	string$empty
+	string$chars
+	int$add
+	string$size
+	string$append
+	strip_blanks
+	dparse
+	sequence$addh
+	dpexprlist_IB_1
+
+dpfspeclist:
+	sequence$new
+	split_tlist
+	array$elements
+	dpfspec
+	sequence$addh
+	array$predict
+	sequence$size
+	sequence$elements
+	oneof$value_5
+	record$get_1
+	array$size
+	int$from_to
+	string$lt
+	array$fetch
+	array$store
+	array$addh
+	sequence$a2s
+
+dpfspec:
+	string$chars
+	char$equal
+	int$equal
+	_cvt
+	dptype
+	oneof$make_5
+	int$add
+	int$sub
+	string$append
+	dpfspec_IB_1
+
+split_tlist:
+	strip_blanks
+	string$indexc
+	string$rest
+	int$add
+	string_lindexs
+	string$substr
+	int$sub
+	array$predict
+	string$chars
+	char$equal
+	int$equal
+	array$addh
+	string$append
+	split_tlist_IB_1
+
+dptype:
+	strip_blanks
+	string$indexs
+	int$equal
+	oneof$make_6
+	string$substr
+	int$sub
+	string$equal
+	string$rest
+	split_tlist
+	sequence$new
+	array$elements
+	sequence$addh
+	dpfspec
+	oneof$make_11
+	_cvt
+	dptype
+	oneof$make_12
+
+strip_blanks:
+	remblank
+	string$size
+	int$from_to_by
+	char$equal
+	string$fetch
+	int$add
+	string$substr
+	int$sub
+
+src$own_init_proc:
+	file_name$create
+	stream$close
+	file_name$parse
+	src$find_module
+	string$equal
+	int$gt
+	int$from_to
+	int$add
+	int$sub
+	stream$getl
+	stream$putl
+	stream$open
+	string$indexs
+	string$rest
+	string$indexc
+	string$concat
+	_environ
+	int$equal
+	stream$puts
+	int$unparse
+	bool$not
+	string$substr
+	string$size
+	remblank
+	char$equal
+	string$fetch
+
+src$set_context:
+	stream$close
+	file_name$parse
+	src$find_module
+
+src$get_context:
+	string$equal
+
+src$list:
+	string$equal
+	int$gt
+	int$from_to
+	int$add
+	int$sub
+	stream$getl
+	stream$putl
+	stream$close
+	file_name$parse
+	stream$open
+	string$indexs
+	string$rest
+	string$indexc
+	string$concat
+	_environ
+	int$equal
+	stream$puts
+	int$unparse
+
+src$find_module:
+	file_name$parse
+	stream$open
+	string$indexs
+	string$rest
+	string$indexc
+	string$concat
+	_environ
+	int$equal
+	bool$not
+	int$add
+	string$substr
+	int$sub
+	string$size
+	stream$getl
+	remblank
+	char$equal
+	string$fetch
+	string$equal
+	stream$close
+
+dvar$own_init_proc:
+	array$new
+	string$equal
+	_cvt
+	array$elements
+	record$get_1
+	record$get_2
+	oneof$make_4
+	oneof$make_1
+	record$set_2
+	array$addh
+
+dvar$get_value:
+	string$equal
+	_cvt
+	array$elements
+	record$get_1
+	record$get_2
+
+dvar$get_dexpr:
+	string$equal
+	oneof$make_4
+	oneof$make_1
+	array$elements
+	record$get_1
+	record$get_2
+
+dvar$set_value:
+	array$elements
+	string$equal
+	record$get_1
+	record$set_2
+	array$addh
+
+alias$own_init_proc:
+	array$new
+	array$fetch
+	string$indexs
+	string$rest
+	int$add
+	string$size
+	array$elements
+	string$equal
+	record$get_1
+	record$set_2
+	bool$not
+	array$addh
+	dbg_env$dump
+	stream$putl
+	string$concat
+	string$empty
+	record$get_2
+	stream$puts
+	alias$expand_alias_asst
+	int$gt
+	string$chars
+	char$ge
+	char$le
+	string$c2s
+	char$equal
+	alias$subst
+	alias_IB_1
+
+alias$init:
+
+alias$add_alias:
+	array$fetch
+	string$indexs
+	string$rest
+	int$add
+	string$size
+	array$elements
+	string$equal
+	record$get_1
+	record$set_2
+	bool$not
+	array$addh
+	dbg_env$dump
+
+alias$remove_alias:
+	array$elements
+	string$equal
+	record$get_1
+	record$set_2
+	bool$not
+	stream$putl
+	string$concat
+	array$new
+	string$empty
+	record$get_2
+	array$addh
+	dbg_env$dump
+
+alias$show_alias:
+	array$elements
+	string$equal
+	record$get_1
+	stream$puts
+	stream$putl
+	record$get_2
+
+alias$expand_alias:
+	alias$expand_alias_asst
+
+alias$expand_alias_asst:
+	int$add
+	int$gt
+	string$chars
+	char$ge
+	char$le
+	string$concat
+	string$c2s
+	char$equal
+	bool$not
+	string$empty
+	alias$subst
+	string$equal
+	alias$expand_alias_asst
+	alias$expand_alias_asst_IB_1
+
+alias$subst:
+	array$elements
+	string$equal
+	record$get_1
+	record$get_2
+
+alias$elements:
+	array$elements
+	string$concat
+	record$get_1
+	record$get_2
+
+dbg_env$own_init_proc:
+	_get_xjname
+	extend_file_name
+	file_name$parse
+	bool$not
+	dbg_env$setup
+	file_exists
+	stream$open
+	stream$getl
+	parse_line
+	string$equal
+	array$fetch
+	int$equal
+	array$size
+	stream$putl
+	ctl_pts$bp_add
+	int$parse
+	string$concat
+	ctl_pts$sig_add
+	int$ge
+	array$reml
+	array$set_low
+	alias$add_alias
+	string$rest
+	pstream$set_max_width
+	pstream$set_max_depth
+	stream$close
+	delete_file
+	ctl_pts$sbp_elements
+	ctl_pts$fbp_elements
+	ctl_pts$lbp_elements
+	ctl_pts$sig_elements
+	alias$elements
+	int$unparse
+	pstream$get_max_width
+	pstream$get_max_depth
+	dbg_env_IB_1
+	dbg_env_IB_2
+	dbg_env_IB_3
+	dbg_env_IB_4
+	dbg_env_IB_5
+
+dbg_env$setup:
+	_get_xjname
+	extend_file_name
+	file_name$parse
+
+dbg_env$load:
+	bool$not
+	dbg_env$setup
+	file_exists
+	stream$open
+	stream$getl
+	parse_line
+	string$equal
+	array$fetch
+	int$equal
+	array$size
+	stream$putl
+	ctl_pts$bp_add
+	int$parse
+	string$concat
+	ctl_pts$sig_add
+	int$ge
+	array$reml
+	array$set_low
+	alias$add_alias
+	string$rest
+	pstream$set_max_width
+	pstream$set_max_depth
+	stream$close
+
+dbg_env$dump:
+	bool$not
+	dbg_env$setup
+	file_exists
+	delete_file
+	stream$open
+	ctl_pts$sbp_elements
+	stream$putl
+	string$concat
+	ctl_pts$fbp_elements
+	ctl_pts$lbp_elements
+	ctl_pts$sig_elements
+	alias$elements
+	int$unparse
+	pstream$get_max_width
+	pstream$get_max_depth
+	stream$close
+	dbg_env$dump_IB_1
+	dbg_env$dump_IB_2
+	dbg_env$dump_IB_3
+	dbg_env$dump_IB_4
+	dbg_env$dump_IB_5
+

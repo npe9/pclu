@@ -1,0 +1,5 @@
+% Copyright Massachusetts Institute of Technology 1981, 1989
+
+working_dir = proc () returns (string)
+	return(_working_dir("", false))
+	end working_dir

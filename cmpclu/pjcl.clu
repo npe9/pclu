@@ -1,0 +1,160 @@
+%	PJCL CLU
+% Copyright Massachusetts Institute of Technology 1982, 1989
+%	CLU compiler: command line parser (system dependent)
+
+parse_command_line = proc (line: ac) returns (commandlist, str, bool)
+    unify(line)			% convert '-' to '#'
+    ohave: bool := true
+    opart: str := get_output_part(line)
+       except when none:
+		   ohave := false
+		   opart := ""
+	      end
+    comms: commandlist := commandlist$new()
+    while true do
+	opts: as := get_option_parts(line)
+	cmnd: str := get_command_part(line)
+	   except when none: if as$size(opts) = 0
+				then break
+				else cmnd := ""
+				end
+		  end
+	args: as := get_input_parts(line)
+	commandlist$addh(comms, command${opts: opts,
+					 cmnd: cmnd,
+					 args: args})
+	if '#' = flush_blanks(line)
+	   then ac$reml(line)
+	   else break
+	   end
+	end
+    return(comms, opart, ohave)
+    end parse_command_line
+
+get_output_part = proc (line: ac) returns (str) signals (none)
+    qc = '\\'
+    ac$set_low(line, 1)
+    h: int := ac$high(line)
+    i: int := 1
+    last: int := 0
+    while i <= h do
+	c: char := line[i]
+	if c = '^'
+	   then last := i
+	 elseif c = qc
+	   then i := i + 1 end
+	i := i + 1
+	end
+    if last = 0
+       then signal none end
+    fs: ac := ac$predict(1, h - last)
+    i := last + 1
+    while i <= h do
+	ac$addh(fs, line[i])
+	i := i + 1
+	end
+    ac$trim(line, 1, last - 1)
+    flush_blanks(fs)
+    return(gets_to(fs, ""))
+    end get_output_part
+
+get_option_parts = proc (line: ac) returns (as)
+    opts: as := as$new()
+    while true do
+	as$addh(opts, get_option_part(line))
+	end
+       except when none: end
+    return(opts)
+    end get_option_parts
+
+get_option_part = proc (line: ac) returns (str) signals (none)
+    c: char := flush_blanks(line)
+    if c = '-'
+       then ac$reml(line)
+	    c := flush_blanks(line)
+	    return(gets_to(line, " \t#,^-"))
+       else signal none
+       end
+    end get_option_part
+
+get_command_part = proc (line: ac) returns (str) signals (none)
+    if ' ' = flush_blanks(line)
+       then signal none end
+    return(gets_to(line, " \t#,^"))
+    end get_command_part
+
+get_input_parts = proc (line: ac) returns (as)
+    inputs: as := as$new()
+    while true do
+	if str$indexc(flush_blanks(line), " #") > 0
+	   then return(inputs) end
+	as$addh(inputs, gets_to(line, " \t,#"))
+	if ',' = flush_blanks(line)
+	   then ac$reml(line) end
+	end
+    end get_input_parts
+
+get_input_part = proc (line: ac) returns (str)
+    if '#' = flush_blanks(line)
+       then return("")
+       else return(gets_to(line, "#"))
+       end
+    end get_input_part
+
+move_to_next = proc (line: ac) signals (extra(str))
+    extra: str := gets_to(line, "#")
+    if '#' = flush_blanks(line)
+       then ac$reml(line)
+	    flush_blanks(line)
+     elseif extra ~= ""
+       then signal extra(extra) end
+    end move_to_next
+
+flush_blanks = proc (line: ac) returns (char)
+    begin
+	while str$indexc(ac$bottom(line), " \t") > 0 do
+	    ac$reml(line)
+	    end
+	return(ac$bottom(line))
+	end
+       except when bounds: return(' ') end
+    end flush_blanks
+
+gets_to = proc (line: ac, terms: str) returns (str)
+    qc = '\\'
+    temp: ac := ac$new()
+    beyond: int := 0
+    while str$indexc(ac$bottom(line), terms) = 0 do
+	c: char := ac$reml(line)
+	if c = qc
+	   then c := ac$reml(line)
+		beyond := -1
+	   end
+	ac$addh(temp, c)
+	beyond := beyond + 1
+	end
+       except when bounds: end
+    while beyond > 0  cand  str$indexc(ac$top(temp), " \t") > 0 do
+	ac$remh(temp)
+	beyond := beyond - 1
+	end
+    return(str$ac2s(temp))
+    end gets_to
+
+% unify substitutes '#' for '-' where '-' occurs initially or preceded
+%	by comma, space, or tab
+% this allows pclu command line invocations to look more unix-like
+%	at the cost of suppressing the options feature of parse_command_line
+%	(the options feature is unused by the compiler)
+
+unify = proc(line:ac)
+    least: int := ac$low(line)
+    for i: int in ac$indexes(line) do
+	if line[i] = '-' then
+	   if i = least then
+	      line[i] := '#' continue end
+	   if string$indexc(line[i-1], " \t,") > 0 then
+	      line[i] := '#' end
+	   end
+	end
+    end unify

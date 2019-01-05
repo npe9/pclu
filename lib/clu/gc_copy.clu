@@ -1,0 +1,72 @@
+% Copyright Massachusetts Institute of Technology 1982, 1989
+
+aobj	= array[_obj]
+bvec	= _bytevec
+veco	= _vec[_obj]
+tago	= _tagcell[_obj]
+ttype	= table[_obj, _obj]
+tab	= record[tab:   ttype,
+		 count: int]
+nbucks	= 500
+
+gc_copy = proc [t: type] (x: t) returns (t)
+	_event$defer()
+	x := _cvt[_obj, t](
+		 _gc_copy(
+		     tab${tab:   ttype$create(nbucks, hash_obj, _obj$equal),
+			  count: _gc$count()},
+		     _cvt[t, _obj](x)))
+	_event$undefer()
+	return(x)
+	end gc_copy
+
+gc_copy_to = proc [t: type] (x: t, leaves: aobj) returns (t)
+	_event$defer()
+	tb: ttype := ttype$create(nbucks, hash_obj, _obj$equal)
+	for y: _obj in aobj$elements(leaves) do
+		ttype$alter(tb, y, y)
+		end
+	x := _cvt[_obj, t](_gc_copy(tab${tab:   tb,
+					 count: _gc$count()},
+				    _cvt[t, _obj](x)))
+	_event$undefer()
+	return(x)
+	end gc_copy_to
+
+_gc_copy = proc (t: tab, x: _obj) returns (_obj)
+	if ~_obj$is_ref(x)
+	   then return(x) end
+	while t.count ~= _gc$count() do
+		t.count := _gc$count()
+		ttype$rehash(t.tab, hash_obj)
+		end
+	return(ttype$lookup(t.tab, x))
+	   except when not_found: end
+	nx: _obj
+	if _obj$is_vec(x)
+	   then xx: veco := veco$copy(_cvt[_obj, veco](x))
+		nx := _cvt[veco, _obj](xx)
+		ttype$alter(t.tab, x, nx)
+		for i: int in int$from_to_by(veco$size(xx), 1, -1) do
+			xx[i] := _gc_copy(t, xx[i])
+			end
+	elseif _obj$is_bvec(x)
+	   then nx := _cvt[bvec, _obj](bvec$copy(_cvt[_obj, bvec](x)))
+		ttype$alter(t.tab, x, nx)
+	elseif _obj$is_adv(x)
+	   then xx: aobj := aobj$copy1(_cvt[_obj, aobj](x))
+		nx := _cvt[aobj, _obj](xx)
+		ttype$alter(t.tab, x, nx)
+		for i: int in aobj$indexes(xx) do
+			xx[i] := _gc_copy(t, xx[i])
+			end
+	elseif _obj$is_cell(x)  cor  _obj$is_anyize(x)
+	   then xx: tago := tago$copy(_cvt[_obj, tago](x))
+		nx := _cvt[tago, _obj](xx)
+		ttype$alter(t.tab, x, nx)
+		tg: int, val: _obj := tago$get(xx)
+		xx.value := _gc_copy(t, val)
+	else nx := x
+	end
+	return(nx)
+	end _gc_copy

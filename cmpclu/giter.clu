@@ -1,0 +1,667 @@
+
+%  Copyright    Massachusetts Institute of Technology     1990,1991
+
+%%%
+%%% Iterator Body Cluster
+%%%
+
+ib = cluster is init, reset, add_body, gen_bodies, next_name, 
+		save_name, restore_name, bodies, exist
+
+    sf = sequence[forstmt]
+    rep = null
+
+    own iblist: sf := sf$new()
+    own count: int := 0
+    own old_count: int := 0
+    own generating_bodies: bool := false % context indicator to g_yield, g_for
+
+    init = proc()
+	iblist := sf$new()
+	count := 0
+	end init
+
+    reset = proc()
+	count := 0
+	end reset
+
+    % this procedure indicates whether code generation is being done for
+    %	bodies of for statements or not
+
+    bodies = proc() returns (bool)
+	return(generating_bodies)
+	end bodies
+
+    % this procedure is used to indicate whether any for statements
+    %	exist in the current proc/iter
+
+    exist = proc() returns (bool)
+	if sf$size(iblist) = 0 
+	   then
+		return (false)
+	   else
+		return (true) 
+	   end
+	end exist
+
+    add_body = proc(bod: forstmt)
+	iblist := sf$addh(iblist, bod)
+	end add_body
+
+    next_name = proc() returns (name)
+
+	count := count + 1
+
+	return(current_apply$get_name()||"_IB_" || int$unparse(count))
+
+	end next_name
+
+    save_name = proc()
+	old_count := count
+	end save_name
+
+    restore_name = proc()
+	count := old_count
+	end restore_name
+
+    gen_bodies = proc(e: g_env, id: idn)
+
+	generating_bodies := true
+	if ~sf$empty(iblist) then
+	   g_env$blankline(e)
+	   g_env$puts(e, "/**** BEGIN ITERATOR BODIES for ")
+	   g_idnlit(e, id)
+	   g_env$puts(e, " ****/")
+	   g_env$blankline(e)
+	   index: int := 1
+	   for each_bod: forstmt in sf$elements(iblist) do
+	       gen_body(e, each_bod, index)
+	       index := index + 1
+	       end % for
+	   g_env$blankline(e)
+	   g_env$puts(e, "/**** END ITERATOR BODIES for ")
+	   g_idnlit(e, id)
+	   g_env$puts(e, " ****/")
+	   g_env$blankline(e)
+	   end
+	generating_bodies := false
+	end gen_bodies
+
+    gen_body = proc(e: g_env, f: forstmt, index: int)
+
+	ex$init()           % initialize exception handling cluster
+
+	% indicate context is an iterator body
+
+	loop_context$enter_for()
+
+	% indicate whether surrounding context is a proc or an iter
+
+	iterp: bool := current_apply$is_iter()
+
+	g_env$newline(e)
+
+	% generate signature
+	ibname: name := current_apply$get_name()||"_IB_" || int$unparse(index)
+	% save_name()
+	g_env$puts(e, "errcode " || ibname ||"(")
+	iv_count:int := 0
+	tagcase f.vars
+	   tag old(o: idnlist):
+	       iv_count := idnlist$size(o)
+	   tag new(n: decllist):
+	       for this_d: decl in decllist$elements(n) do
+		   iv_count := iv_count + idnlist$size(this_d.idns)
+		   end
+	   end
+	for each_i: int in int$from_to(1, iv_count) do
+	    g_env$puts(e, "iv_"||int$unparse(each_i)||", ")
+	    end
+	g_env$putl(e, "locals, iecode)")
+	g_env$putl(e, "errcode *iecode;")
+	for each_i: int in int$from_to(1, iv_count) do
+	    g_env$putl(e, "CLUREF iv_"||int$unparse(each_i)|| ";")
+	    end
+	gen_locals(e)
+
+	% generate the body
+	g_env$putl(e, "{")
+	g_env$indent(e)
+	
+	tagcase f.vars
+	   tag old(idns: idnlist):
+	       for each_i: int in int$from_to(1, iv_count) do
+		   g_idn(e, idns[each_i])
+		   g_env$putl(e, " = iv_"||int$unparse(each_i)||".num;")
+		   end
+	   tag new(d:decllist):
+	       i : int := 1
+	       for each_d: decl in decllist$elements(d) do
+		   for each_idn:idn in idnlist$elements(each_d.idns) do
+		       g_idn(e, each_idn)
+		       g_env$putl(e, " = iv_"||int$unparse(i)||".num;")
+		       i := i + 1
+		       end
+		   end
+	   end % tag
+	g_env$putl(e, "enter_iter_body_proc(" || int$unparse(f.body.stmts[1].line) || ");")
+		except when bounds:
+			g_env$putl(e, "enter_iter_body_proc(-1);")
+			end
+	for s: stmt in stmtlist$elements(f.body.stmts) do
+	    g_stmt(e, s)
+	    end
+
+	% put in standard return
+	g_env$putl(e, "{signal(ERR_ok);}")
+
+	% put in default exception handler for iterator bodies
+	g_env$putl(e, ex$get_current_ex_label()||":")
+	g_env$indent(e)
+	g_env$putl(e, "{")
+	g_env$indent(e)
+	g_env$puts(e, "*iecode = ")
+	g_err(e)
+	g_env$putl(e, ";")
+	if current_apply$is_iter() 
+	   then
+		g_locals(e)
+		g_env$putl(e, "body_ctrl_req = true;")
+		g_env$puts(e, "{signal(ERR_iteriterbodyexit);}")
+	   else
+		g_env$puts(e, "{signal(ERR_iterbodyexit);}")
+	   end
+	g_env$outdent(e)
+	g_env$outdent(e)
+	g_env$putl(e, "}")
+	g_env$newline(e)
+	g_env$puts(e, ex$get_current_end_label() || ": {signal(ERR_ok);}")
+	g_env$ensure_newline(e)
+	
+	% finish up
+	g_env$puts(e, "}")
+	g_env$putl(e, "/* end " || ibname || " */")
+	g_env$outdent(e)
+	loop_context$leave()
+	% restore_name()
+
+	end gen_body
+
+    gen_locals = proc(e:g_env)
+
+	iterp: bool := current_apply$is_iter()
+
+	locals: array[decl] := current_locals$get()
+	args: decllist := current_apply$get().args
+	ap: applydefn := current_apply$get()
+	parms: decllist := parm$get_base()
+
+	g_env$newline(e)
+
+	% build struct: CLUREFs for args, usual locals, and program's locals
+
+	g_env$putl(e, "struct {")
+	if dbg_info$active() then
+		g_env$putl(e, "    struct dbg_info *DBG_INFO;")
+		g_env$putl(e, "    int DBG_LINE;")
+		end
+	if iterp then
+	   g_env$putl(e, "    char **user_locals;")
+	   g_env$putl(e, "    errcode (*proc)();")
+	   end
+	g_env$putl(e, "    errcode err;")
+	g_env$putl(e, "    errcode ecode2;")
+	if iterp then g_env$putl(e, "    bool body_ctrl_req;") end
+
+	if current_type$exists() cand current_type$parmd() then
+	   g_env$putl(e, current_type$get_name() || "_OWN_DEFN *type_own_ptr;")
+	   end
+	if current_apply$parmd() then
+	   defn_name: string := op_own_name()
+	   g_env$putl(e, defn_name || "_OWN_DEFN *op_own_ptr;") end
+	% build defines for each local var
+	for lv: decl in array[decl]$elements(locals) do
+	    ts: typespec := lv.type_
+	    for id: idn in idnlist$elements(lv.idns) do
+		g_env$puts(e, "    ")
+	 	g_decl_typespec(e, ts, idnlit(id))
+		end
+	    end
+	if ~dbg_info$active() then
+	   for a: decl in decllist$elements(args) do
+	       ts: typespec := a.type_
+	       for id: idn in idnlist$elements(a.idns) do
+		   g_env$puts(e, "    ")
+		   g_decl_typespec(e, ts, idnlit(id))
+		   end
+	       end
+	   end
+
+	%	for each_d:decl in decllist$elements(parms) do
+	%	    for each_idn: idn in idnlist$elements(each_d.idns) do
+	%		g_env$putl(e, "    " || reqs$get_tid() || "_of_" ||
+	%			      each_idn.str || "_OPS *" ||
+	%			      each_idn.str || "_ops;")
+	%		end
+	%	    end
+	%
+	%	for each_d:decl in decllist$elements(ap.parms) do
+	%	    for each_idn: idn in idnlist$elements(each_d.idns) do
+	%		g_env$putl(e, reqs$get_id() || "_of_" ||
+	%			      each_idn.str || "_OPS *" ||
+	%			      each_idn.str || "_ops;")
+	%		end
+	%	    end
+
+	g_env$putl(e, "    } *locals;")
+
+	end gen_locals
+    end ib
+
+%%%
+%%% Proc to generate names for iterator bodies
+%%%
+
+g_iterbody_names = proc(arr: array[name], bod: stmtlist)
+
+    next_bodies: array[forstmt]
+    current_bodies: array[forstmt]
+
+    next_bodies := array[forstmt]$new()
+    g_iterbody_names_asst(next_bodies, arr, bod)
+
+    while true do
+
+	current_bodies := next_bodies
+	next_bodies := array[forstmt]$new()
+
+	for each_for: forstmt in array[forstmt]$elements(current_bodies) do
+	    g_iterbody_names_asst(next_bodies, arr, each_for.body.stmts)
+	    end % for
+
+	if array[forstmt]$empty(next_bodies) then break end
+
+	end % while
+
+    end g_iterbody_names
+
+g_iterbody_names_asst = proc(out: array[forstmt], arr: array[name], 
+			     bod: stmtlist) returns(array[forstmt])
+    for s: stmt in stmtlist$elements(bod) do
+	tagcase s.abs
+	   tag decl (d: decl):
+	   tag declinit(di: declinit):
+	   tag for_ (f: forstmt):
+	       if g_inline_iter_test(f.call.apply) then
+		  g_iterbody_names_asst (out, arr, f.body.stmts)
+		  else
+		       array[name]$addh (arr, ib$next_name())
+		       ib$add_body(f)
+		       array[forstmt]$addh(out, f)
+		  end
+	   tag body (b: body):
+	       g_iterbody_names_asst (out, arr, b.stmts)
+	   tag while_ (w: whilestmt):
+	       g_iterbody_names_asst(out, arr, w.body.stmts)
+	   tag if_ (i: ifstmt):
+	       for arm: ifarm in ifarmlist$elements (i.arms) do
+		   g_iterbody_names_asst (out, arr, arm.body.stmts)
+		   end % for
+	       tagcase i.else_
+		  tag body (b:body):
+		      g_iterbody_names_asst(out, arr, b.stmts)
+		  others:
+		  end
+	   tag tag_ (t: tagstmt):
+	       for arm: tagarm in tagarmlist$elements(t.arms) do
+		   g_iterbody_names_asst(out, arr, arm.body.stmts)
+		   end % for
+	       tagcase t.others_
+		  tag body (b: body):
+		      g_iterbody_names_asst(out, arr, b.stmts)
+		  others:
+		  end
+	   tag except_ (e: exceptstmt):
+	       g_iterbody_names_asst(out, arr, stmtlist$fill(1, e.stmt))
+	       for a: handler in handlerlist$elements(e.arms) do
+		   g_iterbody_names_asst(out, arr, a.body.stmts)
+		   end
+	       tagcase e.others_
+		  tag arm (a: othersarm):
+		      g_iterbody_names_asst(out, arr, a.body.stmts)
+		  others:
+		  end
+	   tag resignal_ (rs: resignalstmt):
+	       g_iterbody_names_asst(out, arr, stmtlist$fill(1, rs.stmt))
+	   others:
+	   end
+	end % for
+    return(out)
+    end g_iterbody_names_asst
+%%%
+%%% Cluster to remember looping context: while vs for vs neither
+%%%
+
+loop_context = cluster is init, enter_while, enter_for, enter_inline_for,
+			  leave, 
+			  is_for, is_while, is_inline_for,
+			  get_current_while_count,
+			  get_current_inline_for_count
+
+    rep = null
+
+    value = oneof[while_loop, for_loop, inline_for_loop, none:null]
+    av = array[value]
+    ai = array[int]
+
+    own state: value := value$make_none(nil)
+    own stack: av := av$new()
+    own while_count: int := 0 % count of while stmts in current applydefn
+    own while_count_stack: ai := ai$new()
+    own inline_for_count: int := 0 % count of inline for stmts in current applydefn
+    own inline_for_count_stack: ai := ai$new()
+
+    init = proc()
+
+	state := value$make_none(nil)
+	stack := av$new()
+	while_count := 0
+	while_count_stack := ai$new()
+	inline_for_count := 0
+	inline_for_count_stack := ai$new()
+
+	end init
+
+    enter_while = proc()
+
+	av$addh(stack, state)
+	state := value$make_while_loop(nil)
+	while_count := while_count + 1
+	ai$addh(while_count_stack, while_count)
+
+	end enter_while
+
+    enter_inline_for = proc()
+
+	av$addh(stack, state)
+	state := value$make_inline_for_loop(nil)
+	inline_for_count := inline_for_count + 1
+	ai$addh(inline_for_count_stack, inline_for_count)
+
+	end enter_inline_for
+
+    enter_for = proc()
+
+	av$addh(stack, state)
+	state := value$make_for_loop(nil)
+
+	end enter_for
+
+    leave = proc()
+
+	if value$is_while_loop(state)
+	   then
+		ai$remh(while_count_stack)
+	   end
+	if value$is_inline_for_loop(state)
+	   then
+		ai$remh(inline_for_count_stack)
+	   end
+	state := av$remh(stack)
+
+	end leave
+
+    is_for = proc() returns (bool) signals (not_in_loop)
+	tagcase state
+	   tag for_loop:
+	       return (true)
+	   others:
+	       return (false)
+	   end
+	end is_for
+
+    is_while = proc() returns (bool) signals (not_in_loop)
+	tagcase state
+	   tag while_loop:
+	       return (true)
+	   others:
+	       return (false)
+	   end
+	end is_while
+
+    is_inline_for = proc() returns (bool) signals (not_in_loop)
+	tagcase state
+	   tag inline_for_loop:
+	       return (true)
+	   others:
+	       return (false)
+	   end
+	end is_inline_for
+
+    get_current_while_count = proc() returns (int)
+	return (ai$top(while_count_stack))
+	end get_current_while_count
+
+    get_current_inline_for_count = proc() returns (int)
+	return (ai$top(inline_for_count_stack))
+	end get_current_inline_for_count
+
+    end loop_context
+
+%%%
+%%% Cluster to remember current locals to save them for iterator bodies
+%%%
+
+current_locals = cluster is set, get
+
+    rep = null
+
+    own curr_lvs: array[decl] := array[decl]$new()
+
+    set = proc(lvs: array[decl])
+	curr_lvs := lvs
+	end set
+
+    get = proc() returns (array[decl])
+	return(curr_lvs)
+	end get
+
+    end current_locals
+
+%%%
+%%% Cluster to remember current applydefn to get # of return values
+%%%
+
+current_apply = cluster is set, get, get_val_count, get_apply_name, get_short_name,
+			   get_name, is_iter, parmd, get_formals_string, reset,
+			   get_formals
+
+    as = array[string]
+    rep = null
+    own curr_app: applydefn
+    own curr_app_name: string := ""
+    own iterp: bool := false
+
+    set = proc(app: applydefn)
+	curr_app := app
+	curr_app_name := curr_app.idn.str
+	if curr_app_name[1] = '%' then
+	   curr_app_name := string$rest(curr_app_name, 2)
+	   end
+	if curr_app.gen.unique = "itertype" then iterp := true
+	   else iterp := false end
+	end set
+
+    get = proc() returns (applydefn)
+	return(curr_app)
+	end get
+
+    get_val_count = proc() returns (int)
+	return (typelist$size(curr_app.vals))
+	end get_val_count
+
+    get_apply_name = proc() returns (string)
+	return(curr_app_name)
+	end get_apply_name
+
+    get_name = proc() returns (string)
+	tname: string := current_type$get_name()
+	if ~string$empty(tname) cand ~string$empty(curr_app_name)
+	   then
+		return (current_type$get_name() || sep || curr_app_name)
+	   else return(tname || curr_app_name)
+	   end
+	end get_name
+
+    get_short_name = proc() returns (string)
+	return(curr_app_name)
+	end get_short_name
+
+    is_iter = proc() returns (bool)
+	return(iterp)
+	end is_iter
+
+    parmd = proc() returns (bool)
+	if curr_app_name = "" then return (false) end
+	if decllist$size(curr_app.parms) ~= 0 then return (true)
+	   else return (false) end
+	end parmd
+
+    get_formals_string = proc() returns (string)
+	result: string := ""
+	for each_d:decl in decllist$elements(curr_app.parms) do
+	    for each_i:idn in idnlist$elements(each_d.idns) do
+		result := result || "_" || each_i.str
+		end % for
+	    end % for
+	return (result)
+	end get_formals_string
+
+    get_formals = proc() returns (as)
+	result: as := as$predict(1,10)
+	for each_d:decl in decllist$elements(curr_app.parms) do
+	    for each_i:idn in idnlist$elements(each_d.idns) do
+		as$addh(result, each_i.str)
+		end % for
+	    end % for
+	return (result)
+	end get_formals
+
+    reset = proc()
+	curr_app_name := ""
+	iterp := false
+	end reset
+
+    end current_apply
+
+%%%
+%%% Cluster to remember current typedefn (cluster) to get name, if any
+%%%
+
+current_type = cluster is set, get, get_name, reset, exists, parmd, 
+			  get_formals_string, set_own_init_proc,
+			  own_init_proc_exists, get_formals
+
+    as = array[string]
+    rep = null
+    own curr_typ: typedefn
+    own curr_typ_name: string := ""
+    own own_init_proc: bool := false
+
+    set = proc(typ: typedefn)
+	curr_typ := typ
+	curr_typ_name := curr_typ.idn.str
+	end set
+
+    get = proc() returns (typedefn)
+	return(curr_typ)
+	end get
+
+    exists = proc() returns (bool)
+	if curr_typ_name = "" then return (false)
+	   else return (true) end
+	end exists
+
+    parmd = proc() returns (bool)
+	if decllist$size(curr_typ.parms) ~= 0 then return (true)
+	   else return (false) end
+	end parmd
+
+    get_formals_string = proc() returns (string)
+	result: string := ""
+	for each_d:decl in decllist$elements(curr_typ.parms) do
+	    for each_i:idn in idnlist$elements(each_d.idns) do
+		result := result || "_" || each_i.str
+		end % for
+	    end % for
+	return (result)
+	end get_formals_string
+
+    get_formals = proc() returns (as)
+	result: as := as$predict(1,10)
+	for each_d:decl in decllist$elements(curr_typ.parms) do
+	    for each_i:idn in idnlist$elements(each_d.idns) do
+		as$addh(result, each_i.str)
+		end % for
+	    end % for
+	return (result)
+	end get_formals
+
+    get_name = proc() returns (string)
+	return(curr_typ_name)
+	end get_name
+
+    set_own_init_proc = proc(generated: bool)
+	own_init_proc := generated
+	end set_own_init_proc
+
+    own_init_proc_exists = proc() returns (bool)
+	if curr_typ_name = "" then return (false) end
+	return(own_init_proc)
+	end own_init_proc_exists
+
+    reset = proc()
+	curr_typ_name := ""
+	own_init_proc := false
+	end reset
+
+    end current_type
+
+owns = cluster is save, forget, member
+
+    rep = null
+    own current_owns: initlist := initlist$new()
+
+    save = proc(ilist: initlist)
+
+	for each_i: init in initlist$elements(ilist) do
+	    current_owns := initlist$addh(current_owns, each_i)
+	    end
+
+	end save
+
+    forget = proc()
+
+	current_owns := initlist$new()
+
+	end forget
+
+    member = proc(i:idn) returns (bool)
+	for this_init: init in initlist$elements(current_owns) do
+	    tagcase this_init.stmt
+	       tag decl(d:decl):
+		   for this_idn:  idn in idnlist$elements(d.idns) do
+		       if this_idn = i then return (true) end
+		       end
+	       tag init(di:declinit):
+		   for this_decl: decl in decllist$elements(di.decls) do
+		       for this_idn: idn in idnlist$elements(this_decl.idns) do
+			   if this_idn = i then return (true) end
+			   end
+		       end
+	       end
+	    end
+	return(false)
+	end member
+
+    end owns

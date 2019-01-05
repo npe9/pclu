@@ -1,0 +1,263 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	PCONST	CLU
+%
+%	CLU Compiler:  parsing routines for types and constants
+
+p_type1 = proc (e: p_env) returns (typespec)
+	return(p_type(e))
+	    except when none: p_env$assume(e, "typespec")
+		   when bad:
+		   end
+	return(e.unknown_type)
+	end p_type1
+
+% type => RECORD fieldspeclist | ONEOF fieldspeclist | arraytype |
+%	  NULL | BOOL | INT | REAL | CHAR | STRING | TYPE | REP | CVT | ANY |
+%	  PROCTYPE args returns signals | ITERTYPE args yields signals |
+%	  idn constlist | idn fieldspeclist
+
+p_type = proc (e: p_env) returns (typespec) signals (none, bad)
+	tagcase e.peek1
+	   tag type_ (k: typespec):
+		p_env$next_token(e)
+		return(k)
+	   tag typekey (k: typekey):
+		p_env$next_token(e)
+		tagcase k
+		   tag cluster_ (d: DU):
+			return(p_clutype(e, d))
+		   tag selector_ (d: DU):
+			return(p_seltype(e, d))
+		   tag rep_ (d: idn):
+			xclu: xclutype := xclutype${idn:   d,
+						    parms: exprlist$new()}
+			return(typespec$create(typeabs$make_xclu(xclu), 0))
+		   tag applytype_ (d: DU):
+			return(p_applytype(e, d))
+		   end
+	   tag idn (k: idn):
+		p_env$next_token(e)
+		return(p_idn_type(e, k))
+	   others:
+		signal none
+	   end
+	end p_type
+
+p_seltype = proc (e: p_env, gen: DU) returns (typespec)
+	parms: fieldspeclist := p_fieldspeclist(e)
+	selt: seltype := seltype${gen:   gen,
+				  parms: parms}
+	return(typespec$create(typeabs$make_select(selt), 0))
+	end p_seltype
+
+p_clutype = proc (e: p_env, gen: DU) returns (typespec)
+	parms: exprlist := p_blist[expr](e, p_expr, _none_ok, "constant")
+	clut: clutype := clutype${gen:   gen,
+				  parms: parms}
+	return(typespec$create(typeabs$make_cluster_(clut), 0))
+	end p_clutype
+
+p_applytype = proc (e: p_env, gen: DU) returns (typespec)
+	args: typelist := p_plist[typespec](e, p_type, _no_none, _empty_ok,
+								"typespec")
+	vals: typelist := p_values(e, gen.unique ~= "itertype")
+	sigs: exceptionlist := p_signals(e)
+	at: applytype := applytype${gen:  gen,
+				    args: args,
+				    vals: vals,
+				    sigs: sigs}
+	return(typespec$create(typeabs$make_apply(at), 0))
+	end p_applytype
+
+p_idn_type = proc (e: p_env, id: idn) returns (typespec)
+	abs: typeabs
+	tagcase e.peek1
+	   tag l_bkt:
+		if p_is_seltype(e)
+		   then parms: fieldspeclist := p_fieldspeclist(e)
+			abs := typeabs$make_xsel(xseltype${idn:   id,
+							   parms: parms})
+		   else	parms: exprlist := p_blist[expr](e, p_expr, _none_ok,
+								"constant")
+			abs := typeabs$make_xclu(xclutype${idn:   id,
+							   parms: parms})
+		   end
+	   others:
+		abs := typeabs$make_idn(id)
+	   end
+	return(typespec$create(abs, 0))
+	end p_idn_type
+
+p_is_seltype = proc (e: p_env) returns (bool)
+	i: int := 2
+	while true do
+		tagcase p_env$peek(e, i)
+		   tag idn: 
+		   others:  return(false)
+		   end
+		tagcase p_env$peek(e, i + 1)
+		   tag colon: return(true)
+		   tag comma: i := i + 2
+		   others:    return(false)
+		   end
+		end
+	end p_is_seltype
+
+% fieldspeclist => [fieldspecs]
+% fieldspecs => fieldspec | fieldspec , fieldspecs
+
+p_fieldspeclist = proc (e: p_env) returns (fieldspeclist)
+	tagcase e.peek1
+	   tag l_bkt: p_env$next_token(e)
+	   others:    p_env$assume(e, "[field_spec_list]")
+		      return(fieldspeclist$new())
+	   end
+	specs: fieldspeclist := p_order[fieldspec](e, p_fieldspec,
+						fieldspec$get_sel, "fieldspec")
+	tagcase e.peek1
+	   tag r_bkt: p_env$next_token(e)
+	   others:    p_env$assume(e, "] in [fieldspec_list]")
+	   end
+	return(specs)
+	end p_fieldspeclist
+
+% fieldspec => namelist : type
+
+p_fieldspec = iter (e: p_env) yields (fieldspec)
+	tagcase e.peek1
+	   tag idn:
+	   others:  return
+	   end
+	sels: namelist := p_clist[name](e, p_name, "name")
+	t: typespec
+	tagcase e.peek1
+	   tag colon: p_env$next_token(e)
+		      t := p_type1(e)
+	   others:    p_env$assume(e, ": type in field_spec")
+		      t := e.unknown_type
+	   end
+	for sel: name in namelist$elements(sels) do
+		yield(fieldspec${sel:   sel,
+				 type_: t})
+		end
+	end p_fieldspec
+
+% returns => empty | RETURNS typelist
+% yields => empty | YIELDS typelist
+
+p_values = proc (e: p_env, procdef: bool) returns (typelist)
+	tagcase e.peek1
+	   tag returns_: if ~procdef
+			    then p_env$err(e, "use of returns instead of yields", minor)
+			    end
+	   tag yields_:  if procdef
+			    then p_env$err(e, "use of yields instead of returns", minor)
+			    end
+	   others:	 return(typelist$new())
+	   end
+	p_env$next_token(e)
+	return(p_plist[typespec](e, p_type, _no_none, _no_empty, "typespec"))
+	end p_values
+
+% signals => empty | SIGNALS exceptionlist
+
+p_signals = proc (e: p_env) returns (exceptionlist)
+	tagcase e.peek1
+	   tag signals_: p_env$next_token(e)
+			 return(p_exceptionlist(e))
+	   others:       return(exceptionlist$new())
+	   end
+	end p_signals
+
+% args => () | (types)
+% typelist => (types)
+% types => type  |  type , types
+
+% exceptionlist => (exceptions)
+% exceptions => exception | exception , exceptions
+% exception => name | name typelist
+
+p_exceptionlist = proc (e: p_env) returns (exceptionlist)
+	tagcase e.peek1
+	   tag l_paren: p_env$next_token(e)
+	   others:      p_env$assume(e, "(exception_list)")
+			return(exceptionlist$new())
+	   end
+	sigs: exceptionlist := p_order[exception](e, p_exception,
+					exception$get_name, "exception")
+	tagcase e.peek1
+	   tag r_paren: p_env$next_token(e)
+	   others:	p_env$assume(e, ") in (exception_list)")
+	   end
+	return(sigs)
+	end p_exceptionlist
+
+p_exception = iter (e: p_env) yields (exception)
+	n: name := p_name(e)
+	    except when none: return end
+	types: typelist := p_plist[typespec](e, p_type, _none_ok,
+						_no_empty, "typespec")
+	yield(exception${name:  n,
+			 types: types})
+	end p_exception
+
+% namelist => name | name , namelist
+
+p_name = proc (e: p_env) returns (name) signals (none, bad)
+	tagcase e.peek1
+	   tag idn (k: idn):
+		p_env$next_token(e)
+		return(k.str)
+	   others:
+		signal none
+	   end
+	end p_name
+
+% Order by lexicographic order
+
+p_order = proc [t: type] (e: p_env, p_t: itype, get: gtype, what: str)
+							returns (sequence[t])
+	itype = itertype (p_env) yields (t)
+	gtype = proctype (t) returns (str)
+	tlist = array[t]
+	list: tlist := tlist$new()
+	high: int := 0
+	while true do
+		none: bool := true
+		for x: t in p_t(e) do
+			none := false
+			s: str := get(x)
+			i: int := 1
+			while i <= high  cand  s > get(list[i]) do
+				i := i + 1
+				end
+			if i <= high
+			   then	if s = get(list[i])
+				   then p_env$err(e, "duplicate name '" || s ||
+					      "' in " || what || "_list", minor)
+					continue
+				   end
+				for j: int in int$from_to(i, high) do
+					ox: t := list[j]
+					list[j] := x
+					x := ox
+					end
+			   end
+			tlist$addh(list, x)
+			high := high + 1
+			end
+		if none
+		   then what := what || "_list"
+			if high = 0
+			   then p_env$assume(e, what)
+			   else p_env$err(e, "extra comma at end of " || what,
+									minor)
+			   end
+			return(sequence[t]$a2s(list))
+		   end
+		tagcase e.peek1
+		   tag comma: p_env$next_token(e)
+		   others:    return(sequence[t]$a2s(list))
+		   end
+		end
+	end p_order

@@ -1,0 +1,26 @@
+
+% constants for gc_dump and gc_read
+
+    GCD_CONST = 32
+    GCD_REF   = 33
+    GCD_FILL  = 47
+
+    CLUREFSZ = 4
+    GCD_REF_SIZE = 8
+
+    pagesz  = 1024
+    pagesz2 = pagesz - 2
+    pagesz5 = pagesz - 5
+    bpagesz = CLUREFSZ * pagesz
+
+
+    _seqhd =  4096                 % sequence header 0x1000
+    _bvechd = 8192                 % _bytevec header 0x2000
+    _cellhd = 16384                % _tagcell header 0x4000
+    _advhd  = 24576                % _adv header     0x6000
+
+    wvec = _wordvec
+    bvec = _bytevec
+    w2b = _cvt[_wordvec, _bytevec]
+
+    debug = true

@@ -1,0 +1,652 @@
+% indenter environment
+
+ienv = cluster is create, get, set, get_line, get_peek, get_speek, peek,
+		  speek, xmove, move, imove, bmove, stop, missing,
+		  get_errs, get_indent, set_indent, comment, indent, mindent,
+		  cindent, _reset
+
+rep = record[tab:   tkntab,		% token table
+	     steps: steptab,		% step table
+	     errs:  buf,		% error messages
+	     indy:  int,		% current indent
+	     cindy: int,		% indent for cindent call
+	     buf:   buf,		% buffer
+	     min:   int,		% lowest line number
+	     max:   int,		% highest line number
+	     lnum:  int,		% current line number
+	     line:  string,		% current input line
+	     comm:  int,		% start of comment lines to fix
+	     oindy: int,		% old comment indent
+	     findy: int,		% forced comment indent
+	     first: bool,		% true iff first token on line
+	     diff:  int,		% delta hpos
+	     pos:   int,		% end index + 1 of current token
+	     hpos:  int,		% hpos of end of current token
+	     rstr:  string,		% real current token string
+	     str:   string,		% lower case current token string
+	     tkn:   token,		% current token value
+	     disp:  int,		% input indent - output indent
+	     nline: string]		% current output line if disp ~= 0
+
+tkntab = table[string, token]	% token table
+steptab = array[int]		% step table
+vallist = sequence[int]
+
+itype = proctype (ienv)		% indenter routine
+
+token = oneof[clust_key:	itype,		% cluster key
+	      oper_key:		itype,		% routine key
+	      stmt_key:		itype,		% start of stmt key
+	      do_key:		null,
+	      else_key:		null,
+	      elseif_key:	null,
+	      end_key:		null,
+	      except_key:	null,
+	      has_key:		null,
+	      in_key:		null,
+	      is_key:		null,
+	      others_key:	null,
+	      resignal_key:	null,
+	      tag_key:		null,
+	      then_key:		null,
+	      when_key:		null,
+	      unop:		null,		% unary operator
+	      binop:		int,		% binary operator
+	      bracket:		char,		% (){}[]
+	      dollar:		null,		% $
+	      dot:		null,		% .
+	      comma:		null,		% ,
+	      colon:		null,		% :
+	      assn:		null,		% :=
+	      semi:		null,		% ;
+	      random:		null,		% identifier or literal
+	      handles_key:	null,
+	      foreach_key:	null,
+	      qualify_key:	null,
+	      arm_key:		null,
+	      at:		null,		% @
+	      eob:		null]		% end of buffer
+
+mc = token$make_clust_key
+mo = token$make_oper_key
+ms = token$make_stmt_key
+mb = token$make_binop
+mu = token$make_unop
+mk = token$make_bracket
+ma = token$make_arm_key
+mq = token$make_qualify_key
+mt = token$make_tag_key
+two = struct[s: string, t: token]
+pairs = sequence[two]
+
+stepvals = vallist$[4,    % begin_body
+		    4,    % bracket
+		    1,    % close_bracket
+		    4,    % cluster_body
+		    2,    % do
+		    1,    % elseif
+		    0,    % end
+		    3,    % except
+		    4,    % for_body
+		    2,    % head
+		    8,    % is
+		    2,    % op
+		    4,    % routine_body
+		    3,    % tag
+		    4,    % tag_body
+		    3,    % then
+		    5,    % then_body
+		    3,    % thenx_body
+		    3,    % when
+		    5,    % when_body
+		    8,    % where
+		    4,    % while_body
+		    4,    % coenter_body
+		    4,    % coenter_key
+		    4,    % coenterx_body
+		    4,    % enter_body
+		    4,    % enter_key
+		    4,    % enterx_body
+		    7,    % foreach
+		    4]    % seize_body
+
+_bracket	= 2
+_argus		= vallist$size(stepvals) + 1
+
+create = proc (b: buf, quick: bool) returns (cvt)
+	min, max: int := buf$get_frame(b)
+	lnum: int := min
+	line, pos: int
+	if quick
+	   then line, pos := buf$get_cursor(b)
+		if line > lnum
+		   then lnum := line end
+	   end
+	ie: rep := rep${tab:   get_tab(),
+			steps: get_steps(),
+			errs:  buf$create(),
+			indy:  0,
+			cindy: 0,
+			buf:   b,
+			min:   min,
+			max:   max,
+			lnum:  lnum - 1,
+			line:  "",
+			comm:  0,
+			oindy: 0,
+			findy: 0,
+			first: false,
+			diff:  0,
+			pos:   1,
+			hpos:  0,
+			rstr:  "",
+			str:   "",
+			tkn:   token$make_eob(nil),
+			disp:  0,
+			nline: ""}
+	move(up(ie))
+	if quick
+	   then	while ~token$is_eob(ie.tkn) do
+			if ie.first
+			   then ie.indy := ie.diff
+			   else ie.indy := ie.cindy
+			   end
+			if ie.lnum > line  cor  ie.pos > pos
+			   then break end
+			move(up(ie))
+			end
+	   end
+	return(ie)
+	end create
+
+% return an indentation step
+
+get = proc (step: int) returns (int) signals (bounds)
+	return(get_steps()[step])
+	    resignal bounds
+	end get
+
+% change an indentation step
+
+set = proc (step, val: int) signals (bounds)
+	things = pairs$[two${s: "@", t: token$make_at(nil)},
+			two${s: "abort", t: mq(nil)},
+			two${s: "action", t: ma(nil)},
+			two${s: "background", t: ms(i_section)},
+			two${s: "bind", t: mu(nil)},
+			two${s: "coenter", t: ms(i_coenter)},
+			two${s: "creator", t: mo(i_routine)},
+			two${s: "enter", t: ms(i_enter)},
+			two${s: "equates", t: mc(i_cluster)},
+			two${s: "foreach", t: token$make_foreach_key(nil)},
+			two${s: "fork", t: ms(i_fork)},
+			two${s: "guardian", t: mc(i_cluster)},
+			two${s: "handler", t: mo(i_routine)},
+			two${s: "handles", t: token$make_handles_key(nil)},
+			two${s: "process", t: ma(nil)},
+			two${s: "recover", t: ms(i_section)},
+			two${s: "seize", t: ms(i_seize)},
+			two${s: "stable", t: ms(i_own)},
+			two${s: "tagtest", t: ms(i_tagcase)},
+			two${s: "tagwait", t: ms(i_tagcase)},
+			two${s: "topaction", t: ma(nil)},
+			two${s: "wtag", t: mt(nil)}]
+	get_steps()[step] := val
+	    resignal bounds
+	if step = _argus
+	   then tab: tkntab := get_tab()
+		for x: two in pairs$elements(things) do
+			if val = 0
+			   then tkntab$remove(tab, x.s)
+			   else tkntab$alter(tab, x.s, x.t)
+			   end
+			end
+		if val = 0
+		   then tkntab$alter(tab, ";", token$make_semi(nil))
+		   else tkntab$remove(tab, ";")
+		   end
+	   end except when not_found: end
+	end set
+
+% get current line number
+
+get_line = proc (e: cvt) returns (int)
+	return(e.lnum)
+	end get_line
+
+% get current token
+
+get_peek = proc (e: cvt) returns (token)
+	return(e.tkn)
+	end get_peek
+
+% get string form of current token
+
+get_speek = proc (e: cvt) returns (string)
+	return(e.str)
+	end get_speek
+
+% look ahead I tokens and return token
+
+peek = proc (e: cvt, i: int) returns (token)
+	return(tkntab$mlookup(e.tab, speek(up(e), i), token$make_random(nil)))
+	end peek
+
+% look ahead I tokens and return string form
+
+speek = proc (e: cvt, i: int) returns (string)
+	e := rep$copy1(e)
+	while i > 0 do
+		i := i - 1
+		while next(e, true) do end
+		end
+	return(e.str)
+	end speek
+
+% move to next token without modifying buffer
+
+xmove = proc (e: cvt)
+	e.comm := 0
+	while next(e, true) do end
+	e.tkn := tkntab$mlookup(e.tab, e.str, token$make_random(nil))
+	end xmove
+
+% move to next token
+
+move = proc (e: cvt)
+	tabs = "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t"
+	spaces = "        "
+	chack: bool := false
+	cindy: int
+	if e.comm ~= 0
+	   then cindy := e.indy
+		if e.findy >= 0
+		   then e.indy := e.findy end
+		if e.oindy ~= e.indy
+		   then chack := true
+			e.lnum := e.comm - 1
+			e.line := ""
+			e.pos := 1
+			e.first := false
+			e.disp := 0
+		   else e.indy := cindy
+		   end
+		e.comm := 0
+	   end
+	while true do
+		cnt: int
+		if e.first
+		   then cnt := e.indy
+			e.disp := e.diff - cnt
+			if e.disp ~= 0
+			   then e.nline := string$substr(tabs, 1, cnt / 8) end
+		elseif e.disp ~= 0
+		   then cnt := e.diff
+			for i: int in int$from_to_by(cnt / 8, 1, -1) do
+				e.nline := e.nline || spaces
+				end
+		end
+		if e.disp ~= 0
+		   then e.nline := e.nline ||
+				   string$substr(spaces, 1, cnt // 8) ||
+				   e.rstr
+		   end
+		if next(e, false)
+		   then if ~chack  cand  e.first
+			   then if e.comm = 0
+				   then e.comm := e.lnum
+					e.oindy := e.diff
+					e.findy := -1
+				elseif e.diff ~= e.oindy
+				   then e.oindy := -1 end
+				e.diff := e.indy
+			   end
+			continue
+		   end
+		e.tkn := tkntab$mlookup(e.tab, e.str, token$make_random(nil))
+		if chack
+		   then e.indy := cindy
+			move(up(e))
+		   end
+		return
+		end
+	end move
+
+% temporarily indent by given step if current token starts line
+% return indentation used
+
+imove = proc (e: cvt, step: int) returns (int)
+	if e.first
+	   then indy: int := e.indy
+		nindy: int
+		stp: int := e.steps[step]
+		if stp < 0
+		   then nindy := indy + 8 - (indy // 8)
+		   else nindy := indy + stp
+		   end
+		e.indy := nindy
+		move(up(e))
+		e.indy := indy
+		return(nindy)
+	   else move(up(e))
+		return(e.indy)
+	   end
+	end imove
+
+% move over an open bracket
+% temporarily indent the bracket if it starts the line and ADDON is true
+% then do an mindent with the bracket indentation
+
+bmove = proc (e: cvt, addon: bool) returns (int, int)
+	bold: int
+	if addon  cand  e.first
+	   then bold := imove(up(e), _bracket)
+	   else if e.first
+		   then bold := e.indy
+		   else bold := e.cindy
+		   end
+		move(up(e))
+	   end
+	return(mindent(up(e), _bracket), bold)
+	end bmove
+
+% store current line if changed
+
+stop = proc (e: cvt)
+	while ~e.first  cand  ~token$is_eob(e.tkn) do
+		move(up(e))
+		end
+	end stop
+
+% generate an error message that WHAT is missing
+
+missing = proc (e: cvt, what: string)
+	lnum: int := e.lnum - e.min
+	if ~e.first  cor  lnum = 0
+	   then lnum := lnum + 1 end
+	buf$addh(e.errs, int$unparse(lnum) || ":\tmissing " || what ||
+			 ", next token is '" || e.str || "'")
+	end missing
+
+% return all errors generated
+
+get_errs = proc (e: cvt) returns (buf)
+	return(e.errs)
+	end get_errs
+
+% return current indentation
+
+get_indent = proc (e: cvt) returns (int)
+	return(e.indy)
+	end get_indent
+
+% set indentation
+
+set_indent = proc (e: cvt, indy: int)
+	e.indy := indy
+	end set_indent
+
+% force comments at current indentation and then set indentation
+
+comment = proc (e: cvt, indy: int)
+	e.findy := e.indy
+	e.indy := indy
+	end comment
+
+% relative indent by STEP
+
+indent = proc (e: cvt, step: int) returns (int)
+	old: int := e.indy
+	stp: int := e.steps[step]
+	if stp < 0
+	   then e.indy := old + 8 - (old // 8)
+	   else e.indy := old + stp
+	   end
+	return(old)
+	end indent
+
+% relative indent by STEP if at the start of a line
+% else set indentation to indentation of current token
+
+mindent = proc (e: cvt, step: int) returns (int)
+	if e.first
+	   then return(indent(up(e), step))
+	   else old: int := e.indy
+		e.indy := e.cindy
+		return(old)
+	   end
+	end mindent
+
+% set indentation to indentation of current token
+
+cindent = proc (e: cvt) returns (int)
+	old: int := e.indy
+	if ~e.first
+	   then e.indy := e.cindy end
+	return(old)
+	end cindent
+
+% internal routine to parse to next token in buffer
+
+next = proc (e: rep, peeking: bool) returns (bool)
+	line: string := e.line
+	pos: int := e.pos
+	c: char
+	e.first := false
+	while true do
+		begin
+		while true do
+			c := line[pos]
+			if c > ' '
+			   then break end
+			pos := pos + 1
+			end
+		if ~(c = '%'  cor  c = '#')
+		   then break end
+		bhpos: int := _calc_hpos(line, pos)
+		e.diff := bhpos - e.hpos
+		e.cindy := bhpos - e.disp
+		e.str := string$rest(line, pos)
+		e.rstr := e.str
+		e.pos := string$size(line) + 1
+		e.hpos := _calc_hpos(line, e.pos)
+		return(true)
+		end except when bounds: end
+		if ~peeking  cand  e.disp ~= 0
+		   then e.buf[e.lnum] := e.nline end
+		if e.lnum >= e.max
+		   then e.str := ""
+			e.rstr := ""
+			e.first := false
+			e.disp := 0
+			e.pos := pos
+			return(false)
+		   end
+		e.lnum := e.lnum + 1
+		e.first := true
+		line := e.buf[e.lnum]
+		e.line := line
+		pos := 1
+		e.pos := 1
+		e.hpos := 0
+		e.disp := 0
+		e.nline := ""
+		end
+	beg: int := pos
+	bhpos: int := _calc_hpos(line, beg)
+	e.diff := bhpos - e.hpos
+	e.cindy := bhpos - e.disp
+	lower: bool := true
+	begin
+	if c = '.'  cor  c = '\\'
+	   then cc: char := line[pos + 1]
+		if cc > '9' cor (cc < '0' cand (c = '.' cor cc ~= '#'))
+		   then exit bounds end
+		pos := pos + 2
+		c := line[pos]
+	   end
+	while true do
+		if c >= 'a'
+		   then if c > 'z'
+			   then break end
+		elseif c < '0'
+		   then if c ~= '.'
+			   then break end
+			for i: int in int$from_to_by(pos - 1, beg, -1) do
+			    if line[i] > '9'  cor  line[i] < '0'
+			       then exit bounds end
+			    end
+		elseif c >= 'A'
+		   then if c <= 'Z'
+			   then lower := false
+			elseif c ~= '_'
+			   then break end
+		elseif c > '9'
+		   then break end
+		pos := pos + 1
+		c := line[pos]
+		end
+	end except when bounds: end
+	if pos > beg
+	   then e.rstr := string$substr(line, beg, pos - beg)
+		e.pos := pos
+		if ~lower
+		   then e.str := make_lower_case(e.rstr)
+		   else e.str := e.rstr
+		   end
+	elseif c = '"'  cor  c = '\''
+	   then pos := pos + 1
+		while true do
+			cc: char := line[pos]
+			pos := pos + 1
+			if cc = c
+			   then break
+			elseif cc = '\\'
+			   then if line[pos] = '^'
+				   then pos := pos + 2
+				   else pos := pos + 1
+				   end
+			end
+			end except when bounds: end
+		e.pos := pos
+		e.str := string$substr(line, beg, pos - beg)
+		e.rstr := e.str
+	elseif string$indexc(c, ":<>~/|*") > 0
+	   then pos := pos + 1
+		while string$indexc(line[pos], "<>=/|*") > 0 do
+			pos := pos + 1
+			end except when bounds: end
+		e.pos := pos
+		e.str := string$substr(line, beg, pos - beg)
+		e.rstr := e.str
+	else e.pos := beg + 1
+	     e.str := c2s(c)
+	     e.rstr := e.str
+	end
+	e.hpos := _calc_hpos(line, e.pos)
+	return(false)
+	end next
+
+% return token table
+
+get_tab = proc () returns (tkntab)
+	things = pairs$[two${s: "begin", t: ms(i_begin)},
+			two${s: "cand", t: mb(2)},
+			two${s: "cluster", t: mc(i_cluster)},
+			two${s: "cor", t: mb(1)},
+			two${s: "do", t: token$make_do_key(nil)},
+			two${s: "else", t: token$make_else_key(nil)},
+			two${s: "elseif", t: token$make_elseif_key(nil)},
+			two${s: "end", t: token$make_end_key(nil)},
+			two${s: "except", t: token$make_except_key(nil)},
+			two${s: "exit", t: ms(i_exit)},
+			two${s: "for", t: ms(i_for)},
+			two${s: "has", t: token$make_has_key(nil)},
+			two${s: "if", t: ms(i_if)},
+			two${s: "in", t: token$make_in_key(nil)},
+			two${s: "is", t: token$make_is_key(nil)},
+			two${s: "iter", t: mo(i_routine)},
+			two${s: "others", t: token$make_others_key(nil)},
+			two${s: "own", t: ms(i_own)},
+			two${s: "proc", t: mo(i_routine)},
+			two${s: "resignal", t: token$make_resignal_key(nil)},
+			two${s: "returns", t: mb(8)},
+			two${s: "signal", t: ms(i_signal)},
+			two${s: "signals", t: mb(7)},
+			two${s: "tag", t: mt(nil)},
+			two${s: "tagcase", t: ms(i_tagcase)},
+			two${s: "then", t: token$make_then_key(nil)},
+			two${s: "when", t: token$make_when_key(nil)},
+			two${s: "where", t: ms(i_where)},
+			two${s: "while", t: ms(i_while)},
+			two${s: "yields", t: mb(8)},
+
+			two${s: "(", t: mk('(')},
+			two${s: ")", t: mk(')')},
+			two${s: "[", t: mk('[')},
+			two${s: "]", t: mk(']')},
+			two${s: "{", t: mk('{')},
+			two${s: "}", t: mk('}')},
+			two${s: ",", t: token$make_comma(nil)},
+			two${s: ":", t: token$make_colon(nil)},
+			two${s: ":=", t: token$make_assn(nil)},
+			two${s: ";", t: token$make_semi(nil)},
+			two${s: "$", t: token$make_dollar(nil)},
+			two${s: ".", t: token$make_dot(nil)},
+
+			two${s: "**", t: mb(6)},
+			two${s: "*", t: mb(5)},
+			two${s: "//", t: mb(5)},
+			two${s: "/", t: mb(5)},
+			two${s: "+", t: mb(4)},
+			two${s: "-", t: mb(4)},
+			two${s: "||", t: mb(4)},
+			two${s: "<", t: mb(3)},
+			two${s: "<=", t: mb(3)},
+			two${s: "=", t: mb(3)},
+			two${s: ">=", t: mb(3)},
+			two${s: ">", t: mb(3)},
+			two${s: "~<", t: mb(3)},
+			two${s: "~<=", t: mb(3)},
+			two${s: "~=", t: mb(3)},
+			two${s: "~>=", t: mb(3)},
+			two${s: "~>", t: mb(3)},
+			two${s: "&", t: mb(2)},
+			two${s: "|", t: mb(1)},
+
+			two${s: "~", t: mu(nil)},
+
+			two${s: "", t: token$make_eob(nil)}]
+	own init: bool := false
+	own tab: tkntab
+	if ~init
+	   then tab := tkntab$create(100, hash, string$equal)
+		for x: two in pairs$elements(things) do
+			tkntab$alter(tab, x.s, x.t)
+			end
+	   	init := true
+	   end
+	return(tab)
+	end get_tab
+
+% return step table
+
+get_steps = proc () returns (steptab)
+	own init: bool := false
+	own steps: steptab
+	if ~init
+	   then steps := steptab$fill(1, _argus, 0)
+	   	init := true
+		_reset()
+	   end
+	return(steps)
+	end get_steps
+
+_reset = proc ()
+	steps: steptab := get_steps()
+	for i: int in vallist$indexes(stepvals) do
+		steps[i] := stepvals[i]
+		end
+	end _reset
+
+end ienv

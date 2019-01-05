@@ -1,0 +1,14 @@
+% Copyright Massachusetts Institute of Technology 1981, 1989
+
+_fixup_dir_part = proc (s: string) returns (string)
+	while true do
+		i: int := string$indexs("//", s)
+		if i = 0
+		   then break end
+		s := string$substr(s, 1, i) || string$rest(s, i + 2)
+		end
+	i: int := string$size(s)
+	if i > 1  cand  s[i] = '/'
+	   then s := string$substr(s, 1, i - 1) end
+	return(s)
+	end _fixup_dir_part

@@ -1,0 +1,989 @@
+\documentstyle[12pt]{article}
+\textwidth=5.75in
+\textheight=7.875in
+\hoffset=-.4in
+\voffset=-.75in
+\parskip=.1in plus 1pt minus 1pt
+\leftmargini=12pt
+\topsep=0pt
+\partopsep=0pt
+\itemsep=0pt
+\marginparwidth=0.7in
+\tolerance=1000
+\pretolerance=900
+\hyphenpenalty=200
+\newcommand{\dir}[1]{{\em #1}}
+\newcommand{\proc}[1]{{\em #1}}
+\newcommand{\cludir}[1]{\dir{\~{}CLU}{\em #1}}
+\newcommand{\fname}[1]{{\em #1}}
+\newenvironment{boxdisplay}{\begin{center}\begin{tabular}{|l|}\hline}{\hline\end{tabular}\end{center}}
+
+% updated 1/22/93 to reflect automatic generation of .o files
+
+\title{CLU User's Guide}
+\date{January 22, 1993; Updated November 29, 2016}
+\author{Dorothy Curtis and Stephen Garland\\
+        MIT Laboratory for Computer Science}
+
+\begin{document}
+\thispagestyle{empty}
+
+\maketitle
+
+This guide describes how to use the portable compiler and debugger for CLU.
+This compiler and debugger make CLU available on a wider variety of
+architectures than the earlier native CLU compilers that ran only on Vaxes and
+6800's.  The CLU language is described in the book {\em Abstraction and
+Specification in Program Development} by Barbara Liskov and John Guttag (MIT
+Press, 1986), and also in the {\em CLU Reference Manual} by Liskov {\it et al}
+(Springer-Verlag, 1981).
+
+\section{The CLU compiler}
+\label{clu}
+
+A CLU program consists of one or more modules, also known as {\em
+abstractions}.  The {\em interface specification} for an abstraction completely
+describes how clients (i.e., other abstractions) see the abstraction and how
+they can use it.  The interface specification for a procedural or iteration
+abstraction is determined by the header for that procedure or iterator; the
+interface specification for a data abstraction (i.e., a cluster) is determined
+by the header for the cluster together with the headers for the operations
+named in the cluster header.  The implementation of each abstraction is
+theoretically invisible to its clients.  
+
+     Generally, the code for each module is kept in a separate file, the name
+of which ends with \fname{.clu}.  Sometimes it is convenient for several
+modules to employ common declarations for compile-time constants, e.g., $maxLen
+= 100$ or $intSeq = seq[int]$.  Such ``equates'' are generally kept in a
+separate file, the name of which ends with \fname{.equ}.
+
+\subsection{Setting up your environment}
+
+To make it easy to use CLU, you should customize your Unix environment as
+follows.  Let \cludir{} be the directory in which CLU is installed.  This
+directory may be \dir{/usr/clu}, \dir{/usr/pclu}, \dir{/usr/local/lib/clu}, or
+some other directory.  Check with your system administrator to find where
+\cludir{} is.
+
+\begin{itemize}
+\item
+Put the command {\tt setenv CLUHOME clu-location} in your \fname{.cshrc} file,
+where \cludir{} is located at {\tt clu-location}.  (If you are using the bash
+shell, use the command {\tt export CLUHOME=clu-location} instead.)  This enables
+various parts of the CLU system to find the information they need in \cludir{}.
+\item
+Put {\tt \$CLUHOME/exe} on your Unix search path, e.g., by adding it to the
+{\tt set path} command in your \fname{.cshrc} file.  This allows you to invoke
+the CLU compiler (\fname{pclu}) and the CLU indenter (\fname{cludent}).
+\end{itemize}
+
+\subsection{Compiler commands}
+
+The CLU compiler compiles \fname{.clu} files into \fname{.c} files, which must
+then be compiled and linked using the C compiler.\footnote{Earlier native CLU
+compilers for Vaxes and 6800's compiled \fname{.clu} into object \fname{.bin}
+files, which were linked by a CLU linker.  The portable compiler compiles into
+C rather than into machine language.} The CLU compiler can be invoked from the
+Unix shell by the command {\tt pclu}.  Useful compiler commands include the
+following.
+
+\begin{center}
+\begin{tabular}{|l|l|}
+\hline
+Command & Effect\\
+\hline
+{\tt ce}     & create a compilation environment\\
+{\tt xce}    & extend a compilation environment\\
+{\tt spec}   & add interface specifications to the type library\\
+			 & (ignoring implementations)\\
+{\tt check}  & check syntax and semantics without generating a \fname{.o} file\\
+{\tt compile}& check and generate a \fname{.c} file (if there are no errors)\\
+{\tt dump}   & dump the type library to a \fname{.lib} file\\
+{\tt merge}  & read a type library from a \fname{.lib} file\\
+{\tt optimize}  	 & turn on optimization\\
+{\tt optimize false} & turn off optimization\\
+{\tt ext false} 	 & turn off reporting of external abstractions\\
+{\tt help}   & provide a summary of all compiler commands\\
+{\tt quit}	 & exit from the compiler\\
+\hline
+\end{tabular}
+\end{center}
+
+
+
+\subsection{How the compiler works}
+
+The CLU compiler maintains a type library and a compilation environment (CE).
+The type library contains specifications of abstractions; initially, it
+contains the specifications for CLU's built-in modules.  The CE contains
+``equate'' information; it is initially empty.  In order to do proper type
+checking between abstractions, the CLU compiler adds interface specifications
+to its type library.  When it processes an abstraction, the compiler remembers
+the interface of the abstraction in the type library and uses it in future type
+checking.
+
+When an abstraction is successfully compiled, two messages may follow the
+compilation.  The first lists undefined abstractions, that is, abstractions
+that do not have specifications in the type library.  Undefined abstractions
+should be avoided, because they make it impossible for the compiler to perform
+complete type-checking.  The second message lists abstractions
+used in the file being processed whose specifications are known.
+(This message can be suppressed by issuing the command {\tt ext false}
+to the compiler.)
+
+There are three commonly used ways to get specifications into the type library.
+
+\begin{enumerate}
+\item 
+{\tt merge} in an appropriate type library (\fname{.lib} file).
+\item 
+{\tt spec}, {\tt check}, or {\tt compile} the \fname{.clu} file containing the
+abstraction.
+\item
+{\tt spec} a \fname{.spc} file containing the interface specification for the 
+abstraction.  (A \fname{.spc} file differs from a \fname{.clu} file in that it
+contains procedure and cluster headers, but no implementations.)
+\end{enumerate}
+
+The top most procedure must be named {\tt start\_up}.
+
+\subsection{Command Descriptions}
+
+Following are descriptions of the most commonly used compiler commands.  Each
+command can be abbreviated to two or more characters (e.g., {\tt compile} can
+be abbreviated to {\tt co}).
+
+\begin{itemize}
+\item {\tt ce} {\it filename} \{ , {\it filename} ... \}
+
+The {\tt ce} command creates a compilation environment from the named
+\fname{.equ} files.  Any previously existing compilation environment is
+forgotten.  (See {\tt xce} comand.)  The compiler will supply the suffix
+\fname{.equ} if it is not part of {\it filename}.  Each file named in this
+command must contain only equates.
+
+\item {\tt xce} {\it filename} \{ , {\it filename} ... \}
+
+The {\tt xce} command adds the equates in the named \fname{.equ} files to the
+current compilation environment.
+
+\item {\tt check} {\it filename} \{ , {\it filename} ... \}
+
+The {\tt check} command checks for syntax and type errors in the named
+\fname{.clu} files.  The compiler will supply the suffix \fname{.clu} if it is 
+not part of {\it filename}.
+
+\item {\tt compile} {\it filename} \{ , {\it filename} ... \}
+
+The {\tt compile} command compiles the named \fname{.clu} files into \fname{.o}
+files.  The compiler will supply the suffix \fname{.clu} if it is not part of
+{\it filename}.  A \fname{.o} file is produced only if there are no errors.
+Hence, if a \fname{.o} file is produced, any messages are warnings, not errors.
+The compiler generally produces \fname{.o} files that are suitable for use with
+the CLU debugger.  Once a program has been debugged, more efficient \fname{.o}
+files can be produced by issuing the {\tt opt} command to the compiler before
+the {\tt compile} command.
+
+\item {\tt spec} {\it filename} \{ , {\it filename} ... \}
+
+The {\tt spec} command enters the interfaces of the abstractions in the named
+\fname{.spc} or \fname{.clu} files into the type library without type-checking 
+any implementation bodies.  The compiler will supply the suffix \fname{.spc} or
+\fname{.clu} if it is not part of {\it filename}.
+
+The type library initially contains the interfaces for the modules defined in
+the CLU reference manual.  Every module that is processed successfully with a
+{\tt command}, {\tt check}, or {\tt spec} command has its interface added to
+the library.  However, the compiler makes only a single pass over a file, so
+references within one module in a file to a module defined later in the file
+will not be type-checked unless the interface of the referenced module is
+already in the library.  To get complete type-checking, it is generally
+necessary to {\tt spec} or {\tt check} all modules/files in a program before
+compiling them.
+
+\item {\tt dump} {\it filename}
+
+The compiler retains in the type library the interface of every module it sees.
+This library can be dumped to a \fname{.lib} file with the {\tt dump} command
+and later reloaded with the {\tt merge} command.  The compiler will supply the
+suffix \fname{.lib} if it is not part of {\it filename}.  Libraries make
+complete type-checking much easier and faster, particularly for very large
+programs.
+
+\item {\tt merge} {\it filename} \{ , {\it filename}, ... \}
+\nopagebreak[4]
+
+The {\tt merge} command loads libraries from the given \fname{.lib} files and
+merges them with the current type library.  The compiler will supply the suffix
+\fname{.lib} if it is not part of {\it filename}.  If the current library
+already contains an interface for a module in the library being loaded, the new
+interface will replace the old.
+
+
+\item {\tt optimize} [ {\tt false} ]
+
+The {\tt optimize} command turns code optimization on or off.  Optimized code
+runs faster.  Unoptimized code provides more information when used with the CLU
+debugger.
+\end{itemize}
+
+
+\subsection{Producing an executable program}
+
+After you have successfully compiled your \fname{.clu} files into \fname{.c}
+files, you must compile and link these files using the C compiler.  The easiest
+way to do this is to use the Unix {\tt make} facility, which can also be used
+to compile your \fname{.clu} files.  To use {\tt make}, you generally
+construct a file named \fname{Makefile} and type the shell command {\tt make}.
+To use a makefile named \fname{myMakefile}, type {\tt make -f myMakefile}.
+
+Figure~\ref{makeA} contains a sample makefile that can be used to compile the
+file named \fname{factorial.clu} into a program that can be used with the CLU
+debugger.\footnote{The three indented lines in the makefile begin with a {\tt
+tab} character.  The {\tt make} program will not work if these {\tt tab}
+characters are replaced by spaces.}
+
+\begin{figure}[hbt]
+\small
+\begin{boxdisplay}
+\verb`# Sample CLU makefile`\\
+\verb``\\
+\verb`CLU     = ${CLUHOME}/exe/pclu                                   `\\
+\verb`LDFLAGS = -L${CLUHOME}/code -lpclu_debug -lgc -lm -lc -lpthread `\\
+\verb`DEBUG   = ${CLUHOME}/debug/*.o                                  `\\
+\verb``\\
+\verb`factorial: factorial.o`\\
+\verb`        ${CC} -o factorial factorial.o ${DEBUG} ${LDFLAGS}`\\
+\verb``\\
+\verb`factorial.o: factorial.clu`\\
+\verb`        rm -f factorial.c`\\
+\verb`        ${CLU} -ext false -spec factorial -compile factorial`\\
+\verb``\\
+\verb`clean:`\\
+\verb`        rm -f factorial factorial.o factorial.c`\\
+\end{boxdisplay}
+\caption{Sample makefile for creating programs for CLU debugger}
+\label{makeA}
+\end{figure}
+
+The makefile specifies that the executable file \fname{factorial} depends on
+the object file \fname{factorial.o},, which in turn depends on the CLU source
+file \fname{factorial.clu}.  The makefile performs the following actions when
+it is invoked.
+
+\begin{enumerate}
+\item
+If \fname{factorial.clu} is newer than \fname{factorial.o}, or if
+\fname{factorial.o} does not exist, then the makefile invokes the CLU compiler 
+with the following commands.
+\begin{center}
+\begin{tabular}{l|l}
+Command				  & Effect\\
+\hline
+{\tt ext false}		  & turns off reporting of external abstractions\\
+{\tt spec factorial}  & enters interface specifications in type library\\
+{\tt compile factorial}	  & compiles \fname{factorial.clu} into \fname{factorial.o}
+\end{tabular}
+\end{center}
+\noindent
+It is important to {\tt spec} the source file before compiling it, so that
+specifications for abstractions that occur later in the file (e.g., a procedure
+named \proc{factorial}) can be used to type-check routines that occur earlier
+(e.g., the \proc{start\_up} procedure).
+
+\item
+If \fname{factorial} is newer than \fname{factorial.o}, or if \fname{factorial}
+does not exist, then the makefile invokes the C linker with the command
+\begin{center}
+\verb`     cc -o factorial factorial.o ${CLUHOME}/debug/*.o \`\\
+\verb`        -L${CLUHOME}/code -lpclu -lgc -lm -lc -lpthread`
+\end{center}
+\noindent
+to link \fname{factorial.o} with the CLU debugger and library files to produce
+an executable file named \fname{factorial}.
+\end{enumerate}
+
+Because the above commands are tedious and difficult to type correctly,
+programmers are strongly encouraged to put them into makefiles and not to type
+them by hand.
+
+Once the program \fname{factorial} has been debugged, the makefile in
+Figure~\ref{makeB} can be used to produce an optimized version of the
+program.  Before typing {\tt make} with this
+makefile, you must type {\tt make clean} to remove the files created for use
+with the debugger.
+
+\begin{figure}[hbt]
+\small
+\begin{boxdisplay}
+\verb`# Sample CLU makefile`\\
+\verb``\\
+\verb`CLU     = ${CLUHOME}/exe/pclu                             `\\
+\verb`LDFLAGS = -L${CLUHOME}/code -lpclu -lgc -lm -lc -lpthread `\\
+\verb``\\
+\verb`factorial: factorial.o`\\
+\verb`        ${CC} -o factorial factorial.o ${LDFLAGS}`\\
+\verb``\\
+\verb`factorial.o: factorial.clu`\\
+\verb`        rm -f factorial.c`\\
+\verb`        ${CLU} -ext false -spec factorial -opt -comp factorial`\\
+\verb``\\
+\verb`clean:`\\
+\verb`        rm -f factorial factorial.o factorial.c`\\
+\end{boxdisplay}
+\caption{Sample makefile for creating optimized programs}
+\label{makeB}
+\end{figure}
+
+\subsection{Managing larger programs}
+
+The two makefiles in the previous section are appropriate for small programs.
+For larger programs, more sophisticated makefiles can save time in several
+ways.
+
+\begin{itemize}
+\item
+They can be used to avoid recompiling all modules whenever a single module
+changes.
+\item
+They can shorten the time needed to create a type library by using the {\tt
+merge} command instead of the {\tt spec} command.
+\end{itemize}
+
+Figure~\ref{makeC} contains a sample makefile for managing a moderate size
+program.  Definitions at the beginning of the makefile describe where to find
+the modules that must be compiled and linked to build an executable program:
+
+\begin{figure}
+\small
+\begin{boxdisplay}
+\verb`### Sample Makefile for multimodule program`\\
+\verb``\\
+\verb`CLU     = ${CLUHOME}/exe/pclu                                   `\\
+\verb`LDFLAGS = -L${CLUHOME}/code -lpclu_debug -lgc -lm -lc -lpthread `\\
+\verb`CLULIBS = ${CLUHOME}/lib/*.lib                                  `\\
+\verb`DEBUG   = ${CLUHOME}/debug/*.o                                  `\\
+\verb``\\
+\verb`EQUATES = Equates.equ`\\
+\verb`SOURCES = collection.clu countWords.clu getWord.clu lowercase.clu`\\
+\verb`LIBRARY = countWords.lib`\\
+\verb`OBJECTS = collection.o countWords.o getWord.o lowercase.o`\\
+\verb`PROGRAM = countWords`\\
+\verb``\\
+\verb`.SUFFIXES: .o .clu`\\
+\verb``\\
+\verb``\\
+\verb`.clu.o:`\\
+\verb`        rm -f $*.c`\\
+\verb`        ${CLU} -ext false -merge ${LIBRARY} -ce ${EQUATES} \`\\
+\verb`               -compile $<`\\
+\verb``\\
+\verb`${PROGRAM}: ${OBJECTS}`\\
+\verb`        ${CC} -o ${PROGRAM} ${OBJECTS} ${DEBUG} ${LDFLAGS}`\\
+\verb``\\
+\verb`${LIBRARY}: ${EQUATES} ${SOURCES}`\\
+\verb`        make library`\\
+\verb``\\
+\verb`library:`\\
+\verb`        ${CLU} -ext false -merge ${CLULIBS} -ce ${EQUATES} \`\\
+\verb`               -spec ${SOURCES} -dump ${LIBRARY}`\\
+\verb``\\
+\verb`all: ${LIBRARY} ${PROGRAM}`\\
+\verb``\\
+\verb`clean:`\\
+\verb`        rm -f ${LIBRARY} ${OBJECTS} ${PROGRAM}`\\
+\end{boxdisplay}
+\caption{Makefile for multimodule program}
+\label{makeC}
+\end{figure}
+
+\begin{itemize}
+\item
+{\tt SOURCES} contains a list of the four source \fname{.clu} files for the
+program.
+\item
+{\tt EQUATES} is the name of an \fname{.equ} file containing equates (such as
+$strSeq = sequence[string]$) that are used in several of the source files.
+\item
+{\tt LIBRARY} is the name of a CLU type library that will be constructed from
+the interface specifications in the source files.
+\item
+{\tt OBJECTS} contains a list of the four \fname{.o} files that will be
+produced by the C compiler from four \fname{.c} files produced by the CLU compiler.
+\item
+{\tt PROGRAM} is the name of the executable program that will be produced from
+the \fname{.o} files and the CLU libraries by the C linker.
+\end{itemize}
+
+The {\tt .SUFFIXES:} line in the makefile declares that \fname{.o} files can be
+built from \fname{.clu} files, and the three lines beginning with the one that
+contains {\tt .clu.o:} instruct the makefile to do this using the following
+commands:
+
+\begin{center}
+\begin{tabular}{l|l}
+Command	& Effect\\
+\hline
+{\tt ext false}			& turns off reporting of external abstractions\\
+{\tt merge \$\{LIBRARY\}}	& creates a type library from \fname{countWords.lib}\\
+{\tt ce \$\{EQUATES\}}	& creates a compilation environment from \fname{Equates.equ}\\
+{\tt compile \$<}		& compiles the \fname{.clu} file into a \fname{.o} file
+\end{tabular}
+\end{center}	
+
+\noindent
+
+The remainder of the makefile describes the actions it will take in response to
+user commands.
+
+\begin{itemize}
+\item
+The first use of the makefile should be via the command {\tt make all}, which
+causes the makefile to build the type library \fname{countWords.lib} and then
+to build the executable program \fname{countWords}.
+\item
+Afterwards, whenever there is a change in the implementation of a procedure in
+one of the source \fname{.clu} files, the command {\tt make} (or {\tt make
+countWords}) should be typed to rebuild the executable program
+\fname{countWords}.  The makefile will determine automatically which
+\fname{.o} files are out of date with respect to the recently changed
+\fname{.clu} files, and it will recompile only those files before relinking
+\fname{countWords}.  It is precisely this behavior of the {\tt make} facility
+that makes it so attractive: when you change a small part of a large system,
+{\tt make} notices exactly which files you've changed, and it updates just that
+the part of the system that depends on those files.
+\item
+Whenever there is a change to a procedure or cluster interface in one of the
+source \fname{.clu} files, the command {\tt make all} must reissued to remake
+the type library before remaking the executable program.
+\end{itemize}
+
+There are two important limitations of makefiles such as this:
+
+\begin{enumerate}
+\item
+Because \fname{.clu} files contain implementations for procedures in addition
+to headers for clusters and procedures, there is no way for the makefile to
+determine when a change in a \fname{.clu} file affects an interface and when it
+affects only the implementation of an interface.  Hence, to avoid remaking the
+\fname{.lib} interface library every time an implementation changes, the
+makefile requires an explicit {\tt make library} command whenever an interface
+changes.
+\item
+The makefile starts a separate CLU compilation to remake each out-of-date
+\fname{.o} file.  More sophisticated makefiles can be constructed that start a
+single compilation to remake all out-of-date \fname{.o} files; these makefiles
+save time because they read \fname{.lib} type libraries and build compilation
+environments from \fname{.equ} files just once, rather than several times.  But
+they are much more complicated than the makefile shown here, and are not
+necessary for moderate-sized projects.
+\end{enumerate}
+
+\section{Using Emacs with CLU}
+\label{emacs}
+
+The \fname{emacs} editor provides convenient facilities for preparing and
+compiling CLU source files.  A special {\it clu-mode} allows you to access
+information about CLU using the \fname{emacs} help facility, and it allows you
+to run the CLU compiler and indenter under \fname{emacs}.  It also
+automatically indents lines in a CLU program as you enter them.
+
+In order to use \fname{emacs} with CLU, you should edit your \fname{.emacs} file
+(if you do not have one, create one) to load a library that defines a {\it
+clu-mode}.  You can do this by inserting the file \cludir{/emacs/.emacs} into
+your \fname{.emacs} file.
+
+\subsection{Using Emacs to prepare CLU programs}
+
+The \fname{emacs} editor will go into {\it clu-mode} automatically when you
+visit any file with a name that ends in {\it .clu}.  Once in {\it clu-mode},
+the following commands are available:
+\begin{description}
+\item[{\tt <ESC> \&}]	Runs the CLU compiler.  
+
+When typed in a buffer named \fname{test.clu}, {\tt <ESC> \&} causes
+\fname{emacs} to propose running the CLU compiler with the command {\tt pclu
+test.clu}.  You can edit this command line, or you can replace it with the
+command {\tt make}, before typing {\tt <RETURN>}; \fname{emacs} will then run
+{\tt pclu} or {\tt make} and display the results in a separate compilation
+buffer.  You can also edit the command line to {\tt pclu} alone, and then enter
+compiler commands by positioning the cursor at the compiler prompt in the
+compilation buffer.
+
+\item[{\tt C-X C-K}]	Kills a running CLU compiler.
+
+\item[{\tt C-X $`$}]	Locates errors after a CLU compile.  
+
+If there were errors in a CLU compilation, {\tt C-X $`$} will position the
+first error message at the top of the compiler window and put the cursor at the
+beginning of the line containing the error.  Each successive {\tt C-X $`$} will
+move to the next error.
+
+\item[{\tt <ESC> <TAB>}]	Indents the current buffer.  
+
+This command indents the file in a more CLU-like fashion than is done
+automatically in {\it clu-mode}.
+\end{description}
+
+At any time while in \fname{emacs}, you can return the display back to one
+window by entering either {\tt C-X 1} or {\tt C-X 0}.  {\tt C-X 1} returns the
+entire display to the window in which the cursor is presently in.  {\tt C-X 0}
+returns the entire display to the other window.  {\tt C-X b} can be used to
+move to any buffer.
+
+\subsection{CLU help from Emacs}
+
+You can use the \fname{emacs} help facility to view information in the CLU
+reference manual.  To get CLU help, type {\tt C-h} (the help key) followed by
+one of the keys:
+\begin{itemize}
+\item  {\tt d} for help on CLU symbols such as
+{\tt int\$mul}, {\tt array}, {\tt ARRAY\$LOW}, {\tt FILE\_NAME}, {\tt
+string\$s2ac}, {\tt stream\$primary\_output}.
+\item  {\tt g} for general CLU information on topics such as {\tt 
+terminal\_i/o} , {\tt file}, {\tt own\_variables}, {\tt CLUSTERS},
+{\tt syntactic\_sugar}.
+\item  {\tt /} for CLU apropos.
+Give a partial name, like {\tt file}, and get a list of all the CLU symbols and
+topics that include that name.
+\end{itemize}
+
+For example, if you type {\tt C-h d}, \fname{emacs} will prompt you with {\tt
+Describe CLU symbol: }  If you type {\tt oneof\$make\_ <RETURN>}, \fname{emacs}
+splits your screen and gives help about the CLU operation {\it oneof\$make\_}.
+
+You can request information using uppercase, lowercase, or a mixture of
+uppercase and lowercase.  Symbol completion works (hit the {\tt <TAB>} key);
+for example, if you type {\tt array\$} followed by {\tt <TAB>}, you'll get a
+list of possible completions (all the operations on the CLU {\it array}
+abstraction in this case).  If the cursor is placed on a CLU symbol when you
+type {\tt C-h d}, {\it emacs} will propose giving help about that symbol; for
+example, if your cursor is placed someplace on {\tt array[foo]\$low} in your
+file, and you type {\tt C-h d}, \fname{emacs} will prompt you with {\tt
+Describe CLU symbol (default array\$low): }; typing {\tt <RETURN>} selects
+this default help topic.
+
+To be reminded of this information, you can type {\tt M-x clu-doc-help} (i.e.,
+{\tt META-x clu-doc-help}).
+
+
+
+\section{The debugger}
+
+The CLU debugger enables users to monitor execution of a program.  Users can
+single step a program, executing one line at a time, or they can set {\em
+breakpoints} in the program.  The debugger suspends execution of a program
+whenever it reaches a breakpoint, so that the user can determine how control
+reached that breakpoint and/or examine the values of program variables.
+
+Whenever a procedure is invoked, information about the invocation is pushed
+onto a runtime {\em stack}.  This information is known as a {\em stack frame}.
+By examining the stack when a breakpoint is reached, the user can determine how
+control reached the current procedure.
+
+The debugger enables users to print the values of program variables, which are
+CLU objects.  Users can control how much of the representations for objects are
+displayed.  The printing {\em depth} is the maximum number of levels of nesting
+of an object that will be displayed.  The printing {\em width} is the maximum
+number of components of an object that are displayed at each depth.  The
+greater the width, the more elements in an array and the more fields in a
+record that are printed.  The greater the depth, the more information about
+each element in an array or each field in a record that is displayed.
+
+\subsection{Command overview}
+
+A debugger command consists of a command name followed by a sequence of
+arguments separated by spaces.  The following describes related groups of
+debugger commands.  The next section contains an alphabetical list of all
+debugger commands and describes them in detail.
+
+\begin{itemize}
+\item{\bf Running}
+
+The {\tt run} and {\tt continue} commands cause the program to run
+continuously.  The {\tt next} command causes execution of a single program
+line. 
+
+\item{\bf Breakpoints}
+
+The {\tt break} command sets breakpoints.  The {\tt show} command shows the
+current breakpoints.  The {\tt delete} command deletes breakpoints.  The {\tt
+step} command turns on single stepping for a procedure.  The {\tt unstep}
+command turns off single stepping for a procedure.  The {\tt trace} command
+turns on tracing for exceptions.  The {\tt untrace} command turns off tracing
+for exceptions.
+
+\item{\bf The stack}
+
+The {\tt where} command displays the stack.  The {\tt up} and {\tt down}
+commands select different frames in the stack.
+
+\item{\bf Printing}
+
+The {\tt print} command displays the values of variables.  The {\tt width} and
+{\tt depth} commands control how much of the value is displayed.
+
+\item{\bf Invocation}
+
+The {\tt eval} command evaluates procedure invocations.
+
+\item{\bf Source code}
+
+The {\tt list} command displays source code.  The {\tt func} command selects a
+procedure to be displayed.  Reaching a breakpoint also selects the procedure
+containing as the one to be displayed.  Moving up and down the stack changes
+the procedure to be displayed.
+
+\item{\bf Miscellaneous}
+
+The {\tt help} command gives brief information on debugger commands.  All
+commands can be displayed via {\tt help all}.  The {\tt quit} command
+terminates the debugger.
+
+\end{itemize}
+
+\subsection{Commands}
+
+This section describes each command in detail.  Commands are listed
+alphabetically.  Users can repeat execution of the {\tt continue}, {\tt eval},
+{\tt up}, {\tt list}, {\tt down}, {\tt next} commands simply by pressing the
+{\tt <RETURN>} key.
+
+
+
+\begin{itemize}
+
+\item {\tt break} \{{\it breakpoint ...}\}
+
+The {\tt break} command instructs the debugger to stop when a particular
+procedure or iterator is entered or exited or before a particular line in a
+file is executed.  Each {\it breakpoint} is either the name of a procedure, the
+name of an iterator, or a line number, which refers to a line in the file
+containing the current procedure (or iterator).  Note that the {\tt func}, {\tt
+up}, and {\tt down} commands change the current procedure.  Some examples:
+\begin{verbatim}
+break start_up         % sets breakpoints on entry to and
+                       % exit from the top-most procedure
+\end{verbatim}
+\begin{verbatim}
+break 10               % sets a breakpoint at line 10
+                       % in the current procedure
+\end{verbatim}
+\begin{verbatim}
+break 10 20            % sets breakpoints at lines 10 and 20
+                       % in the current procedure
+\end{verbatim}
+\begin{verbatim}
+break t$op1 t$op2      % sets breakpoints on entry to and
+                       % exit from procedures t$op1 and t$op2
+\end{verbatim}
+\begin{verbatim}
+break t$op1 t$op2 10   % sets breakpoints on entry to and
+                       % exit from procedures t$op1 and t$op2       
+                       % and at line 10 in the current procedure
+                       % (which may not be either t$op1 or t$op2)
+\end{verbatim}
+\begin{verbatim}
+func t$op1             % select function t$op1
+break 10               % sets a breakpoint at line 10 in t$op1
+\end{verbatim}
+Whenever the debugger reaches a breakpoint, it displays the corresponding line
+in the source file and stops before executing that line.
+
+\item {\tt continue}
+
+The {\tt continue} command directs the debugger to continue running the
+program, either until the next breakpoint or until the next instruction in a
+procedure (or iterator) that is being single-stepped.  It terminates any
+single-stepping set by the {\tt next} command in the current procedure (or
+iterator).
+
+\item {\tt delete} {\it breakpoint} \{{\it breakpoint ...}\}
+
+The {\tt delete} command removes the specified breakpoints.  (Note: If there
+are two breakpoints with the same line number, only the first will be deleted.)
+The argument {\tt all} causes all breakpoints to be removed.  Some examples:
+\begin{verbatim}
+delete t$op1              % deletes the breakpoints on entry to
+                          % and exit from the procedure t$op1
+\end{verbatim}
+\begin{verbatim}
+delete all                % deletes all breakpoints
+\end{verbatim}
+
+\item {\tt depth} \{{\it integer}\}
+
+The {\tt depth} command controls the printing depth for objects printed by the
+{\tt print} command.  If the {\tt depth} command has no argument, the debugger
+prints the current depth.  See also the {\tt width} command.
+
+\item {\tt down} \{{\it integer}\}
+
+The {\tt down} command moves down the specified number of stack frames.  If no
+argument is specified, then 1 is assumed.  See also the {\tt where} command and
+the {\tt up} command.
+
+\item {\tt eval} {\it expression}
+
+The {\tt eval} command evaluates the specified expression.  The following
+section describes the legal expressions.  Some examples:
+\begin{verbatim}
+eval a = "xyz"                    % sets the variable a to "xyz"
+eval po = stream$primary_output() % sets po to
+                                  %  the primary output stream
+eval stream$putl(po, a)           % prints a on po
+\end{verbatim}
+\noindent
+The assignment to the variable {\tt a} in the example above changes the value
+of the variable {\tt a} in the current stack frame, if such a variable exists.
+Otherwise, it creates a debugger variable named {\tt a} and assigns the value
+of the expression to that variable.
+
+\item {\tt func} \{{\it name}\}
+
+The {\tt func} specifies the named procedure (or iterator) to be the one of
+current interest, either for listing source code or for setting breakpoints at
+line numbers.  If no argument is given, the current line is printed, along with
+the five preceding and five succeeding lines
+\begin{verbatim}
+func t$op1                  % select function t$op1
+list                        % list lines surrounding t$op1
+break 10                    % set a breakpoint at line 10 in 
+                            % the file containing t$op1
+\end{verbatim}
+
+\item {\tt help} \{{\it command}\}
+
+The {\tt help} command, with no arguments, gives a summary of command names.
+When a command name is present as an argument, the {\tt help} command will give
+a short description of the specified command.  If the argument is the keyword
+{\tt all}, short descriptions of all commands are displayed.
+
+\item {\tt list} \{{\it integer ...}\}
+
+The {\tt list} command displays source code in the current procedure (or
+iterator).  By default, the current procedure is the routine that last reached
+a breakpoint.  When the debugger first starts up, the {\tt start\_up} procedure
+is selected as the current procedure.  The {\tt func}, {\tt up}, and {\tt down} commands change the
+current procedure to the specified procedure.  The arguments to {\tt list}
+specify the line numbers of interest (use a space to separate the line
+numbers).  The {\tt where} command can be used to show the current line numbers
+in the currently active procedures.
+\begin{verbatim}
+list                         % list lines at current breakpoint
+func t$op1                   % select function t$op1
+list                         % list lines surrounding t$op1
+\end{verbatim}
+
+\item {\tt next} \{{\it integer}\}
+
+The {\tt next} command directs the debugger to single step to the next line in
+the current procedure.  When a numeric argument $n$ is present, the debugger
+executes the next $n$ lines in the current procedure and prints out the
+corresponding source code as each line is executed.
+
+\item {\tt print} {\it variable}
+
+The {\tt print} command prints the values of variables, procedure arguments,
+and {\bf own} variables.  Uninitialized variables are printed as {\tt ???}.
+
+\item {\tt quit}
+
+The {\tt quit} command causes the debugger to terminate.
+
+\item {\tt rebuild}
+
+The {\tt rebuild} command causes the debugger to run {\tt make} and then the
+program.
+
+\item {\tt restart}
+
+The {\tt restart} command causes the debugger to restart the program
+by creating a new process and by causing {\bf own} variables to be
+initialized and the stack to be empty.
+
+\item {\tt run}
+
+The {\tt run} command causes the debugger to continue running the program.  
+
+\item {\tt show}
+
+The {\tt show} command displays the location of the current breakpoints.
+
+\item {\tt step} {\it name}
+
+The {\tt step} command turns on single stepping for the specified procedure.
+
+\item {\tt trace} {\it name}
+
+The {\tt trace} command turns on tracing for the named signal.
+\begin{verbatim}
+trace bounds                % trace the bounds exception
+trace all                   % trace all exceptions
+\end{verbatim}
+
+\item {\tt unstep} {\it name}
+
+The {\tt unstep} command turns off single stepping for the specified procedure.
+
+\item {\tt untrace} {\it name}
+
+The {\tt untrace} command turns off tracing for the named signal.
+\begin{verbatim}
+untrace bounds              % stop tracing the bounds exception
+untrace all                 % do not trace any exceptions
+\end{verbatim}
+
+\item {\tt up} \{{\tt integer}\}
+
+The {\tt up} command moves up the specified number of stack frames.  If no
+argument is specified, 1 is assumed.  See also the {\tt where} command and the
+{\tt down} command.
+
+\item {\tt where} \{{\tt integer}\}
+
+The {\tt where} command displays the frames on the stack.  A numeric argument
+$n$ limits the output to the last $n$ frames pushed on the stack.
+
+\item {\tt width} \{{\tt integer}\}
+
+The {\tt width} command controls the printing width for objects printed by the
+{\tt print} command.  If the {\tt width} command has no argument, the debugger
+prints the current width.  See also the {\tt depth} command.
+\end{itemize}
+
+\subsection{Expressions}
+
+The {\tt eval} command currently accepts the following expressions:
+
+\begin{itemize}
+\item{Constants:}
+\begin{itemize}
+\item{booleans: {\tt 0} for false, {\tt 1} for true}
+\item{characters: {\tt $'$a$'$}}
+\item{strings: {\tt "abc"}}
+\item{integers: {\tt 1}}
+\item{reals: {\tt 1.2}}
+\end{itemize}
+
+\item{Variables:}
+
+The debugger first looks for a debugger variable with the given name, then for
+a local variable in the current procedure (or iterator), then for an {\bf own}
+variable in the current procedure (or iterator) and finally for an {\bf own}
+variable in the current type.
+
+The current version of the debugger does not always print the value of the
+variable that one expects: if two parallel scopes use the same name to denote
+variables of different types, the first declaration determines the print
+operation.
+
+\item{Invocations:}
+
+The programmer may invoke stand-alone procedures and procedures 
+from parameterized or unparameterized clusters.  Arguments to
+procedures can be constants or variables, as described above.  The current
+debugger does not recognize sugars: users must type {\tt eval int\$add(1,2)}
+rather than {\tt eval 1+2}.  The debugger does not type-check arguments for
+procedure invocations; irrecoverable errors may result if arguments do not have
+the appropriate types.
+
+Some support has been added to ease access to components of complex objects.
+Instead of {\tt eval record[f1:int, f2: string]\$get\_f1(r1)}, the user may
+type {\tt eval rep\$get\_f1(r1)}.
+\end{itemize}
+
+\subsection{Operational notes}
+
+\subsubsection{Interrupting the debugger}
+
+When a program is running, typing {\tt control-c} (i.e., holding down the
+control or ctrl key and then pressing the letter {\tt c}), will cause control
+to be passed back to the debugger.  This assumes that {\tt control-c} is your
+{\tt INTR} (interrupt) character. (See {\em man (2) stty}.)  For {\tt
+control-c} to take effect, the program must pass through a procedure entry/exit
+point or a procedure with line breakpoints set in it (these lines do not need
+to be executed).  A program in an infinite loop, which does not call a
+procedure, will not respond to {\tt control-c}.  To kill off such a program,
+type {\tt control-z} (or your {\tt SUSP} (suspend) character), use the {\tt
+jobs} shell command to locate the errant program, and type
+\begin{verbatim}
+kill -9 %number_associated_with_program
+\end{verbatim}
+You may need to use the {\tt reset} shell command to restore normal tty
+behavior.
+
+\subsubsection{Auxiliary files}
+
+When a program is executed under the debugger, an auxiliary file with symbol
+information is created.  If the program is named \fname{ps1}, then the file is
+named \fname{ps1.sym}.
+
+To preserve break point settings between debugging sessions, the debugger
+maintains the current breakpoints in a file.  If the program is named
+\fname{ps1}, then the file is named \fname{ps1.bkpts}.
+
+\subsubsection{A note on stacks}
+
+When an iterator is active, the invoking procedure will appear on the stack
+twice: once for the invocation and once for the body of the {\bf for}
+statement.  Also, low-level routines that are in-lined may not appear on the
+stack, so setting breakpoints at such low-level routines may have no effect.
+Own initialization is not traceable and does not appear on the stack.
+
+\subsubsection{Capturing output}
+
+The (Unix) {\tt script} command provides a method for capturing output created
+during a debugging session.
+
+\subsubsection{Fatal errors}
+
+When running a program, a fatal error may occur and result in a Unix {\tt
+Segmentation Violation} or {\tt Bus Error}.  When this happens, the debugger
+executes a {\tt where} command to display the stack and then terminates.  These
+errors are frequently caused by uninitialized variables.
+
+If a program accesses uninitialized variables without triggering a fatal error,
+the state of the debugger may be corrupted.
+
+If a circularly-linked object is printed, the debugger may terminate
+when the stack fills up.
+
+\subsubsection{How Printing Works}
+
+When printing an object of type t, the debugger uses {\tt t\$print}, if it
+exists and takes an object of type t (or cvt) as its first argument and
+a pstream as its second argument.  If such an operation does not exist,
+{\tt rep\$print} for type t is used.
+
+\section{Line editing}
+
+The debugger and compiler support a limited amount of line editing.  The
+following files are used to specify key bindings for line editing:
+\fname{\~{}/.lineedit.keys} and \fname{\~{}/.inputrc}.  These files override 
+the default settings given by the following table.
+\begin{center}
+\begin{tabular}{|l|l|l|}\hline
+Key	   & Action	&Alternative key\\
+\hline
+ctrl-A & move to beginning of the line  	&ESC\\
+ctrl-B & move back (left) one character 	&left-arrow on lk-201's\\
+ctrl-D & delete current character			&\\
+ctrl-E & move to end of current line		&\\
+ctrl-F & move forward (right) one character &right-arrow on lk-201's\\
+ctrl-J & complete entry						&\\
+ctrl-K & delete to the end of the line 		&remove-key on lk-201's\\
+ctrl-M & complete entry						&\\
+ctrl-N & move to next history item     		&down-arrow on lk-201's\\
+ctrl-P & move to previous history item 		&up-arrow on lk-201's\\
+ctrl-U & delete line						&\\
+ctrl-W & delete word						&\\
+del    & delete previous character				&\\
+	   & move forward one word				& next-screen on lk-201's\\
+	   & move back one word					& prev-screen on lk-201's\\
+\hline
+\end{tabular}
+\end{center}
+\end{document}
+
+

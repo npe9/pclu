@@ -1,0 +1,275 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	COPER CLU
+%
+%	CLU Compiler Version 3: operation checker
+
+c_cluster_op = proc (e: c_env, dut: clutype, cop: clusterop) returns (typespec)
+	info: typeinfo
+	specs: DUspecs := c_get_DUspecs(e, dut.gen)
+	tagcase specs
+	   tag cluster_ (inf: typeinfo):
+		info := inf
+	   tag none:
+		return(c_env$get_type(e, typeabs$make_other(othertype$make_op(cop))))
+	   others:
+		return(e.unknown_type)
+	   end
+	n: name := cop.name
+	if n = "debug_print" then return(e.unknown_type) end
+	parms: exprlist := dut.parms
+	tparms: idnlist := info.parms
+	for op: opinfo in opinfolist$elements(info.opers) do
+		if n = op.name
+		   then pparms: exprlist := cop.parms
+			ainfo: applyinfo := op.info
+			if c_2_parms(e, pparms, ainfo.parms,
+					parms, tparms, op.where_)
+			   then return(subst_2_parms(e, parms, tparms,
+							pparms, ainfo))
+			   end
+			c_env$err(e, qs$["bad parameters to '",
+					 get_clusterop_print(cop), "'"])
+			return(e.unknown_type)
+		   end
+		end
+	c_env$err(e, qs$["'", get_clusterop_print(cop), "' does not exist 1"])
+	return(e.unknown_type)
+	end c_cluster_op
+
+c_select_op = proc (e: c_env, dut: seltype, cop: clusterop) returns (typespec)
+	info: typeinfo
+	specs: DUspecs := c_get_DUspecs(e, dut.gen)
+	tagcase specs
+	   tag select (inf: typeinfo):
+		info := inf
+	   tag none:
+		return(c_env$get_type(e, typeabs$make_other(othertype$make_op(cop))))
+	   others:
+		return(e.unknown_type)
+	   end
+	n: name := cop.name
+	if n = "debug_print" then return(e.unknown_type) end
+	fparms: fieldspeclist := dut.parms
+	x: expr := expr$create(exprabs$make_type_(cop.type_), e.type_type)
+	for op: opinfo in opinfolist$elements(info.opers) do
+		opn: name := op.name
+		if n = opn  cor  (name$indexs(opn, n) = 1  cand
+				  idnlist$size(op.info.parms) = 1)
+		   then	c_select_requires(e, fparms, op.where_)
+			ainfo: applyinfo := op.info
+			pparms: exprlist
+			if n = opn
+			   then pparms := cop.parms
+			   else	sel: name := name$rest(n, name$size(opn) + 1)
+				t: typespec := c_sel_type(e, sel, fparms)
+				x1: expr := expr$create(exprabs$make_type_(t),
+							e.type_type)
+				pparms := exprlist$e2s(x1)
+			   end
+			if c_parms(e, pparms, ainfo.parms)
+			   then return(subst_2_parms(e,
+						exprlist$e2s(x),
+						idnlist$e2s(idnlist$bottom(info.parms)),
+						pparms,
+						ainfo))
+			   end
+			c_env$err(e, qs$["bad parameters to '",
+					 get_clusterop_print(cop), "'"])
+			return(e.unknown_type)
+			end
+		end
+	gen: DU := dut.gen
+	if (gen = e.struct_  cand  (n = "s2r"  cor  n = "r2s"))  cor
+	   (gen = e.oneof_  cand  (n = "o2v"  cor  n = "v2o"))  cor
+	   (gen = e.record_  cand  (n = "create"  cor  n = "r_gets_s"))  cor
+	   (gen = e.variant_  cand  n = "v_gets_o")  cor
+	   (n = "create"  cand  ~(gen = e.struct_  cor  gen = e.oneof_  cor
+				  gen = e.record_  cor  gen = e.variant_))
+	   then t1: typespec := c_env$get_type(e, typeabs$make_select(dut))
+		if gen = e.struct_
+		   then gen := e.record_
+		elseif gen = e.oneof_
+		   then gen := e.variant_
+		elseif gen = e.variant_
+		   then gen := e.oneof_
+		else gen := e.struct_ end
+		dut1: seltype := seltype${gen:   gen,
+					  parms: fparms}
+		t2: typespec := c_env$get_type(e, typeabs$make_select(dut1))
+		args: typelist := typelist$[t1]
+		vals: typelist := typelist$[t2]
+		if n = "r2s"  cor  n = "v2o"  cor  n = "create"
+		   then args, vals := vals, args
+		elseif n = "r_gets_s"  cor  n = "v_gets_o"
+		   then args := args || vals
+			vals := typelist$[]
+		end
+		apt: applytype := applytype${gen:  e.proc_,
+					     args: args,
+					     vals: vals,
+					     sigs: exceptionlist$new()}
+		return(c_env$get_type(e, typeabs$make_apply(apt)))
+	   end
+	c_env$err(e, qs$["'", get_clusterop_print(cop), "' does not exist 2"])
+	return(e.unknown_type)
+	end c_select_op
+
+c_sel_type = proc (e: c_env, sel: name, specs: fieldspeclist) returns (typespec)
+	for spec: fieldspec in fieldspeclist$elements(specs) do
+		if sel = spec.sel
+		   then return(spec.type_) end
+		end
+	if ~fieldspeclist$empty(specs)
+	   then c_env$err(e, qs$["'", sel, "' not a legal selector"]) end
+	return(e.unknown_type)
+	end c_sel_type
+
+c_idn_op = proc (e: c_env, i: idn, cop: clusterop) returns (typespec)
+	tagcase i.kind
+	   tag tparm, tconst (k: opspeclist):
+		op: name := cop.name
+		parms: exprlist := cop.parms
+		for spec: opspec in opspeclist$elements(k) do
+			if op = spec.name  cand  exprlist$similar(parms, spec.parms)
+			   then return(spec.type_) end
+			end
+		if ~c_env$building_specs(e)
+		   then c_env$err(e, qs$["'", get_clusterop_print(cop),
+							"' does not exist 3"])
+		   end
+	   tag var, ownvar:
+		return(c_env$get_type(e, typeabs$make_other(othertype$make_op(cop))))
+	   others:
+	   end
+	return(e.unknown_type)
+	end c_idn_op
+
+c_apply_op = proc (e: c_env, at: applytype, cop: clusterop) returns (typespec)
+	info: typeinfo
+	specs: DUspecs := c_get_DUspecs(e, at.gen)
+	tagcase specs
+	   tag atype (inf: typeinfo):
+		info := inf
+	   tag none:
+		return(c_env$get_type(e, typeabs$make_other(othertype$make_op(cop))))
+	   others:
+		return(e.unknown_type)
+	   end
+	n: name := cop.name
+	if n = "debug_print" then return(e.unknown_type) end
+	x: expr := expr$create(exprabs$make_type_(cop.type_), e.type_type)
+	for op: opinfo in opinfolist$elements(info.opers) do
+		if n = op.name
+		   then	pparms: exprlist := cop.parms
+			ainfo: applyinfo := op.info
+			if c_parms(e, pparms, ainfo.parms)
+			   then return(subst_2_parms(e, exprlist$e2s(x),
+							info.parms,
+							pparms,
+							ainfo))
+			   end
+			c_env$err(e, qs$["bad parameters to '",
+					 get_clusterop_print(cop), "'"])
+			return(e.unknown_type)
+		   end
+		end
+	if n = "create"  cand  at.gen ~= e.proc_  cand  at.gen ~= e.iter_
+	   then t: typespec
+		ok: bool := exprlist$size(cop.parms) = 1
+		if ok
+		   then t := exprabs$value_type_(exprlist$bottom(cop.parms).abs)
+		   end except when wrong_tag: ok := false end
+		if ~ok
+		   then c_env$err(e, qs$["bad parameters to '",
+					 get_clusterop_print(cop), "'"])
+			return(e.unknown_type)
+		   end
+		pta: applytype := applytype${gen:  e.proc_,
+					     args: typelist$addl(at.args, t),
+					     vals: at.vals,
+					     sigs: at.sigs}
+		pt: typespec := c_env$get_type(e, typeabs$make_apply(pta))
+		pta := applytype${gen:  e.proc_,
+				  args: typelist$[e.int_type, pt],
+				  vals: typelist$[cop.type_],
+				  sigs: exceptionlist$[]}
+		return(c_env$get_type(e, typeabs$make_apply(pta)))
+	   end
+	c_env$err(e, qs$["'", get_clusterop_print(cop), "' does not exist 4"])
+	return(e.unknown_type)
+	end c_apply_op
+
+c_requires = proc (e: c_env, vals: exprlist, parms: idnlist, reqs: typesetlist)
+	for req: typeset in typesetlist$elements(reqs) do
+		p: idn := req.parm
+		for i: int in idnlist$indexes(parms) do
+			if p = parms[i]
+			   then c_restrictions(e, vals[i], vals, parms, req.opers) end
+			end	
+		end
+	end c_requires
+
+c_select_requires = proc (e: c_env, specs: fieldspeclist, reqs: typesetlist)
+	for req: typeset in typesetlist$elements(reqs) do
+		for spec: fieldspec in fieldspeclist$elements(specs) do
+			x: expr := expr$create(exprabs$make_type_(spec.type_),
+					       e.type_type)
+			if ~opspeclist$empty(req.opers)
+			   then c_restrictions(e, x, exprlist$e2s(x),
+						  idnlist$e2s(req.parm), req.opers)
+			   end
+			end
+		end
+	end c_select_requires
+
+subst_parms = proc (e: c_env, vals: exprlist, forms: idnlist, t: typespec)
+						returns (typespec)
+	if exprlist$empty(vals) then return(t) end
+	c_env$begin_scope(e)
+	c_env$push_vals(e, forms, vals)
+	t := b_type(e, t)
+	c_env$end_scope(e)
+	return(t)
+	end subst_parms
+
+subst_2_parms = proc (e: c_env, vals1: exprlist, parms1: idnlist, vals2: exprlist,
+					info: applyinfo) returns (typespec)
+	t: typespec := info.type_
+	if exprlist$empty(vals1)  cand  exprlist$empty(vals2)
+	   then return(t) end
+	c_env$begin_scope(e)
+	c_env$push_vals(e, parms1, vals1)
+	c_env$push_vals(e, info.parms, vals2)
+	t := b_type(e, t)
+	c_env$end_scope(e)
+	return(t)
+	end subst_2_parms
+
+c_restrictions = proc (e: c_env, x: expr, vals: exprlist, forms: idnlist,
+					specs: opspeclist) returns (bool)
+	t: typespec
+	tagcase x.abs
+	   tag type_ (xa: typespec):
+		t := xa
+	   tag bad:
+		return(false)
+	   tag apply:
+		return(true)
+	   others:
+		return(false)
+	   end
+	ok: bool := true
+	for spec: opspec in opspeclist$elements(specs) do
+		opt: typespec := subst_parms(e, vals, forms, spec.type_)
+		cop: clusterop := clusterop${type_: t,
+					     name:  spec.name,
+					     parms: spec.parms}
+		copt: typespec := c_clusterop(e, cop)
+		if typespec$mismatch(opt, copt)
+		   then	ok := false
+			c_env$err(e, qs$["type_of(", get_clusterop_print(cop),
+					") does not match restriction"])
+		   end
+		end
+	return(ok)
+	end c_restrictions

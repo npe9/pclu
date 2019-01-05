@@ -1,0 +1,131 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	DU CLU
+%
+%	CLU Compiler Version 3: hack DU cluster
+
+DU = cluster is		create,		% name -> DU
+			get_unique,	% DU -> name
+			get_common,	% DU -> name
+			read_specs,	% DU -> DUspecs, bool
+			add_specs,	% DU, DUspecs => specs_exist
+			get_mspecs,	% DU -> mspecs
+			set_mspecs,	% DU, mspecs ->
+			get_dump_info,	% DU -> DUspecs, bool
+			update_specs,	% DU, specs ->
+			forget_specs,	% DU ->
+			keep,		% ->
+			reset,		% ->
+			equal,		% same object
+			similar,	% same name
+			copy,		% same object
+			_gcd
+
+speclist = array[DUspecs]
+mspeclist = array[mspecs]
+
+rep = record[name:   name,
+	     index:  int]
+
+own store: speclist := speclist$predict(1, 100)
+own fixups: flaglist := flaglist$predict(1, 100)
+own cache: mspeclist := mspeclist$predict(1, 100)
+own keepmax: int := 0
+
+create = proc (common: name) returns (cvt)
+	speclist$addh(store, DUspecs$make_none(nil))
+	flaglist$addh(fixups, false)
+	mspeclist$addh(cache, mspecs$make_none(nil))
+	return(rep${name:  common,
+		    index: speclist$size(store)})
+	end create
+
+get_unique = proc (d: cvt) returns (name)
+	return(d.name)
+	end get_unique
+
+get_common = proc (d: cvt) returns (name)
+	return(d.name)
+	end get_common
+
+read_specs = proc (d: cvt) returns (DUspecs, bool)
+	fixdus: bool := fixups[d.index]
+	if fixdus
+	   then fixups[d.index] := false end
+	return(store[d.index], fixdus)
+	end read_specs
+
+add_specs = proc (d: cvt, specs: DUspecs) signals (specs_exist)
+	store[d.index] := specs
+	if DUspecs$is_atype(specs)
+	   then p_env$add_token(cmpvar$stuffs().penv,
+				d.name,
+				token$make_typekey(
+				       typekey$make_applytype_(up(d))))
+	   end
+	end add_specs
+
+get_mspecs = proc (d: cvt) returns (mspecs)
+	return(cache[d.index])
+	end get_mspecs
+
+set_mspecs = proc (d: cvt, specs: mspecs)
+	cache[d.index] := specs
+	end set_mspecs
+
+get_dump_info = proc (d: cvt) returns (DUspecs, bool)
+	return(store[d.index], d.index > keepmax)
+	end get_dump_info
+
+update_specs = proc (d: cvt, specs: DUspecs)
+	if DUspecs$is_none(store[d.index])
+	   then store[d.index] := specs
+		fixups[d.index] := true
+		if DUspecs$is_atype(specs)
+		   then p_env$add_token(cmpvar$stuffs().penv,
+					d.name,
+					token$make_typekey(
+					       typekey$make_applytype_(up(d))))
+		   end
+	   end
+	end update_specs
+
+forget_specs = proc (d: cvt)
+	if d.index > keepmax
+	   then store[d.index] := DUspecs$make_none(nil)
+		fixups[d.index] := false
+		cache[d.index] := mspecs$make_none(nil)
+	   end
+	end forget_specs
+
+keep = proc ()
+	keepmax := speclist$high(store)
+	while keepmax > 0  cand  DUspecs$is_none(store[keepmax]) do
+		keepmax := keepmax - 1
+		end
+	end keep
+
+reset = proc ()
+	for i: int in int$from_to(keepmax + 1, speclist$high(store)) do
+		store[i] := DUspecs$make_none(nil)
+		fixups[i] := false
+		cache[i] := mspecs$make_none(nil)
+		end
+	end reset
+
+equal = proc (d1, d2: cvt) returns (bool)
+	return(d1 = d2)
+	end equal
+
+similar = proc (d1, d2: cvt) returns (bool)
+	return(d1.name = d2.name)
+	end similar
+
+copy = proc (d: DU) returns (DU)
+	return(d)
+	end copy
+
+_gcd = proc (d: cvt, tab: gcd_tab) returns (int)
+	return(rep$_gcd(d, tab))
+	end _gcd
+
+end DU

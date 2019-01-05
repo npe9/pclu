@@ -1,0 +1,28 @@
+% Copyright Massachusetts Institute of Technology 1981, 1989
+
+_split_name_part = proc (s: string) returns (string, string, string)
+	i: int := string$indexc('.', s)
+	if i > 0
+	   then j: int := i + 1
+		while s[j] = '.' do
+			j := j + 1
+			end except when bounds: i := 0 end
+	   end
+	if i = 0
+	   then return(s, "", "") end
+	name: string := string$substr(s, 1, i - 1)
+	suffix: string := string$rest(s, i + 1)
+	i := string$indexc('.', suffix)
+	if i > 0
+	   then j: int := i + 1
+		while suffix[j] = '.' do
+			j := j + 1
+			end except when bounds: i := 0 end
+	   end
+	if i = 0
+	   then s := ""
+	   else s := string$rest(suffix, i + 1)
+		suffix := string$substr(suffix, 1, i - 1)
+	   end
+	return(name, suffix, s)
+	end _split_name_part

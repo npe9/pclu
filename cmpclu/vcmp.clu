@@ -1,0 +1,78 @@
+%	VCMP	CLU
+% Copyright Massachusetts Institute of Technology 1982, 1989
+%	CLU compiler: VAX/UNIX dependent routines
+
+# extend
+
+%op_sys_name = proc () returns (str)
+%	return("VAX 4.2BSD")
+%	end op_sys_name
+
+op_sys_name = proc () returns (str)
+	return ("PCLU")
+	end op_sys_name
+
+
+basic_name = proc () returns (fname)
+	return(fname$create(_system_root() || "/cmp", "basic", "types", ""))
+	end basic_name
+
+nul_dev = proc () returns (str)
+	return("/dev/null")
+	end nul_dev
+
+dsuffix = proc () returns (str)
+	return("")
+	end dsuffix
+
+%binary_suffix = proc () returns (str)
+%	return("bin")
+%	end binary_suffix
+
+binary_suffix = proc () returns (str)
+	return ("c")
+	end binary_suffix
+
+equate_suffix = proc () returns (str)
+	return("equ")
+	end equate_suffix
+
+code_temp = proc () returns (str)
+	return("_c_")
+	end code_temp
+
+bin_temp = proc () returns (str)
+	return("_b_")
+	end bin_temp
+
+err_name = proc () returns (fname)
+	return(fname$create(_system_root()||"/include", "pclu_err", "h", ""))
+	end err_name
+
+safety_name = proc () returns (fname)
+	return(fname$create(_system_root(), "system", "names", ""))
+	end safety_name
+
+help_name = proc () returns (fname)
+	return(fname$create(_system_root(), "clu", "order", ""))
+	end help_name
+
+junk_name = proc () returns (fname)
+	return(fname$create("", "clu", "junk", ""))
+	end junk_name
+
+get_compiler_version = proc () returns (str)
+	return(int$unparse(_get_version()))
+	end get_compiler_version
+
+restore_compiler = proc ()
+	_restore_state(_system_root() || "/cmp/state." ||
+		       int$unparse(_get_version()))
+	end restore_compiler
+
+dump_compiler = proc (vers: str)
+	if vers ~= "0"
+	   then _gc$gc()
+		_save_state(_system_root() || "/cmp/state." || vers, 0644)
+	   end
+	end dump_compiler

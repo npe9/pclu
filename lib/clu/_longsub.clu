@@ -1,0 +1,15 @@
+% Copyright Massachusetts Institute of Technology 1980, 1989
+
+_longsub = proc (x1, x2, x3, y1, y2, y3: int) returns (int, int, int)
+	x3 := x3 - y3
+	if x3 < 0
+	   then x2 := x2 - 1
+		x3 := x3 + 1000
+	   end
+	x2 := x2 - y2
+	if x2 < 0
+	   then x1 := x1 - 1
+		x2 := x2 + 1000
+	   end
+	return(x1 - y1, x2, x3)
+	end _longsub

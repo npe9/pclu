@@ -1,0 +1,5 @@
+% Copyright Massachusetts Institute of Technology 1981, 1989
+
+_cause_overflow = proc () signals (overflow)
+	signal	overflow
+	end _cause_overflow

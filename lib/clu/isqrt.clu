@@ -1,0 +1,17 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+isqrt = proc (i: int) returns (int) signals (complex_result)
+    if i <= 1
+       then if i >= 0
+	       then return(i) end
+	    signal complex_result
+       end
+    a: int := 1
+    b: int := i / 2
+    while a ~= b  cand  b - a ~= 1 do
+	a := b
+	b := (a + i / a) / 2
+	end
+    if a ~= b  cand  b * b <= i
+       then a := b end
+    return(a)
+    end isqrt

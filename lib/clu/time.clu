@@ -1,0 +1,345 @@
+% Copyright Massachusetts Institute of Technology 1980, 1989
+
+time = cluster is create, get_days, get_hours, get_minutes, get_seconds,
+		  get_millis, get_micros, get_all, add, sub, mul, div, average,
+		  lt, le, ge, gt, parse, unparse, t2r, format,
+		  print, equal, similar, copy, encode, decode, _gcd
+    
+str = string
+    
+rep = struct[days, hours, mins, secs, millis, micros: int]
+    
+create = proc (days, hours, mins, secs, millis, micros: int) returns (cvt)
+		signals (bad_format, overflow)
+	begin
+	if days < 0  cor  hours < 0  cor  mins < 0  cor
+	   secs < 0  cor  millis < 0  cor  micros < 0
+	   then signal bad_format end
+	millis := millis + micros / 1000
+	micros := micros // 1000
+	secs := secs + millis / 1000
+	millis := millis // 1000
+	mins := mins + secs / 60
+	secs := secs // 60
+	hours := hours + mins / 60
+	mins := mins // 60
+	days := days + hours / 24
+	hours := hours // 24
+	return(rep${days: days, hours: hours, mins: mins,
+		    secs: secs, millis: millis, micros: micros})
+	end resignal overflow
+	end create
+    
+get_days = proc (t: cvt) returns (int)
+	return(t.days)
+	end get_days
+    
+get_hours = proc (t: cvt) returns (int)
+	return(t.hours)
+	end get_hours
+    
+get_minutes = proc (t: cvt) returns (int)
+	return(t.mins)
+	end get_minutes
+    
+get_seconds = proc (t: cvt) returns (int)
+	return(t.secs)
+	end get_seconds
+    
+get_millis = proc (t: cvt) returns (int)
+	return(t.millis)
+	end get_millis
+    
+get_micros = proc (t: cvt) returns (int)
+	return(t.micros)
+	end get_micros
+    
+get_all = proc (t: cvt) returns (int, int, int, int, int, int)
+	return(t.days, t.hours, t.mins, t.secs, t.millis, t.micros)
+	end get_all
+    
+add = proc (t1: time, t2: cvt) returns (cvt) signals (overflow)
+	begin
+	days, hours, mins, secs, millis, micros: int := get_all(t1)
+	micros := micros + t2.micros
+	if micros >= 1000
+	   then millis := millis + 1
+		micros := micros - 1000
+	   end
+	millis := millis + t2.millis
+	if millis >= 1000
+	   then secs := secs + 1
+		millis := millis - 1000
+	   end
+	secs := secs + t2.secs
+	if secs >= 60
+	   then mins := mins + 1
+		secs := secs - 60
+	   end
+	mins := mins + t2.mins
+	if mins >= 60
+	   then hours := hours + 1
+		mins := mins - 60
+	   end
+	hours := hours + t2.hours
+	if hours >= 24
+	   then days := days + 1
+		hours := hours - 24
+	   end
+	days := days + t2.days
+	return(rep${days: days, hours: hours, mins: mins,
+		    secs: secs, millis: millis, micros: micros})
+	end resignal overflow
+	end add
+    
+sub = proc (t1: time, t2: cvt) returns (cvt) signals (negative_time)
+	if up(t2) > t1
+	   then signal negative_time end
+	days, hours, mins, secs, millis, micros: int := get_all(t1)
+	micros := micros - t2.micros
+	if micros < 0
+	   then millis := millis - 1
+		micros := micros + 1000
+	   end
+	millis := millis - t2.millis
+	if millis < 0
+	   then secs := secs - 1
+		millis := millis + 1000
+	   end
+	secs := secs - t2.secs
+	if secs < 0
+	   then mins := mins - 1
+		secs := secs + 60
+	   end
+	mins := mins - t2.mins
+	if mins < 0
+	   then hours := hours - 1
+		mins := mins + 60
+	   end
+	hours := hours - t2.hours
+	if hours < 0
+	   then days := days - 1
+		hours := hours + 24
+	   end
+	days := days - t2.days
+	return(rep${days: days, hours: hours, mins: mins,
+		    secs: secs, millis: millis, micros: micros})
+	end sub
+    
+mul = proc (t: cvt, n: int) returns (cvt)
+	signals (overflow, negative_multiplier)
+	if n < 0
+	   then signal negative_multiplier end
+	begin
+	days, hours, mins, secs, millis, micros, carry: int
+	carry, micros := do_div(0, t.micros, n, 1000)
+	carry, millis := do_div(carry, t.millis, n, 1000)
+	carry, secs := do_div(carry, t.secs, n, 60)
+	carry, mins := do_div(carry, t.mins, n, 60)
+	carry, hours := do_div(carry, t.hours, n, 24)
+	days := t.days * n + carry
+	return(rep${days: days, hours: hours, mins: mins,
+		    secs: secs, millis: millis, micros: micros})
+	end resignal overflow
+	end mul
+
+div = proc (t: time, n: int) returns (time) signals (bad_divisor)
+	return(average(t, n))
+	   resignal bad_divisor
+	end div
+
+average = proc (t: cvt, n: int) returns (cvt) signals (bad_divisor)
+	if n <= 0
+	   then signal bad_divisor end
+	days, hours, mins, secs, millis, micros, rem: int
+	i: int := t.days
+	days := i / n
+	hours, rem := do_div(t.hours, 24, i // n, n)
+	mins, rem := do_div(t.mins, 60, rem, n)
+	secs, rem := do_div(t.secs, 60, rem, n)
+	millis, rem := do_div(t.millis, 1000, rem, n)
+	micros, rem := do_div(t.micros + n/2, 1000, rem, n)
+	return(rep${days: days, hours: hours, mins: mins,
+		    secs: secs, millis: millis, micros: micros})
+	end average
+    
+% Internal
+
+do_div = proc (a, b, c, d: int) returns (int, int) signals (overflow)
+	begin
+	t: int := a + b * c
+	return(t / d, t // d)
+	end except when overflow: end
+	q: int := a / d + b * (c / d)
+	   resignal overflow
+	r: int := a // d
+	rr: int := c // d
+	for i: int in int$from_to(1, b) do
+		x: int := d - r
+		if rr >= x
+		   then r := rr - x
+			q := q + 1
+		   else r := r + rr
+		   end
+		end resignal overflow
+	return(q, r)
+	end do_div
+    
+lt = proc (t1, t2: cvt) returns (bool)
+	if t1.days ~= t2.days
+	   then return(t1.days < t2.days)
+	elseif t1.hours ~= t2.hours
+	   then return(t1.hours < t2.hours)
+	elseif t1.mins ~= t2.mins
+	   then return(t1.mins < t2.mins)
+	elseif t1.secs ~= t2.secs
+	   then return(t1.secs < t2.secs)
+	elseif t1.millis ~= t2.millis
+	   then return(t1.millis < t2.millis)
+	else return(t1.micros < t2.micros) end
+	end lt
+    
+le = proc (t1, t2: time) returns (bool)
+	return(t1 < t2  cor  t1 = t2)
+	end le
+    
+ge = proc (t1, t2: time) returns (bool)
+	return(t2 <= t1)
+	end ge
+    
+gt = proc (t1, t2: time) returns (bool)
+	return(t2 < t1)
+	end gt
+    
+% string must have form "days:hours:mins:secs.fraction"
+% although leading zero fields need not be present.
+    
+parse = proc (s: str) returns (time) signals (bad_format, overflow)
+	ai = array[int]
+	begin
+	a: ai := ai$predict(1, 6)
+	while true do
+		i: int := str$indexc(':', s)
+		if i = 0
+		   then break end
+		ai$addh(a, int$parse(str$substr(s, 1, i - 1)))
+		s := str$rest(s, i + 1)
+		end
+	i: int := str$indexc('.', s)
+	if i > 0
+	   then ai$addh(a, int$parse(str$substr(s, 1, i - 1)))
+		s := str$rest(s, i + 1)
+	   else ai$addh(a, int$parse(s))
+		s := ""
+	   end
+	if ai$size(a) > 4
+	   then signal bad_format end
+	while ai$size(a) < 4 do
+		ai$addl(a, 0)
+		end
+	while (str$size(s)//3 ~= 0) do	% parsed in 3 char chunks.
+	    s := str$append(s, '0')
+	    end
+	while ~str$empty(s) do
+		ai$addh(a, int$parse(str$substr(s, 1, 3)))
+		if str$size(s) <= 3
+		   then break end
+		s := str$rest(s, 4)
+		end
+	while ai$size(a) < 6 do
+		ai$addh(a, 0)
+		end
+	ai$set_low(a, 1)
+	return(time$create(a[1], a[2], a[3], a[4], a[5], a[6]))
+	end except when overflow: signal overflow
+		   others: signal bad_format
+		   end
+	end parse
+    
+unparse = proc (t: time) returns (str)
+	return(format(t, 6))
+	end unparse
+    
+% returns time in seconds
+
+t2r = proc (t: cvt) returns (real) signals (overflow)
+	return(real$i2r(t.micros) / 1e6 +
+	       real$i2r(t.millis) / 1e3 +
+	       real$i2r(t.secs) +
+	       real$i2r(t.mins) * 60. +
+	       real$i2r(t.hours) * 3600. +
+	       real$i2r(t.days) * 86400.)
+	   resignal overflow
+	end t2r
+
+% returns  "days:hours:mins:secs.fraction" with leading zero
+% fields (above secs) suppressed; second arg indicates number
+% of fractional digits (truncated)
+    
+format = proc (t: cvt, frac_width: int) returns (str)
+	s: str
+	b: bool := false
+	if t.days > 0
+	   then s := str$append(int$unparse(t.days), ':')
+		b := true
+	   end
+	if b
+	   then s := str$append(s || str$rest(int$unparse(t.hours + 100), 2),
+				':')
+	elseif t.hours > 0
+	   then s := str$append(int$unparse(t.hours), ':')
+		b := true
+	end
+	if b
+	   then s := str$append(s || str$rest(int$unparse(t.mins + 100), 2),
+				':')
+	elseif t.mins > 0
+	   then s := str$append(int$unparse(t.mins), ':')
+		b := true
+	end
+	if b
+	   then s := s || str$rest(int$unparse(t.secs + 100), 2)
+	   else s := int$unparse(t.secs)
+	   end
+	if frac_width <= 0
+	   then return(s) end
+	frac: str := int$unparse(t.millis + 1000)
+	frac := frac || str$rest(int$unparse(t.micros + 1000), 2)
+	return(str$append(s, '.') || str$substr(frac, 2, frac_width))
+	end format
+    
+print = proc (t: time, pst: pstream)
+	pstream$text(pst, unparse(t))
+	end print
+    
+equal = proc (t1, t2: cvt) returns (bool)
+	begin
+	return(t1 = t2)
+	end
+	end equal
+    
+similar = proc (t1, t2: time) returns (bool)
+	return(t1 = t2)
+	end similar
+    
+copy = proc (t: time) returns (time)
+	return(t)
+	end copy
+    
+encode = proc (t: time, ist: istream) signals (not_possible(str))
+	str$encode(unparse(t), ist)
+	   resignal not_possible
+	end encode
+
+decode = proc (ist: istream) returns (time)
+		signals (end_of_file, not_possible(str))
+	return(parse(str$decode(ist)))
+	   resignal end_of_file, not_possible
+	   except when bad_format: signal not_possible("bad format") end
+	end decode
+
+_gcd = proc (t: cvt, tab: gcd_tab) returns (int)
+	return(rep$_gcd(t, tab))
+	end _gcd
+
+end time

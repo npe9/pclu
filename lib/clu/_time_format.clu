@@ -1,0 +1,8 @@
+% Copyright Massachusetts Institute of Technology 1980, 1989
+
+_time_format = proc (sec, msec, usec: int) returns (string)
+	msec := msec + (usec + 499) / 1000
+	return(int$unparse(sec + msec / 1000) || "." ||
+	       string$rest(int$unparse(msec // 1000 + 1000), 2) ||
+	       " seconds")
+	end _time_format

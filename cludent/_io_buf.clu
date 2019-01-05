@@ -1,0 +1,12 @@
+% _io_buf = qproc () returns (_bytevec)
+% 	wvec	buf	{04200}
+% 	bisl	0774,buf,rr
+% 	movl	%bvecw,,020000,(rr)
+% 	return(rr)
+% 	end _io_buf
+
+
+_io_buf = proc () returns (_bytevec)
+    own buffer: _bytevec := _bytevec$create(8192)
+    return(buffer)
+    end _io_buf

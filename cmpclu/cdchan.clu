@@ -1,0 +1,190 @@
+%	CDCHAN	CLU
+% Copyright Massachusetts Institute of Technology 1982, 1989
+%	CLU Compiler Version 3: machine code channel
+
+# extend
+
+code_chan = cluster is open, write, get_chan, size, close
+
+rep	= record[chan:   _chan,
+		 count:  int,
+		 page:   _wordvec,
+		 index:  int,
+		 closed: bool,
+		 err:	 bool,
+		 why:	 str]
+
+pagesz = 2048
+bpagesz = 4 * pagesz
+
+vc = _vec[char]
+dc = _adv[char]
+
+own isfree: bool := false
+own free: _wordvec
+
+open = proc (fn: fname) returns (fname, cvt) signals (not_possible(str))
+	c: _chan
+	if fn.dir = "/dev"  cand  fn.name = "null"
+	   then c := _chan$nul()
+	   else c := _chan$open(fn, "random", 0)
+	   end resignal not_possible
+	page: _wordvec
+	if isfree
+	   then page := free
+		isfree := false
+	   else page := _wordvec$create(pagesz)
+	   end
+	return(c.name,
+	       rep${chan:   c,
+		    count:  0,
+		    page:   page,
+		    index:  0,
+		    closed: false,
+		    err:    false,
+		    why:    ""})
+	end open
+
+write = proc (cc: cvt, base: int, code, eblock: ai) returns (int)
+	count: int := cc.count
+	cc.count := count +
+		    ((ai$size(code) + 7) / 4 + (ai$size(eblock) + 1) / 2) * 4
+	if cc.index = pagesz
+	   then if ~cc.err
+		   then _chan$putw(cc.chan, cc.page, 1, bpagesz, false)
+			   except when not_possible (why: str):
+					cc.err := true
+					cc.why := why
+				  end
+		   end
+		cc.index := 0
+	   end
+	cc.index := cc.index + 1
+	cc.page[cc.index] := base
+	boutput(cc, code)
+	output(cc, eblock)
+	return(count)
+	end write
+
+boutput = proc (cc: rep, block: ai)
+	_event$defer()
+	v: vc := _cvt[ai, dc](block).vector
+	i: int := _cvt[ai, dc](block).start
+	z: int := ai$size(block)
+	p: _wordvec := cc.page
+	index: int := cc.index * 4
+	while z > 0 do
+		if index = bpagesz
+		   then if ~cc.err
+			   then _chan$putw(cc.chan, p, 1, bpagesz, false)
+				   except when not_possible (why: str):
+						cc.err := true
+						cc.why := why
+					  end
+			   end
+			index := 0
+		   end
+		len: int := int$min(z, bpagesz - index)
+		_bytevec$move_v(v, i,
+				_cvt[_wordvec, _bytevec](p), index + 1,
+				len)
+		z := z - len
+		index := index + len
+		i := i + len
+		end
+	_event$undefer()
+	while index // 4 ~= 0 do
+		index := index + 1
+		_wordvec$bstore(p, index, 0)
+		end
+	cc.index := index / 4
+	end boutput
+
+output = proc (cc: rep, block: ai)
+	if ai$empty(block)
+	   then return end
+	p: _wordvec := cc.page
+	index: int := cc.index
+	low: int := ai$low(block)
+	max: int := ai$high(block) - 1
+	for low in int$from_to_by(low, max, 2) do
+		if index = pagesz
+		   then if ~cc.err
+			   then _chan$putw(cc.chan, p, 1, bpagesz, false)
+				   except when not_possible (why: str):
+						cc.err := true
+						cc.why := why
+					  end
+			   end
+			index := 0
+		   end
+		index := index + 1
+		_wordvec$store2(p, index, block[low + 1], block[low])
+		end
+	if low ~= max
+	   then if index = pagesz
+		   then if ~cc.err
+			   then _chan$putw(cc.chan, p, 1, bpagesz, false)
+				   except when not_possible (why: str):
+						cc.err := true
+						cc.why := why
+					  end
+			   end
+			index := 0
+		   end
+		index := index + 1
+		_wordvec$store2(p, index, 0, ai$top(block))
+	   end
+	cc.index := index
+	end output
+
+get_chan = proc (cc: cvt) returns (_chan)
+	if cc.index > 0
+	   then if ~cc.err
+		   then _chan$putw(cc.chan, cc.page, 1, 4 * cc.index, false)
+			    except when not_possible (why: str):
+					 cc.err := true
+					 cc.why := why
+				   end
+		   end
+		cc.index := 0
+	   end
+	return(cc.chan)
+	end get_chan
+
+size = proc (cc: cvt) returns (int)
+	return(cc.count)
+	end size
+
+close = proc (cc: cvt) signals (not_possible(str))
+	if cc.closed
+	   then return end
+	if cc.index > 0  cand  ~cc.err
+	   then _chan$putw(cc.chan, cc.page, 1, 4 * cc.index, false)
+		    except when not_possible (why: str):
+				 cc.err := true
+				 cc.why := why
+			   end
+	   end
+	if cc.err
+	   then _chan$abort(cc.chan)
+	   else _chan$close(cc.chan)
+	   end except when not_possible (why: str):
+				if ~cc.err
+				   then cc.err := true
+					cc.why := why
+				   end
+		      when permanent:
+		      end
+	why: str := cc.why
+	cc.why := "channel is closed"
+	cc.closed := true
+	free := cc.page
+	isfree := true
+	if cc.err
+	   then signal not_possible(why)
+	   else cc.err := true
+	   end
+	end close
+
+end code_chan

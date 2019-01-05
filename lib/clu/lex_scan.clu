@@ -1,0 +1,109 @@
+% No Copyright.
+%
+% Lex_scan is a hairy procedure to parse lines of text into tokens.
+% Characters are divided into six catagories:
+%   Fill characters: separate tokens, but are otherwise ignored
+%   Separator characters: separate tokens, and are returned as tokens
+%			  themselves
+%   Begin/End quote: Beginning/End of a quoted section.  Inside of a quoted
+%		     section, all characters (including comment character)
+%		     are significant.  The character that ends a quote is
+%		     in the corresponding index from the one that began it.
+%   Comment character (one only): causes remainder of the string to be flushed
+%   Text characters: All characters not one of the above.
+%
+% Fill,Separator,Beginq and Comment characters should all be distinct.  Lex_scan
+% will probably not work if this is not true.  Elements of Endq may duplicate
+% those of beginq.
+%
+% Lex_scan returns an array[string].  Each string is a token; tokens from 
+% earlier in 's' appear to the bottom of the array.
+%  Failure is signaled if beginq and endq are of different sizes.
+%  Unterminated_Quote is signaled when there is no ending quote.
+%   It gives enough information to allow the caller to fool lex_scan
+%   into parsing the rest of the quote properly.
+
+lex_scan = proc ( s: string,
+		sep_chars,fill_chars,beginq,endq: string,
+		comment_char: char )
+	     returns ( array[string] )
+	     signals( unterminated_quote( array[string], char ) )
+    fill_st = 0
+    id_st = 1
+    sep_st = 2
+    quote_st = 3
+
+    if string$size(beginq) ~= string$size(endq) then
+       signal failure("Beginq and Endq must be of the same size")
+       end
+    ps: array[string] := array[string]$[]
+    state: int := sep_st
+    mark: int
+    i: int
+    end_quote,ch: char
+
+    for i in int$from_to(1, string$size( s ) ) do
+	ch := s[i]
+	if state = quote_st then
+	   if ch = end_quote
+	      then
+		   array[string]$addh(ps, string$substr(s, mark, i-mark) )
+		   array[string]$addh(ps,string$substr(s,i,1))
+		   state := sep_st
+	      end
+	      continue
+	   end
+	if ch = comment_char then break end
+
+	fillc: bool := string$indexc( ch, fill_chars ) ~= 0
+	sepc: bool := string$indexc( ch, sep_chars ) ~= 0
+	qix: int := string$indexc( ch, beginq )
+	bq: bool := qix ~= 0
+	if bq then end_quote := endq[qix] end
+	textc: bool := ~(fillc | sepc | bq)
+	
+	if state = sep_st then
+	   if textc then
+	      state := id_st
+	      mark := i
+	    elseif fillc then
+	      state := fill_st
+	    elseif bq then
+	      array[string]$addh( ps, string$substr(s, i, 1) )
+	      state := quote_st
+	      mark := i+1
+	    else
+		 array[string]$addh( ps, string$substr(s, i, 1) )
+	    end
+	 elseif state = fill_st then
+	   if textc then
+	      mark := i
+	      state := id_st
+	    elseif sepc then
+	      array[string]$addh(ps, string$substr(s, i, 1) )
+	      state := sep_st
+	    elseif bq then
+	      array[string]$addh( ps, string$substr(s, i, 1) )
+	      state := quote_st
+	      mark := i+1
+	    end
+	 elseif state = id_st cand ~textc then
+	   array[string]$addh(ps, string$substr(s, mark, i-mark) )
+	   if fillc then state := fill_st
+	    elseif sepc then array[string]$addh(ps, string$substr(s, i, 1))
+			     state := sep_st
+	    elseif bq then
+	      array[string]$addh( ps, string$substr(s, i, 1) )
+	      state := quote_st
+	      mark := i+1
+	    end
+	 end
+	end
+    if state = id_st cor state = quote_st then
+       array[string]$addh(ps, string$substr(s, mark, (i+1)-mark) )
+       end
+    if state = quote_st then
+       signal unterminated_quote(ps,beginq[string$indexc(end_quote,endq)])
+       end
+    return ( ps )
+    end lex_scan

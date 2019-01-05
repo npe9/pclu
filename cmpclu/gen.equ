@@ -1,0 +1,40 @@
+debug_expr = false
+debug_stmt = false
+debug_typespec = false
+debug_lineno = false
+debug_logit = true
+
+logit = compiler_logit
+
+% equate for "$"
+
+sep = "OP"
+
+% equates for parameter block generation
+
+pb = oneof[op: clusterop, a_cons: arraycons, apply: clutype, 
+	   ainfo: applyinfo, tinfo: typeinfo, selinfo: selectinfo,
+	   any_: expr, force_: typespec]
+
+selectinfo = record[name: name, fields: fieldspeclist]
+pblist = array[pb]
+
+% equates for constant generation
+
+cst = oneof[str:str, i:invoke]
+
+constlist = array[cst]
+
+mexprlist = sequence[mexpr]
+
+namelists = array[name]
+fieldlists = array[fieldspeclist]
+
+linelist = array[int]
+
+max_const_parms = 7
+
+% equates for g_tbl$g_field_tables
+
+static = 1
+dynamic = 2

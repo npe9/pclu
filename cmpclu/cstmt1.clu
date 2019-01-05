@@ -1,0 +1,356 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	CSTMT1 CLU
+%
+%	CLU Compiler Version 3: statement checker
+
+c_body = proc (e: c_env, b: body)
+	c_env$begin_scope(e)
+	c_env$equates(e, b.equates)
+	for s: stmt in stmtlist$elements(b.stmts) do
+		c_stmt(e, s)
+		end
+	c_env$end_scope(e)
+	end c_body
+
+c_stmt = proc (e: c_env, s: stmt)
+	e.line := s.line
+	tagcase s.abs
+	   tag decl (sa: decl):
+		c_decl(e, sa)
+	   tag declinit (sa: declinit):
+		c_declinit(e, sa, norm_vars_)
+	   tag assn (sa: assn):
+		c_assn(e, sa)
+	   tag sugarassn (sa: sugarassn):
+		c_sugarassn(e, s, sa)
+	   tag invoke (sa: invoke):
+		c_invoke(e, sa, eval_first)
+	   tag while_ (sa: whilestmt):
+		c_while(e, sa)
+	   tag for_ (sa: forstmt):
+		c_for(e, sa)
+	   tag if_ (sa: ifstmt):
+		c_if(e, sa)
+	   tag tag_ (sa: tagstmt):
+		c_tagcase(e, sa)
+	   tag return_ (sa: exprlist):
+		s.abs := stmtabs$make_return_(c_return(e, sa))
+	   tag yield_ (sa: exprlist):
+		s.abs := stmtabs$make_yield_(c_yield(e, sa))
+	   tag signal_ (sa: condition):
+		c_signal(e, sa)
+	   tag exit_ (sa: condition):
+		c_exit(e, sa)
+	   tag break_:
+		if c_env$break_illegal(e)
+		   then c_env$err1(e, "break statement not inside a loop") end
+	   tag continue_:
+		if c_env$continue_illegal(e)
+		   then c_env$err1(e, "continue statement not inside a loop")
+		   end
+	   tag body (sa: body):
+		c_body(e, sa)
+	   tag except_ (sa: exceptstmt):
+		c_except(e, sa)
+	   tag resignal_ (sa: resignalstmt):
+		c_resignal(e, sa)
+	   tag force_ (sa: forcestmt):
+		c_forcestmt(e, sa)
+	   tag bad:
+	   end
+	end c_stmt
+
+c_decl = proc (e: c_env, d: decl)
+	t: typespec := c_type(e, d.type_)
+	d.type_ := t
+	for i: idn in idnlist$elements(d.idns) do
+		c_env$add_var(e, i, t)
+		end
+	end c_decl
+
+c_declinit = proc (e: c_env, di: declinit, own_vars: bool)
+	decls: decllist := di.decls
+	if own_vars
+	   then c_own_decls(e, decls)
+	   else c_decllist(e, decls)
+	   end
+	x: expr := di.expr
+	types: typelist
+	tagcase x.abs
+	   tag invoke (xa: invoke):
+		types := c_invoke(e, xa, eval_first)
+	   others:
+		if decllist$size(decls) > 1  cor
+		   idnlist$size(decllist$bottom(decls).idns) > 1
+		   then c_env$err1(e,
+				 "right side of multiple assignment not an invocation")
+		   end
+		t: typespec := c_expr(e, x)
+		types := typelist$e2s(t)
+	   end
+	di.anys := c_decl_assn(e, decls, types)
+	if decllist$size(di.anys) = 1  cand  typelist$size(types) = 1
+	   then	di.expr := expr$create(exprabs$make_any_(x), e.any_type)
+		x.typespec := typelist$bottom(types)
+		di.anys := decllist$new()
+	   end
+	end c_declinit
+
+c_own_decls = proc (e: c_env, decls: decllist)
+	for d: decl in decllist$elements(decls) do
+		t: typespec := c_type(e, d.type_)
+		d.type_ := t
+		for i: idn in idnlist$elements(d.idns) do
+			c_env$add_ownvar(e, i, t)
+			end
+		end
+	end c_own_decls
+
+c_decllist = proc (e: c_env, decls: decllist)
+	for d: decl in decllist$elements(decls) do
+		c_decl(e, d)
+		end
+	end c_decllist
+
+c_decl_assn = proc (e: c_env, decls: decllist, types: typelist)
+						returns (decllist)
+	anys: decllist := decllist$new()
+	if c_return_type(types) then return(anys) end
+	j: int := 1
+	h: int := typelist$size(types)
+	for d: decl in decllist$elements(decls) do
+	   t: typespec := d.type_
+	   for i: idn in idnlist$elements(d.idns) do
+		if j > h
+		   then	c_env$err(e, qs$["more variables than values (",
+					 int$unparse(h), ") for assignment"])
+			return(anys)
+		   end
+		if typespec$mismatch(t, types[j])
+		   then c_env$errt(e, qs$["object assigned to '", i.str, "'"],
+					t, types[j])
+		   end
+		   except when anyize:
+				anys := decllist$addh(anys, decl${idns:  idnlist$e2s(i),
+								  type_: types[j]})
+			  end
+		j := j + 1
+		end
+	   end
+	if j <= h
+	   then c_env$err(e, qs$["more values (", int$unparse(h),
+				 ") than variables for assignment"])
+	   end
+	return(anys)
+	end c_decl_assn
+
+c_assn = proc (e: c_env, sgn: assn)
+	vars: idnlist := sgn.left
+	vals: exprlist := sgn.right
+	if idnlist$size(vars) > 1  cand  exprlist$size(vals) = 1
+	   then	tagcase exprlist$bottom(vals).abs
+		   tag invoke (xa: invoke):
+			sgn.anys := c_mult_assn(e, vars, c_invoke(e, xa, eval_first))
+			return
+		   others:
+			c_variables(e, vars)
+			c_env$err1(e, "right side of multiple assignment not an invocation")
+			c_expr(e, exprlist$bottom(vals))
+			return
+		   end
+	   end
+	c_variables(e, vars)
+	for x: expr in exprlist$elements(vals) do
+		c_expr(e, x)
+		end
+	if idnlist$size(vars) ~= exprlist$size(vals)
+	   then c_env$err(e, qs$[int$unparse(idnlist$size(vars)),
+				 " variables to assign to, ",
+				 int$unparse(exprlist$size(vals)),
+				 " values to assign"])
+		return
+	   end
+	for i: int in idnlist$indexes(vars) do
+	    tagcase vars[i].kind
+	       tag var, ownvar (k: typespec):
+		    if typespec$mismatch(k, vals[i].typespec)
+		       then c_env$errt(e, qs$["object assigned to '",
+						vars[i].str, "'"],
+					k, vals[i].typespec)
+		       end
+		       except when anyize:
+				     x: expr := expr$create(exprabs$make_any_(vals[i]),
+							    e.any_type)
+				     sgn.right := exprlist$replace(sgn.right, i, x)
+			      end
+	       others:
+	       end
+	    end
+	end c_assn
+
+c_mult_assn = proc (e: c_env, idns: idnlist, types: typelist)
+						returns (decllist)
+	anys: decllist := decllist$new()
+	c_variables(e, idns)
+	if c_return_type(types) then return(anys) end
+	if idnlist$size(idns) ~= typelist$size(types)
+	   then	c_env$err(e, qs$[int$unparse(idnlist$size(idns)),
+				 " variables to assign to, ",
+				 int$unparse(typelist$size(types)),
+				 " values to assign"])
+		return(anys)
+	   end
+	for i: int in idnlist$indexes(idns) do
+	   tagcase idns[i].kind
+	      tag var, ownvar (k: typespec):
+		  if typespec$mismatch(k, types[i])
+		     then c_env$errt(e, qs$["object assigned to '",
+							idns[i].str, "'"],
+					k, types[i])
+		     end
+		     except when anyize:
+				  anys := decllist$addh(anys, decl${idns:  idnlist$e2s(idns[i]),
+								    type_: types[i]})
+			    end
+	      others:
+	      end
+	   end
+	return(anys)
+	end c_mult_assn
+
+c_variables = proc (e: c_env, idns: idnlist)
+	for i: idn in idnlist$elements(idns) do
+		tagcase i.kind
+		   tag var, ownvar: 
+		   others: c_env$err(e, qs$["identifier '", i.str, "' not a variable"])
+		   end
+		end
+	end c_variables
+
+c_return_type = proc (types: typelist) returns (bool)
+	if typelist$size(types) ~= 1
+	   then return(false) end
+	tagcase typelist$bottom(types).abs
+	   tag other (ta: othertype):
+		tagcase ta
+		   tag return_: return(true)
+		   others:      
+		   end
+	   tag unknown:
+		return(true)
+	   others:
+	   end
+	return(false)
+	end c_return_type
+
+c_sugarassn = proc (e: c_env, s: stmt, sa: sugarassn)
+	x: expr := sa.left
+	args: exprlist
+	op: name
+	tagcase x.abs
+	   tag get (xa: get_sugar):
+		args := exprlist$[xa.object, sa.right]
+		op := "set_" || xa.sel
+	   tag fetch (xa: fetch_sugar):
+		args := exprlist$[xa.object, xa.index, sa.right]
+		op := "store"
+	   tag ref (xa: bracketref):
+		args := c_idn_store(e, xa, sa.right)
+		op := "store"
+	   others:
+		c_env$err1(e, "illegal form of assignment")
+		return
+	   end
+	t: typespec := c_expr(e, exprlist$bottom(args))
+	cop: clusterop := clusterop${type_: t,
+				     name:  op,
+				     parms: exprlist$new()}
+	inv: invoke := invoke${apply: expr$create(exprabs$make_op(cop), e.unknown_type),
+			       args:  args}
+	s.abs := stmtabs$make_invoke(inv)
+	c_invoke(e, inv, first_done)
+	end c_sugarassn
+
+c_idn_store = proc (e: c_env, ref: bracketref, x3: expr) returns (exprlist)
+	x1: expr := expr$create(exprabs$make_idn(ref.idn), e.unknown_type)
+	parms: exprlist := ref.parms
+	x2: expr := exprlist$bottom(parms)
+	if exprlist$size(parms) > 1
+	   then c_env$err(e, qs$[int$unparse(exprlist$size(parms)),
+		 " expressions in square brackets of store sugar, 1 expected"])
+	   end
+	return(exprlist$[x1, x2, x3])
+	end c_idn_store
+
+c_while = proc (e: c_env, ws: whilestmt)
+	if typespec$mismatch(e.bool_type, c_expr(e, ws.test))
+	   then c_env$errt(e, qs$["result of loop test"],
+					e.bool_type, ws.test.typespec)
+	   end
+	c_env$begin_while(e)
+	c_body(e, ws.body)
+	c_env$end_loop(e)
+	end c_while
+
+c_for = proc (e: c_env, fs: forstmt)
+	c_env$begin_scope(e)
+	fvars: forvars := fs.vars
+	tagcase fvars
+	   tag new (vars: decllist):
+		c_decllist(e, vars)
+	   others:
+	   end
+	inv: invoke := fs.call
+	it: typespec := c_expr(e, inv.apply)
+	args: exprlist := inv.args
+	for arg: expr in exprlist$elements(args) do
+		c_expr(e, arg)
+		end
+	tagcase it.abs
+	   tag apply (ita: applytype):
+		if ita.gen ~= e.iter_
+		   then c_env$err(e, qs$["invocation of non-iterator: ",
+					 get_inv_print(inv)])
+		    end
+		tagcase fvars
+		   tag new (vars: decllist):
+			fs.anys := c_decl_assn(e, vars, c_call(e, ita, inv))
+		   tag old (vars: idnlist):
+			fs.anys := c_mult_assn(e, vars, c_call(e, ita, inv))
+		   end
+	   tag other, unknown:
+		c_unknown_assn(e, fvars)
+	   others:
+		c_env$err(e, qs$["invocation of non-iterator: ",
+				 get_inv_print(inv)])
+		c_unknown_assn(e, fvars)
+	   end
+	c_env$begin_for(e)
+	c_body(e, fs.body)
+	fs.xent := c_env$end_loop(e)
+	c_env$end_scope(e)
+	end c_for
+
+c_unknown_assn = proc (e: c_env, vars: forvars)
+	tagcase vars
+	   tag old (idns: idnlist):
+		c_variables(e, idns)
+	   others:
+	   end
+	end c_unknown_assn
+
+c_if = proc (e: c_env, ifs: ifstmt)
+	for arm: ifarm in ifarmlist$elements(ifs.arms) do
+		e.line := arm.line
+		if typespec$mismatch(e.bool_type, c_expr(e, arm.test))
+		   then c_env$errt(e, qs$["result of conditional test"],
+					e.bool_type, arm.test.typespec)
+		   end
+		c_body(e, arm.body)
+		end
+	tagcase ifs.else_
+	   tag body (mb: body):
+		c_body(e, mb)
+	   others:
+	   end
+	end c_if

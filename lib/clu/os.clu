@@ -1,0 +1,8 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+_operating_system = proc () returns (string)
+    return("UNIX")
+    end _operating_system
+
+_host_system = proc () returns (string)
+    return(_host_name())
+    end _host_system

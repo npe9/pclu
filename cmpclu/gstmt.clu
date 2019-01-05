@@ -1,0 +1,1135 @@
+
+%  Copyright    Massachusetts Institute of Technology     1990,1991
+
+% omit decls, only do assignment part of declinits
+% similarly for tag, for, except
+
+g_stmt = proc (e: g_env, s: stmt)
+    if debug_lineno then
+       logit(800, "\n/**** " || int$unparse(s.line) || " ****/\n") end
+    e.lineno := s.line
+    if debug_stmt then stmt_print(s) end
+    tv$enter()
+    tagcase s.abs
+       tag decl (sa: decl):
+	   %	   g_decl(e, sa)
+	   if dbg_info$active() then
+	      g_decl_debug(e, sa)
+	      end
+       tag declinit (sa: declinit):
+	   g_declinit(e, sa)
+       tag assn (sa: assn):
+	   g_assn (e, sa)
+       tag invoke (sa: invoke):
+	   g_sinvoke(e, sa)
+       tag while_ (sa: whilestmt):
+	   g_while(e, sa)
+       tag for_ (sa: forstmt):
+	   g_for(e, sa)
+       tag if_ (sa: ifstmt):
+	   g_if (e, sa)
+       tag tag_ (sa: tagstmt):
+	   g_tagcase(e, sa)
+       tag return_ (sa: exprlist):
+	   g_return(e, sa)
+       tag yield_ (sa: exprlist):
+	   g_yield(e, sa)
+       tag signal_ (sa: condition):
+	   g_signal(e, sa)
+       tag exit_ (sa: condition):
+	   g_exit(e, sa)
+       tag break_:
+	   g_break(e)
+       tag continue_:
+	   g_continue(e)
+       tag body (sa: body):
+	   g_beginend(e, sa)
+       tag except_ (sa: exceptstmt):
+	   g_except(e, sa)
+       tag resignal_ (sa: resignalstmt):
+	   g_resignal(e, sa)
+       others:
+       end
+    tv$leave()
+    g_env$newline(e)
+    end g_stmt
+
+g_decllist = proc (e: g_env, decls: decllist)
+
+    for each_d: decl in decllist$elements(decls) do
+	g_decl(e, each_d)
+	g_env$newline(e)
+	end
+    end g_decllist
+
+g_decl = proc (e: g_env, stmnt: decl)
+
+    for each_i: idn in idnlist$elements(stmnt.idns) do
+	g_decl_typespec(e, stmnt.type_, idnlit(each_i))
+	end
+    end g_decl
+
+g_decl_debug = proc (e: g_env, stmnt: decl)
+
+    for each_i: idn in idnlist$elements(stmnt.idns) do
+	g_idn_plain(e, each_i)
+	g_env$putl(e, ".num = UNINIT;")
+	end
+    end g_decl_debug
+
+g_declinit = proc (e: g_env, stmnt: declinit)
+
+    %% stmnt.idns : stmnt.type_ := stmnt.expr
+
+    g_env$puts(e, "{")
+    g_env$indent(e)
+    g_env$newline(e)
+    g_env$puts(e, "{")
+    g_expr0(e, stmnt.expr)
+    el: exprlist := g_expr1(e, stmnt.expr)
+    i: int := 1
+    for d:decl in decllist$elements(stmnt.decls) do
+	for each_idn:idn in idnlist$elements(d.idns) do
+	    g_c_assn(e, each_idn, el[i])
+	    % g_idn(e, each_idn)
+	    % g_env$puts(e, " = ")
+	    % g_expr2(e, el[i])
+	    % g_env$putl(e, ";")
+	    i := i + 1
+	    end % for
+	end % for
+    g_anys(e, stmnt.anys)
+    g_env$putl(e, "}")
+    g_env$putl(e, "}")
+    g_env$outdent(e)
+    end g_declinit
+
+g_assn = proc (e: g_env, stmnt: assn)
+
+    %% stmnt.left := stmnt.right
+
+    g_env$putl(e, "{")
+
+    %   iterate over elements of right hand side, generating temp defns
+    for each_e: expr in exprlist$elements(stmnt.right) do
+	g_expr0(e, each_e)
+	end % for
+
+    %   iterate over lhs looking for idns that will get clobbered by
+    %		assignment statements and declare appropriate temps,
+    %		to save the values, and save a list of the temps for
+    %		later use
+    rsize: int := exprlist$size(stmnt.right)
+    altlist: mexprlist := mexprlist$new()
+    for ind: int in idnlist$indexes(stmnt.left) do
+	for ind2: int in int$from_to(ind, rsize) do
+	    tagcase stmnt.right[ind2].abs
+	       tag idn (i:idn):
+		   if idn$similar (stmnt.left[ind], i) then
+		      %logit("g_assn: SWAPPING")
+		      et: typespec := stmnt.right[ind2].typespec
+		      tv$decl_next(e, et)
+		      tvi: expr := tv$idn_next(et)
+		      altlist := mexprlist$addh(altlist, mexpr$make_one(tvi))
+		      else
+			   altlist := mexprlist$addh(altlist, mexpr$make_none(nil))
+		      end % if
+	       others:
+		   altlist := mexprlist$addh(altlist, mexpr$make_none(nil))
+	       end % tag
+	    end % for
+	end % for
+
+    for ind: int in mexprlist$indexes(altlist) do
+	if mexpr$is_one(altlist[ind]) then
+	   % g_expr2(e, mexpr$value_one(altlist[ind]))
+	   g_expr_plain(e, mexpr$value_one(altlist[ind]))
+	   g_env$puts(e, " = ")
+	   ex: expr := stmnt.right[ind]
+	   tagcase ex.abs
+	      tag idn (i:idn):
+		  g_idn_plain(e, i)
+	      others:
+	      end
+	   g_env$putl(e, ";")
+	   end
+	end
+
+    %   iterate over elements of right hand side, accumulating terminal exprs
+    %	(1 per result value) and producing newright, 
+    %   a list of terminal expressions
+    newright: exprlist := exprlist$new()
+    for each_e: expr in exprlist$elements(stmnt.right) do
+	newright := seq_extend[expr](newright, g_expr1(e, each_e))
+	end % for
+
+    i: int := 1
+    for each_idn: idn in idnlist$elements(stmnt.left) do
+	% g_idn(e, each_idn)
+	% g_env$puts(e, " = ")
+	tagcase altlist[i]
+	   tag none:
+	       % g_expr2(e, newright[i])
+	       g_c_assn(e, each_idn, newright[i])
+	   tag one:
+	       % g_expr2(e, mexpr$value_one(altlist[i]))
+	       g_c_assn(e, each_idn, mexpr$value_one(altlist[i]))
+	   end
+	   except when bounds:
+		       % g_expr2(e, newright[i])
+		       g_c_assn(e, each_idn, newright[i])
+		  end
+	i := i + 1
+	end % for
+       except when bounds: end
+    g_anys(e, stmnt.anys)
+    g_env$putl(e, "}")
+    end g_assn
+
+g_sinvoke = proc (e: g_env, stmnt: invoke)
+    g_env$putl(e, "{")
+    exp: expr := expr$create(exprabs$make_invoke(stmnt), stmnt.apply.typespec)
+    g_expr0(e, exp)
+    g_einvoke(e, stmnt)
+    g_env$putl(e, "}")
+    end g_sinvoke
+
+g_temp_decl = proc (e: g_env, n: int)
+    return
+    end g_temp_decl
+
+g_while = proc (e: g_env, stmnt: whilestmt)
+
+    %% WHILE ( stmnt.test ) DO
+    %%	  stmnt.body
+    %% END
+
+    loop_context$enter_while()
+    g_env$putl(e, "for (;;) {")
+    g_env$indent(e)
+    g_expr0(e, stmnt.test)
+    el: exprlist := g_expr1(e, stmnt.test)
+    g_env$puts(e, "if (")
+    g_expr2(e, exprlist$bottom(el))
+    g_env$putl(e, " != true) { break; }")
+    g_body(e, stmnt.body)
+    g_env$putl(e, "}")
+    n: int := loop_context$get_current_while_count()
+    g_env$putl(e, "end_while_" || int$unparse(n) || ":;")
+    g_env$ensure_newline(e)
+    g_env$outdent(e)
+    loop_context$leave()
+    end g_while
+
+g_for = proc (e: g_env, stmnt: forstmt)
+
+    if g_inline_iter(e, stmnt) then return end
+    g_env$putl(e, "{")
+    g_env$indent(e)
+    for each_arg: expr in exprlist$elements(stmnt.call.args) do
+	g_expr_arg0(e, each_arg)
+	end % for
+    if ~g_qinv_test(stmnt.call.apply) then
+       g_inv0(e, stmnt.call.apply)
+       end
+
+    % generate the call similarly to g_einvoke
+
+    el: exprlist := exprlist$new()
+    for each_arg: expr in exprlist$elements(stmnt.call.args) do
+	new_el: exprlist := g_expr_arg1(e, each_arg)
+	el := seq_extend[expr](el, new_el)
+	end % for
+
+    % compute proctype to be invoked
+
+    quick: bool := g_qinv_test(stmnt.call.apply)
+    proc_id: expr := stmnt.call.apply
+
+    % generate the actual invocation
+    ibname: name := ib$next_name()
+    iterp: bool := current_apply$is_iter()
+    if iterp then g_locals(e) g_env$putl(e, "body_ctrl_req = false;") end
+    if quick
+       then
+	    g_qiinv(e, proc_id, el, ibname)
+       else
+	    gen_proc_id: expr := exprlist$bottom(g_inv1(e, stmnt.call.apply))
+	    g_inv(e, gen_proc_id, proc_id)
+
+	    for each_arg: expr in exprlist$elements(el) do
+		g_expr_arg(e, each_arg)
+		g_env$puts(e, ", ")
+		end % for
+	    if ib$bodies()
+	       then
+		    g_env$putl(e, ibname || ", locals, iecode);")
+	       else
+		    g_env$putl(e, ibname || ", &locals, &locals.ecode2);")
+	       end
+       end
+
+    % Generate code to process end of iterator invocation:
+    %	i.e., the end of the for statement (bodies generated elsewhere)
+
+    if ib$bodies() then
+
+       g_env$puts(e, "if (")
+       g_err(e)
+       g_env$putl(e, " != ERR_ok) {")
+
+       if ~iterp then % an ITERBODY of a PROC
+	  g_env$puts(e, "if (")
+	  g_err(e)
+	  g_env$putl(e, " == ERR_iterbodyreturn) {signal(ERR_iterbodyreturn);}")
+	  g_env$puts(e, "if (")
+	  g_err(e)
+	  g_env$putl(e, " == ERR_iterbodysignal) {signal(ERR_iterbodysignal);}")
+	  % 7/1/93: added resignalling for break
+	  % 9/10/93: nope: convert break to ok here
+	  g_env$puts(e, "if (")
+	  g_err(e)
+	  g_env$puts(e, " == ERR_break) ")
+	  g_err(e)
+	  g_env$putl(e, " = ERR_ok;")
+	  g_env$puts(e, "if (")
+	  g_err(e)
+	  g_env$putl(e, " == ERR_iterbodyexit) ")
+	  g_err(e)
+	  g_env$putl(e, " = *iecode;")	% * new 2/26/90 (_a_f_n_)
+	  g_env$puts(e, "if (")
+	  g_err(e)
+	  g_env$putl(e, " != ERR_ok) ")
+	  g_env$putl(e, "goto " || ex$get_current_ex_label() || ";")
+	  g_env$putl(e, "}")
+	  else          % an ITERBODY of an ITER
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$putl(e, " == ERR_iterbodyreturn) {signal(ERR_iterbodyreturn);}")
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$putl(e, " == ERR_iterbodysignal) {signal(ERR_iterbodysignal);}")
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$putl(e, " == ERR_iterbodyexit) {signal(ERR_iterbodyexit);}")
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$putl(e, " == ERR_iteriterbodyreturn) {signal(ERR_iteriterbodyreturn);}")
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$putl(e, " == ERR_iteriterbodysignal) {signal(ERR_iteriterbodysignal);}")
+	       % 7/1/93: added resignalling for break % 9/8/93 as long as no bcr
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$puts(e, " == ERR_break && !")
+	       g_locals(e)
+	       g_env$putl(e, "body_ctrl_req) {signal(ERR_break);}")
+	       % 3/3/94: added resignalling for iibe as long as no bcr
+	       % 	this fix supersedes 2/7/94 fix
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$puts(e, " == ERR_iteriterbodyexit && !")
+	       g_locals(e)
+	       g_env$putl(e, "body_ctrl_req) {signal(ERR_iteriterbodyexit);}")
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$puts(e, " == ERR_break) ")
+	       g_err(e)
+	       g_env$putl(e, " = ERR_ok;")
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$putl(e, " == ERR_iteriterbodyexit) ")
+	       g_err(e)
+	       g_env$putl(e, " = *iecode;")	% * new 2/26/90 (_a_f_n_)
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$putl(e, " != ERR_ok) ")
+	       g_env$putl(e, "goto " || ex$get_current_ex_label() || ";")
+	       g_env$putl(e, "}")
+	  end
+       else	% (TOP-LEVEL) ITER OR PROC
+	    if iterp then % ITER
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$putl(e, " == ERR_iterbodyreturn) {signal(ERR_iterbodyreturn);}")
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       % added code to move locals.ecode2 to iecode 6/5/90
+	       g_env$putl(e, " == ERR_iterbodysignal) {")
+	       g_env$indent(e)
+	       g_env$putl(e, "*iecode = locals.ecode2; signal(ERR_iterbodysignal);}")
+	       g_env$outdent(e)
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$putl(e, " == ERR_iterbodyexit) {")
+	       g_env$indent(e)
+	       % added code to move locals.ecode2 to iecode 6/5/90
+	       g_env$putl(e, "*iecode = locals.ecode2; signal(ERR_iterbodyexit);}")
+	       g_env$outdent(e)
+
+	       % preserved behavior in case this a body of this iter caused
+	       % signal/return/exit - otherwise just propagate it 8/17/90
+	       %if bcr
+	       %clear bcr
+	       g_env$puts(e, "if (")
+	       g_locals(e)
+	       g_env$putl(e, "body_ctrl_req == true) {")
+	       g_env$indent(e)
+	       g_locals(e)
+	       g_env$putl(e, "body_ctrl_req = false;")
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$putl(e, " == ERR_iteriterbodyreturn) {signal(ERR_ok);}")
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       % formerly *iecode 6/5/90
+	       g_env$putl(e, " == ERR_iteriterbodysignal) {signal(locals.ecode2);}")
+	       % 7/1/93: added break to ok conversion
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$puts(e, " == ERR_break) ")
+	       g_err(e)
+	       g_env$putl(e, " = ERR_ok;")   % 6/5/90 formerly *iecode
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$puts(e, " == ERR_iteriterbodyexit) ")
+	       g_err(e)
+	       g_env$putl(e, " = locals.ecode2;")   % 6/5/90 formerly *iecode
+	       g_env$putl(e, "}")
+	       g_env$outdent(e)
+	       %else
+	       %just propagate
+	       g_env$putl(e, "else {")
+	       g_env$indent(e)
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$putl(e, " == ERR_iteriterbodyreturn) {signal(ERR_iteriterbodyreturn);}")
+	       % 7/1/93: added resignalling of break
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$putl(e, " == ERR_break) {signal(ERR_break);}")
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$putl(e, " == ERR_iteriterbodysignal) {")
+	       % added propagation of ecode2 to iecode 6/24/93
+	       g_env$putl(e, "      *iecode = locals.ecode2; signal(ERR_iteriterbodysignal);}")
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$putl(e, " == ERR_iteriterbodyexit) {")
+	       % added propagation of ecode2 to iecode 6/24/93
+	       g_env$puts(e, "      *iecode = locals.ecode2; signal(ERR_iteriterbodyexit);}")
+	       g_env$putl(e, "}")
+	       g_env$outdent(e)
+	       %end
+	       g_env$puts(e, "if (")
+	       g_err(e)
+	       g_env$putl(e, " != ERR_ok) goto "|| ex$get_current_ex_label()||";")
+	       else % PROC
+		    g_env$puts(e, "if (")
+		    g_err(e)
+		    g_env$putl(e, " == ERR_iterbodyreturn) {")
+		    count: int := current_apply$get_val_count()
+		    for i: int in int$from_to(1, count) do
+			g_env$puts(e, "ret_" || int$unparse(i) || "->num = ")
+			g_env$putl(e, "elist[" || int$unparse(i-1) || "].num;")
+			% .ref new as of 2/27/90
+			% ref to num 6/26/90
+			end % for
+		    g_env$putl(e, "signal(ERR_ok);}")
+		    g_env$puts(e, "if (")
+		    g_err(e)
+		    g_env$putl(e, " == ERR_iterbodysignal) {signal(locals.ecode2);}")
+		    % 7/1/93: added break to ok conversion
+		    g_env$puts(e, "if (")
+		    g_err(e)
+		    g_env$puts(e, " == ERR_break) ")
+		    g_err(e)
+		    g_env$putl(e, " = ERR_ok;")
+		    g_env$puts(e, "if (")
+		    g_err(e)
+		    g_env$puts(e, " == ERR_iterbodyexit) ")
+		    g_err(e)
+		    g_env$putl(e, " = locals.ecode2;")
+		    g_env$puts(e, "if (")
+		    g_err(e)
+		    g_env$putl(e, " != ERR_ok) goto "||
+				  ex$get_current_ex_label()||";")
+	       end
+       end
+    g_env$putl(e, "}")
+    g_env$outdent(e)
+
+    g_anys(e, stmnt.anys)
+    g_env$newline(e)
+
+    end g_for
+
+g_if = proc (e: g_env, stmnt: ifstmt)
+
+    %%  IF ( stmnt.arms[1].test ) THEN
+    %%      stmnt.arms[1].body
+    %%  ELSEIF ( stmnt.arms[2].test ) THEN
+    %%      stmnt.arms[2].body
+    %%   :
+    %%  ELSEIF ( stmnt.arms[n].test ) THEN
+    %%	   stmnt.arms[n].body
+    %%  ELSE
+    %%  	   stmnt.else_.body
+    %%  END
+
+    g_env$putl(e, "{")
+    g_expr0(e, stmnt.arms[1].test)
+    el: exprlist := g_expr1(e, stmnt.arms[1].test)
+    g_env$puts(e, "if (")
+    g_expr2(e, exprlist$bottom(el))
+    g_env$putl(e, " == true) {")
+    g_env$indent(e)
+    g_body(e, stmnt.arms[1].body)
+    g_env$putl(e, "}")
+    g_env$outdent(e)
+    for i: int in int$from_to(2, ifarmlist$size(stmnt.arms)) do
+        g_env$putl(e, "else {")
+	g_expr0(e, stmnt.arms[i].test)
+	el := g_expr1(e, stmnt.arms[i].test)
+        g_env$puts(e, "if (")
+        g_expr2(e, exprlist$bottom(el))
+        g_env$putl(e, " == true) {")
+        g_env$indent(e)
+        g_body(e, stmnt.arms[i].body)
+        g_env$putl(e, "}")
+        g_env$outdent(e)
+        end
+    if mbody$is_body(stmnt.else_)
+       then g_env$newline(e)
+	    g_env$putl(e, "else {")
+	    g_env$indent(e)
+	    g_body(e, mbody$value_body(stmnt.else_))
+	    g_env$puts(e, "}")
+	    g_env$outdent(e)
+       end
+    g_env$indent(e)
+    for i:int in int$from_to(1, ifarmlist$size(stmnt.arms)) do
+	g_env$puts(e, "}") end
+    g_env$putl(e, "/* end if */")
+    g_env$ensure_newline(e)
+    g_env$outdent(e)
+    end g_if
+
+g_tagcase = proc (e: g_env, stmnt: tagstmt)
+
+    % First I did this via switch and case statements
+    % Second I redid it via if statements, because case labels in C must
+    %	be constants and for awhile I thought the tags in CLU were not
+    %	constants
+    % Third, I could go back to switch/case statements or continue on this
+    %	path, but I need to decide how oneofs are represented in C:
+    %	? a struct of a tag and a union of values as in mercury?
+    %	and generate tags and tag fields wherever appropriate.
+    %
+    %% TAGCASE stmnt.obj
+    %%	   TAG stmnt.arms[1].tags ( stmnt.arms[1].var ) :
+    %%		stmnt.arms[1].body
+    %%	    :
+    %%     OTHERS:
+    %%		stmnt.others_.body
+    %% END
+    % Note: the parser doesn't eliminate the tagcase sugar (enabled by #extend)
+    % so it is possible that stmnt.obj is not a oneof or variant.
+    % In either case, this statement is equivalent to the following:
+    %    % t is type_of(stmnt.obj)
+    %	 % tagij is stmnt.arms[i].tags[j]
+    %    IF t$is_tag11(stmnt.obj) COR ... COR t$is_tag1n(stmnt.obj) then
+    %	     stmnt.arms[1].var := t$value_tag1(stmnt.obj)
+    %        stmnt.arms[1].body
+    %    ELSEIF t$is_tag21(stmnt.obj) COR...
+    %     :
+    %    ELSE
+    %	     stmnt.others_.body
+    %    END
+
+    if g_qtagcase(e, stmnt) then return end
+    begin
+
+	ty: typespec := stmnt.obj.typespec
+	is_clutype: bool := false
+	flist: fieldspeclist := fieldspeclist$new()
+	tagcase ty.abs
+	   tag select (ta: seltype):
+	       flist := ta.parms
+	   tag cluster_ (ct: clutype):
+	       is_clutype := true
+	   others:
+	       logit(801, "tagcase: not select!?")
+	       typespec_print(ty)
+	   end
+
+	g_env$putl(e, "{")
+	g_expr0(e, stmnt.obj)
+	for t: tagarm in tagarmlist$elements(stmnt.arms) do
+	    for nm: name in namelist$elements(t.tags) do
+		tv$decl_next(e, e.comp.bool_type)
+		end
+	    end
+	el0: exprlist := g_expr1(e, stmnt.obj)
+	tlist: exprlist := exprlist$new()
+	for t: tagarm in tagarmlist$elements(stmnt.arms) do
+	    for nm: name in namelist$elements(t.tags) do
+		junk: string := ""
+		ind: int := 0
+		if ~is_clutype then
+		   junk, ind := field_index("is_" || nm, flist)
+		   end
+		g_err(e)
+		g_env$puts(e, " = ")
+		if is_clutype 
+		   then
+			g_typespec(e, stmnt.obj.typespec)
+			g_env$puts(e, sep || "is_" || nm || "(")
+		   else
+			g_term_typespec(e, stmnt.obj.typespec)
+			g_env$puts(e, sep || "is_" || int$unparse(ind) || "(")
+		   end
+		g_expr_arg(e, exprlist$bottom(el0))
+		g_env$puts(e, ", &")
+		next_idn: expr := tv$idn_next(e.comp.bool_type)
+		g_expr_arg(e, next_idn)
+		g_env$putl(e, ");")
+		tlist := exprlist$addh(tlist, next_idn)
+		g_env$puts(e, "if (")
+		g_err(e)
+		g_env$puts(e, " != ERR_ok) ")
+		g_env$putl(e, "goto " || ex$get_current_ex_label() || ";")
+		end
+	    end
+	tindex: int := 1
+	first: bool := true
+	for t: tagarm in tagarmlist$elements(stmnt.arms) do
+	    if first then
+	       g_env$puts(e, "if (")
+	       first := false
+	       else
+		    g_env$puts(e, "else if (")
+	       end
+	    nth: bool := false
+	    el2: exprlist := exprlist$new()
+	    for nm: name in namelist$elements(t.tags) do
+		%logit("tindex: " || int$unparse(tindex))
+		if nth then g_env$puts(e, " || ")
+		   else nth := true end
+		g_expr2(e, tlist[tindex])
+		el2 := exprlist$addh(el2, tlist[tindex])
+		g_env$puts(e, " == true")
+		tindex := tindex + 1
+		end % for
+	    g_env$putl(e, ")")
+	    g_env$indent(e)
+	    g_env$puts(e, "{")
+	    if mdecl$is_decl(t.var)
+	       then
+		    dl: decl :=  mdecl$value_decl(t.var)
+		    tv$decl_next(e, dl.type_)
+		    this_temp: expr := tv$idn_next(dl.type_)
+		    if ~is_clutype 
+		       then
+			    junk: str, ind: int := field_index
+						       ("is_" || namelist$bottom(t.tags), flist)
+			    g_err(e)
+			    g_env$puts(e, " = ")
+			    g_term_typespec(e, stmnt.obj.typespec)
+			    g_env$puts(e, sep || "value(")    % a small amount of cheating
+			    g_expr_arg(e, exprlist$bottom(el0))
+			    g_env$puts(e, ", &")
+			    g_expr_arg(e, this_temp)
+			    g_env$putl(e, ");")
+			    g_env$puts(e, "if (")
+			    g_err(e)
+			    g_env$puts(e, " != ERR_ok) ")
+			    g_env$putl(e, "goto " || ex$get_current_ex_label() || ";")
+		       else
+			    for index: int in namelist$indexes(t.tags) do
+				each_nm: name := t.tags[index]
+				each_expr: expr := el2[index]
+				g_env$puts(e, "if (")
+				g_expr2(e, each_expr)
+				g_env$putl(e, " == true) {")
+				g_env$indent(e)
+				g_err(e)
+				g_env$puts(e, " = ")
+				g_typespec(e, stmnt.obj.typespec)
+				g_env$puts(e, sep ||"value_" || namelist$bottom(t.tags)
+						|| "(")
+				g_expr_arg(e, exprlist$bottom(el0))
+				g_env$puts(e, ", &")
+				g_expr_arg(e, this_temp)
+				g_env$putl(e, ");")
+				g_env$puts(e, "if (")
+				g_err(e)
+				g_env$puts(e, " != ERR_ok) ")
+				g_env$putl(e, "goto " || ex$get_current_ex_label() || ";")
+				g_env$putl(e, "}")
+				g_env$outdent(e)
+				end
+		       end
+		    g_idn(e, idnlist$bottom(dl.idns))  % maybe more?
+		    g_env$puts(e, " = ")
+		    g_expr2(e, this_temp)
+		    g_env$putl(e, ";")
+	       end
+	    g_env$indent(e)
+	    g_env$newline(e)
+	    g_body(e, t.body)
+	    g_env$putl(e, "}")
+	    g_env$outdent(e)
+	    g_env$outdent(e)
+	    end
+	if mbody$is_body(stmnt.others_)
+	   then g_env$putl(e, "else {")
+		g_env$indent(e)
+		g_body(e, mbody$value_body(stmnt.others_))
+		g_env$outdent(e)
+		g_env$newline(e)
+		g_env$puts(e, "}")
+	   end
+	g_env$ensure_newline(e)
+	g_env$putl(e, "}")
+	end
+       except when bounds: end
+    end g_tagcase
+
+g_return = proc (e: g_env, exp: exprlist)
+
+    %% RETURN ( exp )
+
+    g_env$putl(e, "{")
+    if ib$bodies()
+       then
+	    iterp: bool := current_apply$is_iter()
+	    if iterp then
+	       % an iter's iterbody
+	       g_locals(e)
+	       g_env$putl(e, "body_ctrl_req = true;")
+	       g_env$putl(e, "{signal(ERR_iteriterbodyreturn);}")
+	       else
+		    % a proc's iterbody
+		    i: int := 0
+		    for each_e: expr in exprlist$elements(exp) do
+			g_env$putl(e, "{")
+			g_expr0(e, each_e)
+			el: exprlist := g_expr1(e, each_e)
+			g_sig_assn(e, i, exprlist$bottom(el))
+			% g_env$puts(e, "elist["||int$unparse(i)||"].num = ")
+			% ref to num 6/26/90
+			% g_expr2(e, exprlist$bottom(el))
+			% g_env$putl(e, ";")
+			g_env$putl(e, "}")
+			i := i + 1
+			end % for
+		    g_env$putl(e, "*iecode = ERR_ok;")
+		    g_env$putl(e, "{signal(ERR_iterbodyreturn);}")
+	       end
+       else
+	    % not in an iterbody, i.e. a normal return
+	    if current_apply$is_iter() cand exprlist$size(exp) ~= 0 then
+	       logit(802, "Non-empty return list for an iterator?!") end
+	    i: int := 1
+	    for each_e: expr in exprlist$elements(exp) do
+		g_env$putl(e, "{")
+		g_expr0(e, each_e)
+		el: exprlist := g_expr1(e, each_e)
+		g_ret_assn(e, i, exprlist$bottom(el))
+		% g_env$puts(e, "ret_"||int$unparse(i)||"->num = ")
+		% g_expr2(e, exprlist$bottom(el))
+		% g_env$putl(e, ";")
+		g_env$putl(e, "}")
+		i := i + 1
+		end % for
+    	    g_env$puts(e, "{signal (ERR_ok);}")
+       end
+       except when bounds: end
+    g_env$putl(e, "}")
+    end g_return
+
+g_yield = proc (e: g_env, exp: exprlist)
+
+    %% YIELD ( exp )
+    %%    occurs only in iterators (and their bodies)
+
+
+    g_env$putl(e, "{")
+    for each_exp:expr in exprlist$elements(exp) do
+	g_expr_arg0(e, each_exp)
+	end % for
+    el:exprlist := exprlist$new()
+    for each_exp: expr in exprlist$elements(exp) do
+	new_el: exprlist := g_expr_arg1(e, each_exp)
+	el := seq_extend[expr](el, new_el)
+	end
+    g_err(e)
+    g_env$puts(e, " = ")
+    g_proc(e)
+    g_env$puts(e, "(")
+    for each_exp: expr in exprlist$elements(el) do
+	g_expr_arg(e, each_exp)
+	g_env$puts(e, ", ")
+	end % for
+    g_user_locals(e)
+    g_env$puts(e, ", ")
+    g_env$putl(e, "iecode);")  % NO & here!
+    if ib$bodies() 
+       then
+	    % ITERATOR BODY:
+	    %	attempt to process iteriterbodyexit (8/21/93 if bcr set!)
+	    %	propagate everything else
+	    % 5/31/90: probably should just propagate iteriterbodyexit
+	    g_env$puts(e, "if ((")
+	    g_locals(e)
+	    g_env$puts(e, "body_ctrl_req == true) && (")
+	    g_err(e)
+	    g_env$putl(e, " == ERR_iteriterbodyexit)) {")
+	    g_env$indent(e)
+	    g_err(e)
+	    g_env$putl(e, " = *iecode;")
+	    g_env$putl(e, "goto " || ex$get_current_ex_label() || ";}")
+	    g_env$outdent(e)
+	    g_env$puts(e, "if (")
+	    g_err(e)
+	    g_env$putl(e, " != ERR_ok) {")
+	    g_env$puts(e, "signal(")
+	    g_err(e)
+	    g_env$putl(e, ");")
+	    g_env$putl(e, "}")
+       else
+	    % ITERATOR PROPER:
+	    %	convert break to ok
+	    %   7/1/93: removed conversion of break to ok: just resignal
+	    %	propagate iterbodyreturn, iterbodysignal, iterbodyexit
+	    %		i.e. pass through to invoker of iterator
+	    % 5/31/90: removed irrelevant comments;
+	    %	       propagated ibs directly (needed) (formerly signal(*iecode)
+	    %	       propagated everything else (not *iecode) (?appropriate)
+	    g_env$puts(e, "if (") g_err(e) g_env$putl(e, " != ERR_ok) {")
+	    g_env$puts(e, "if (") g_err(e) g_env$putl(e, " == ERR_break) {signal(ERR_break);}")
+	    g_env$puts(e, "if (") g_err(e) 
+	    g_env$putl(e, " == ERR_iterbodyreturn) {signal(ERR_iterbodyreturn);}")
+	    g_env$puts(e, "if (") g_err(e)
+	    g_env$putl(e, " == ERR_iterbodyexit) {signal(ERR_iterbodyexit);}")
+	    g_env$puts(e, "if (") g_err(e) 
+	    g_env$putl(e, " == ERR_iterbodysignal) {signal(ERR_iterbodysignal);}")
+	    g_env$puts(e, "{signal(") g_err(e) g_env$putl(e, ");")
+	    g_env$indent(e)
+	    g_env$putl(e, "}}")
+	    g_env$outdent(e)
+       end
+    g_env$putl(e, "}")
+
+    end g_yield
+
+g_signal = proc (e: g_env, cond: condition)
+
+    %% SIGNAL cond.name ( cond.args )
+
+    g_env$putl(e, "{")
+    for each_e: expr in exprlist$elements(cond.args) do
+	g_expr0(e, each_e)
+	end % for
+    i: int := 0
+    for each_e: expr in exprlist$elements(cond.args) do
+	el: exprlist := g_expr1(e, each_e)
+	g_sig_assn(e, i, exprlist$bottom(el))
+	% g_env$puts(e, "elist["||int$unparse(i)||"].num = ")
+	% ref to num 6/26/90
+	% g_expr2(e, exprlist$bottom(el))
+	% g_env$putl(e, ";")
+	i := i + 1
+	end % for
+    if ~ib$bodies()
+       then
+	    g_env$puts(e, "{signal (" || sig$name(cond.name) ||");}")
+       else
+	    iterp: bool := current_apply$is_iter()
+	    if iterp 
+	       then
+		    g_env$putl(e, "*iecode = " || sig$name(cond.name) || ";")
+		    g_locals(e)
+		    g_env$putl(e, "body_ctrl_req = true;")
+		    g_env$putl(e, "{signal(ERR_iteriterbodysignal);}")
+	       else
+	            g_env$putl(e, "*iecode = " || sig$name(cond.name) || ";")
+		    g_env$putl(e, "{signal(ERR_iterbodysignal);}")
+	       end
+       end
+    g_env$putl(e, "}")
+    end g_signal
+
+g_exit = proc (e: g_env, cond: condition)
+
+    %% EXIT cond.name ( cond.args )
+
+    g_env$putl(e, "{")
+    for each_e: expr in exprlist$elements(cond.args) do
+	g_expr0(e, each_e)
+	end % for
+    el: exprlist := exprlist$new()
+    g_env$indent(e)
+    for each_e: expr in exprlist$elements(cond.args) do
+	new_el: exprlist := g_expr1(e, each_e)
+	el := seq_extend[expr](el, new_el)
+	end % for
+    i: int := 0
+    for each_e: expr in exprlist$elements(el) do
+	g_env$puts(e, "elist["||int$unparse(i)||"].num = ")
+	% ref to num 6/26/90
+	g_expr2(e, each_e)
+	g_env$putl(e, ";")
+	i := i + 1
+	end % for
+
+    g_err(e)
+    g_env$putl(e, " = " || sig$name(cond.name) || ";")
+    g_env$putl(e, "goto " || ex$get_current_ex_label() || ";")
+    g_env$putl(e, "}")
+    g_env$outdent(e)
+    end g_exit
+
+g_break = proc (e: g_env)
+
+    %% BREAK
+
+    if loop_context$is_while() 
+       then
+	    n: int := loop_context$get_current_while_count()
+	    g_env$putl(e, "goto end_while_" || int$unparse(n) || ";")
+     elseif loop_context$is_inline_for()
+       then
+	    n: int := loop_context$get_current_inline_for_count()
+	    g_env$putl(e, "goto end_inline_for_" || int$unparse(n) || ";")
+     else
+	  iterp: bool := current_apply$is_iter()
+	  if ib$bodies() cand iterp then
+	     % 8/1/93: added body_ctrl_req clause
+	     g_env$puts(e, "{")
+	     g_locals(e)
+	     g_env$puts(e, "body_ctrl_req = true; ")
+	     g_env$putl(e, "{signal(ERR_break);}}")
+	     else
+		  g_env$putl(e, "{signal(ERR_break);}")
+	     end
+     end
+    end g_break
+
+g_continue = proc (e: g_env)
+
+    %% CONTINUE
+
+    if loop_context$is_while() cor loop_context$is_inline_for()
+       then
+	    g_env$putl(e, "continue;")
+       else
+	    g_env$putl(e, "{signal(ERR_ok);}")
+       end
+    end g_continue
+
+g_beginend = proc (e: g_env, bod: body)
+
+    %% BEGIN
+    %% bod.stmts
+    %% END
+    % (can leave out BEGIN END if only 1 stmnt, otherwise might need it if
+    % this body has attached exception handlers)
+
+    g_env$putl(e, "{")
+    g_env$indent(e)
+    g_body(e, bod)
+    g_env$puts(e, "}")
+    g_env$outdent(e)
+    g_env$ensure_newline(e)
+    end g_beginend
+
+g_body = proc (e: g_env, bod: body)
+    %% bod.stmts
+    % (can ignore equates)
+
+    for s: stmt in stmtlist$elements(bod.stmts) do
+	g_stmt(e, s)
+	end
+    end g_body
+
+g_except = proc (e: g_env, stmnt: exceptstmt)
+
+    %% stmnt.stmt
+    %%    EXCEPT WHEN stmnt.arms[1]
+    %%		  :
+    %%		 WHEN stmnt.arms[n]
+    %%		 OTHERS ( stmnt.others_.arm.decl) :
+    %%			stmnt.others_.asm.body
+    %%	  END
+
+    ex$enter()
+    g_stmt(e, stmnt.stmt)
+    g_env$indent(e)
+    el: string := ex$get_current_end_label()
+    g_env$putl(e, "goto " || el || ";")
+    g_env$putl(e, ex$get_current_ex_label()||":")
+    ex$leave()
+    g_env$indent(e)
+    firsth: bool := true
+    for h: handler in handlerlist$elements(stmnt.arms) do
+	if firsth then g_env$puts(e, "if (")
+		       firsth := false
+	   else g_env$puts(e, "else if (") end
+	nthn: bool := false
+	for each_name: string in namelist$elements(h.names) do
+	    if nthn then
+	       g_env$newline(e)
+	       g_env$puts(e, " || ")
+	       else nthn := true end
+	    if sig$lookup(each_name)
+	       then
+		    g_env$puts(e, "(")
+		    g_err(e)
+		    g_env$puts(e, " == " || sig$name(each_name) || ")")
+	       else
+		    g_env$puts(e, "errcmp(")
+		    g_err(e)
+		    g_env$puts(e, ", " || sig$name(each_name) || ")")
+	       end
+	    end
+	g_env$putl(e, ") {")
+	tagcase h.vars
+	   tag decls (dlist: decllist):
+	       g_decllist(e, dlist)
+	       i: int := 0
+	       for each_d: decl in decllist$elements(dlist) do
+		   for each_idn: idn in idnlist$elements(each_d.idns) do
+		       g_idn(e, each_idn)
+		       g_env$puts(e, " = elist["
+				       || int$unparse(i) || "].num") % ref to num 6/26/90
+		       g_env$putl(e, ";")
+		       i := i + 1
+		       end
+		   end
+	   tag star:
+	   others:
+	   end
+	g_env$indent(e)
+	g_env$newline(e)
+	g_body(e, h.body)
+	g_env$outdent(e)
+	g_env$newline(e)
+	g_env$putl(e, "}")
+	end
+    if (handlerlist$size(stmnt.arms)) ~= 0
+       then g_env$puts(e, "else ") end
+    if mothersarm$is_arm(stmnt.others_)
+       then arm: othersarm := mothersarm$value_arm(stmnt.others_)
+	    g_env$putl(e, "{")
+	    g_env$indent(e)
+	    if mdecl$is_decl(arm.decl)
+	       then
+		    d: decl := mdecl$value_decl(arm.decl)
+		    g_decl(e, d)
+		    % 3/14/94: dcurtis: handle variable properly for others:
+		    %		at most one var; set it to signal name
+		    g_idn_plain(e, idnlist$bottom(d.idns))
+		    g_env$puts(e, " = _pclu_erstr(")
+	            g_err(e)
+		    g_env$putl(e, ");")
+	       end
+	    g_env$newline(e)
+	    g_body(e, arm.body)
+	    g_env$outdent(e)
+	    g_env$putl(e, "}")
+       else
+	    g_env$putl(e, "{")
+	    g_env$indent(e)
+	    g_env$putl(e, "goto " || ex$get_current_ex_label() || ";")
+	    g_env$outdent(e)
+	    g_env$putl(e, "}")
+       end
+    g_env$newline(e)
+    g_env$outdent(e)
+    g_env$puts(e, el || ":;")
+    g_env$ensure_newline(e)
+    g_env$outdent(e)
+    end g_except
+
+
+g_resignal = proc (e: g_env, stmnt: resignalstmt)
+
+    %% stmnt.stmt
+    %%     RESIGNAL stmnt.resigs
+
+    % enter an exception handling scope
+    ex$enter()
+
+    % generate normal statements within that scope
+    g_stmt(e, stmnt.stmt)
+
+    % generate exception handlers
+    % first let normal code hop around the handlers
+    el: string := ex$get_current_end_label()
+    % the following line was uncommented 12/4 (other problems may recur?)
+    g_env$putl(e, "goto " || el || ";")
+
+    % emit exception handlers' label
+    g_env$putl(e, ex$get_current_ex_label()||":")
+    g_env$indent(e)
+
+    % let further signals be caught by surrounding scope
+    ex$leave()
+
+    % emit a nested if statement for each possible signal and
+    %	generate a signal for it; (results are already sitting in elist)
+    first: bool := true
+    for each_sig: name in namelist$elements(stmnt.resigs) do
+	if first
+	   then
+		g_env$puts(e, "if ") first := false
+	   else
+		g_env$puts(e, "else if ")
+	   end
+	g_env$puts(e, "(")
+	sig_name: string := sig$name(each_sig)
+	if sig$lookup(each_sig)
+	   then
+		g_err(e)
+		g_env$puts(e, " == " || sig_name || ")")
+	   else
+		g_env$puts(e, "errcmp(")
+		g_err(e)
+		g_env$puts(e, ", " || sig_name || "))")
+	   end
+	if ib$bodies()
+	   then
+		iterp: bool := current_apply$is_iter()
+		if iterp
+		   then
+			g_env$puts(e, "{*iecode = ")
+			g_err(e)
+			g_env$putl(e, ";")
+			g_locals(e)
+			g_env$putl(e, "body_ctrl_req = true;")
+			g_env$putl(e, "{signal(ERR_iteriterbodysignal);}}")
+		   else
+			g_env$puts(e, " {*iecode = ")
+			g_err(e)
+			g_env$putl(e, ";")
+			g_env$putl(e, " {signal(ERR_iterbodysignal);}}")
+		   end
+	   else
+		g_env$putl(e, " {signal(" ||sig_name || ");}")
+	   end
+	end
+
+    % send other signals to surrounding handler
+    g_env$putl(e, "else {")
+    g_env$indent(e)
+    g_env$puts(e, "goto " || ex$get_current_ex_label() || ";")
+    g_env$outdent(e)
+    g_env$putl(e, "}")
+    g_env$outdent(e)
+
+    % emit end of statement and exception handler label
+    g_env$puts(e, el || ":;")
+    g_env$ensure_newline(e)
+    end g_resignal

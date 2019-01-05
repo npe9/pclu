@@ -1,0 +1,90 @@
+% Copyright Massachusetts Institute of Technology 1983, 1989
+
+% CAP must be of the form ":nm=" or ":nm#"
+% REPEAT is for padding (should be zero if no padding expected)
+
+_termcap = proc (term, cap: string, repeat, baud: int) returns (string)
+						       signals (not_found)
+	i: int := string$indexs(cap, term)
+	if i = 0
+	   then signal not_found end
+	i := i + 4
+	c: char
+	pad: string := ""
+	if repeat > 0
+	   then c := term[i]
+		if c < '0'  cor  c > '9'
+		   then exit bounds end
+		cnt: int := 0
+		scale: int := 0
+		while true do
+			i := i + 1
+			if c < '0'  cor  c > '9'
+			   then if c ~= '.'
+				   then break end
+				scale := 1
+			   end
+			cnt := cnt * 10 + char$c2i(c) - 48
+			if scale > 0
+			   then scale := scale * 10 end
+			c := term[i]
+			end
+		if c = '*'
+		   then cnt := cnt * repeat
+		   else i := i - 1
+		   end
+		if baud > 0
+		   then scale := 9600 * int$max(scale, 1)
+			scale := (cnt * baud + scale / 2) / scale
+			if scale > 0
+			   then c := '\000'
+				cnt := string$indexs(":pc=", term)
+				if cnt > 0
+				   then cnt, c := _termcap_decode
+						      (term, cnt + 4)
+				   end
+				pad := string$ac2s(
+					   array[char]$fill(1, scale, c))
+			   end
+		   end
+	   end except when bounds: end
+	s: string := ""
+	while true do
+		i, c := _termcap_decode(term, i)
+		s := string$append(s, c)
+		end except when bounds: end
+	return(s || pad)
+	end _termcap
+
+_termcap_decode = proc (term: string, i: int) returns (int, char)
+					      signals (bounds)
+	c: char := term[i]
+	   resignal bounds
+	if c = ':'
+	   then signal bounds end
+	i := i + 1
+	if c = '\\'
+	   then c := term[i]
+		i := i + 1
+		if c >= '0'  cand  c <= '7'
+		   then c := char$i2c(((char$c2i(c) - 48) // 4) * 64 +
+				      (char$c2i(term[i]) - 48) * 8 +
+				      char$c2i(term[i + 1]) - 48)
+			   except when illegal_char: end
+			i := i + 2
+		   else j: int := string$indexc(c, "Enrtbf")
+			if j > 0
+			   then c := "\033\n\r\t\b\v"[j] end
+		   end
+	elseif c = '^'
+	   then c := term[i]
+		i := i + 1
+		if c >= '@'  cand  c <= '_'
+		   then c := char$i2c(char$c2i(c) - 64)
+		elseif c >= 'a'  cand  c <= 'z'
+		   then c := char$i2c(char$c2i(c) - 96)
+		elseif c = '?'
+		   then c := '\177' end
+	end resignal bounds
+	return(i, c)
+	end _termcap_decode

@@ -1,0 +1,4 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+_system_root = proc () returns (string)
+	return(_home_dir("CLU"))
+	end _system_root

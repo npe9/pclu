@@ -1,0 +1,583 @@
+
+%  Copyright    Massachusetts Institute of Technology     1990,1991
+
+%%%
+%%% Print routines
+%%%
+
+pb_print = proc(p: pb)
+    if ~debug_logit then return end
+    po: stream := get_stream()
+    stream$puts(po, "parmblock: ")
+    tagcase p
+       tag apply(ct:clutype):
+	   stream$puts(po, "apply\n")
+           specs: DUspecs, b:bool := du$read_specs(ct.gen)
+           if ~DUspecs$is_none(specs) 
+	      then
+		   stream$puts(po, "apply: " || ct.gen.common || "\n")
+		   duspec_print(specs, true)
+	      else
+		   stream$puts(po, "apply: "|| ct.gen.common ||  ": no specs \n")
+	      end
+       tag op(cop:clusterop):
+	   stream$puts(po, "op\n")
+       tag a_cons:
+	   stream$puts(po, "a_cons\n")
+       tag ainfo:
+	   stream$puts(po, "ainfo\n")
+       tag tinfo:
+	   stream$puts(po, "tinfo\n")
+       tag any_:
+	   stream$puts(po, "any_\n")
+       tag force_:
+	   stream$puts(po, "force_\n")
+       others:
+       end % tag
+    end pb_print
+
+typespec_print = proc(a: typespec)
+    if ~debug_logit then return end
+    po: stream := get_stream()
+    stream$puts(po, "typespec: ")
+    tagcase a.abs
+       tag cluster_ (ct: clutype):
+	   stream$puts(po, "cluster_: " || ct.gen.common || ", ")
+           specs: DUspecs, b:bool := du$read_specs(ct.gen)
+           if ~DUspecs$is_none(specs) then
+	      duspec_print(specs, true)
+	      else
+		   stream$puts(po, "none\n")
+	      end
+       tag select:
+	   stream$puts(po, "select\n")
+       tag apply (ap:applytype):
+	   stream$puts(po, "apply\n")
+           specs: DUspecs, b:bool := du$read_specs(ap.gen)
+           if ~DUspecs$is_none(specs) then
+	      duspec_print(specs, true)
+	      else
+		   stream$puts(po, "none\n")
+	      end
+
+       tag idn (i: idn):
+	   stream$puts(po, "idn "|| i.str || "\n")
+       tag any_:
+	   stream$puts(po, "any_\n")
+       tag type_ (ct: clutype):
+	   stream$puts(po, "type_\n")
+	   stream$puts(po, "clutype: " || ct.gen.common || ", ")
+           specs: DUspecs, b:bool := du$read_specs(ct.gen)
+           if ~DUspecs$is_none(specs) then
+	      duspec_print(specs, true)
+	      else
+		   stream$puts(po, "none\n")
+	      end
+       tag cvt_:
+	   stream$puts(po, "cvt_\n")
+       tag other (o: othertype):
+	   stream$puts(po, "other: ")
+	   tagcase o
+	      tag du (ct: clutype):
+		  stream$puts(po, "du\n")
+		  stream$puts(po, "clutype: " || ct.gen.common || ", ")
+                  specs: DUspecs, b:bool := du$read_specs(ct.gen)
+                  if ~DUspecs$is_none(specs) then
+		     duspec_print(specs, true)
+		     else
+			  stream$puts(po, "none\n")
+		     end
+	      tag op (ct: clusterop):
+		  stream$puts(po, "op: " || ct.name || "\n      ")
+		  typespec_print(ct.type_)
+	      tag return_ (rt: typespec):
+		  stream$puts(po, "return_: ")
+		  typespec_print(rt)
+	      end
+       tag xclu (x: xclutype):
+	   stream$puts(po, "xclu: " || x.idn.str || ",\n")
+       tag xsel:
+	   stream$puts(po, "xsel\n")
+       tag unknown:
+	   stream$puts(po, "unknown\n")
+       end
+    end typespec_print
+
+restrictkind_print = proc(r: restrictkind)
+    if ~debug_logit then return end
+    po: stream := get_stream()
+    stream$puts(po, "restrictkind:\n")
+    tagcase(r)
+       tag idn(i:idn):
+	   stream$puts(po, "idn: " || i.str ||" \n")
+       tag set (x: xtypeset):
+	   stream$puts(po, "set: " || x.idn.str ||" \n")
+       tag has_(o: operdecllist):
+	   stream$puts(po, "operdecllist: " ||
+			   int$unparse(operdecllist$size(o)) ||" \n")
+       end
+    end restrictkind_print
+
+restrictkind_similar = proc(r1, r2: restrictkind) returns (bool)
+
+    tagcase (r1)
+       tag idn(i:idn):
+	   if restrictkind$is_idn(r2) 
+	      then
+		   return(idn$similar(i, restrictkind$value_idn(r2)))
+	      else
+		   return(false)
+	      end
+       tag set (x1: xtypeset):
+	   if restrictkind$is_set(r2) 
+	      then
+		   x2: xtypeset := restrictkind$value_set(r2)
+		   if (idn$similar(x1.idn, x2.idn) cand
+		       equatelist$similar(x1.equates, x2.equates) cand
+		       operdecllist_similar(x1.ops, x2.ops))
+		      then return (true)
+		      else return (false)
+		      end
+	      else
+		   return(false)
+	      end
+       tag has_ (o: operdecllist):
+	   if restrictkind$is_has_(r2)
+	      then
+		   return(operdecllist_similar(o, restrictkind$value_has_(r2)))
+	      else
+		   return(false)
+	      end
+       end
+
+
+    end restrictkind_similar
+
+operdecllist_similar = proc(o1, o2: operdecllist) returns(bool)
+    if operdecllist$size(o1) ~= operdecllist$size(o2)
+       then return(false) end
+    %logit ("decllist size match")
+    for i: int in operdecllist$indexes(o1) do
+	if opspeclist$size(o1[i].opers) ~= opspeclist$size(o2[i].opers)
+	   then return(false) end
+        %logit ("opspecllist size match")
+	for j: int in opspeclist$indexes(o1[i].opers) do
+	    if o1[i].opers[j].name ~= o2[i].opers[j].name
+	       then return(false) end
+	    %logit ("name match")
+	    if ~exprlist$similar(o1[i].opers[j].parms, o2[i].opers[j].parms)
+	       then return(false) end
+	    %logit ("parms match")
+	    if ~typespec_similar(o1[i].opers[j].type_, o2[i].opers[j].type_)
+	       then return(false) end
+	    %logit ("typeabs match")
+	    end % for
+	end % for
+    return(true)
+    end operdecllist_similar
+
+typespec_similar = proc(t1, t2: typespec) returns(bool)
+    tagcase t1.abs
+       tag cluster_(c1:clutype):
+	   %logit("cluster")
+	   if ~typeabs$is_cluster_(t2.abs) then
+	      return (false) end
+	   c2: clutype := typeabs$value_cluster_(t2.abs)
+	   if ~exprlist$similar(c1.parms, c2.parms) then
+	      return(false) end
+	   if c1.gen.common ~= c2.gen.common then
+	      return(false)
+	      else return (true) end
+       tag type_(c1:clutype):
+	   %logit("type_")
+	   if ~typeabs$is_type_(t2.abs) then
+	      return (false) end
+	   c2: clutype := typeabs$value_type_(t2.abs)
+	   if ~exprlist$similar(c1.parms, c2.parms) then
+	      return(false) end
+	   if c1.gen.common ~= c2.gen.common then
+	      return(false)
+	      else return (true) end
+       tag select(s1:seltype):
+	   if ~typeabs$is_select(t2.abs) then
+	      return (false) end
+	   s2: seltype := typeabs$value_select(t2.abs)
+	   if ~fieldspeclist$similar(s1.parms, s2.parms) then
+	      return(false) end
+	   if s1.gen.common ~= s2.gen.common then
+	      return(false)
+	      else return (true) end
+       tag apply(a1:applytype):
+	   %logit("apply")
+	   if ~typeabs$is_apply(t2.abs) then
+	      return (false) end
+	   a2:applytype := typeabs$value_apply(t2.abs)
+	   if a1.gen.common ~= a2.gen.common then
+	      return(false) end
+	   if ~typelist_similar(a1.args, a2.args) cor
+	      ~typelist_similar(a1.vals, a2.vals) cor
+	      ~exceptionlist_similar(a1.sigs, a2.sigs)
+	      then return(false)
+	      else return(true) end
+       tag other:
+	   %logit("other: unfinished")
+	   if ~typeabs$is_other(t2.abs) then
+	      return (false) end
+       tag xclu:
+	   %logit("xclu: unfinished")
+	   if ~typeabs$is_xclu(t2.abs) then
+	      return (false) end
+       tag xsel:
+	   %logit("xsel: unfinished")
+	   if ~typeabs$is_xsel(t2.abs) then
+	      return (false) end
+       tag idn(i:idn):
+	   %logit("idn")
+	   if ~typeabs$is_idn(t2.abs) then
+	      return (false) end
+	   if i.str ~= typeabs$value_idn(t2.abs).str then
+	      return (false)
+	      else return (true) end
+       tag any_:
+	   %logit("any_")
+	   if ~typeabs$is_any_(t2.abs) then
+	      return (false) end
+       tag cvt_:
+	   %logit("cvt_")
+	   if ~typeabs$is_cvt_(t2.abs) then
+	      return (false) end
+       tag unknown:
+	   %logit("unknown")
+	   if ~typeabs$is_unknown(t2.abs) then
+	      return (false) end
+       end
+
+    end typespec_similar
+
+typelist_similar = proc(t1, t2: typelist) returns(bool)
+    if typelist$size(t1) ~= typelist$size(t2) then
+       return (false) end
+    for i: int in typelist$indexes(t1) do
+	if ~typespec_similar(t1[i], t2[i]) then
+	   return (false) end
+	end % for
+    %logit ("typelist matched")
+    return(true)
+    end typelist_similar
+
+exceptionlist_similar = proc(e1, e2: exceptionlist) returns(bool)
+    if exceptionlist$size(e1) ~= exceptionlist$size(e2) then
+       return (false) end
+    for i: int in exceptionlist$indexes(e1) do
+	if e1[i].name ~= e2[i].name then return (false) end
+	if ~typelist_similar(e1[i].types, e2[i].types) then
+	   return (false) end
+	end % for
+    %logit("exceptionlist matched")
+    return(true)
+    end exceptionlist_similar
+
+idnkind_print = proc(i: idnkind)
+    if ~debug_logit then return end
+    po: stream := get_stream()
+    tagcase (i)
+       tag var:
+	   stream$puts(po, "var\n")
+       tag ownvar:
+	   stream$puts(po, "ownvar\n")
+       tag tparm:
+	   stream$puts(po, "tparm\n")
+       tag vparm:
+	   stream$puts(po, "vparm\n")
+       tag tconst:
+	   stream$puts(po, "tconst\n")
+       tag expr:
+	   stream$puts(po, "expr\n")
+       tag typeset:
+	   stream$puts(po, "typeset\n")
+       tag gen:
+	   stream$puts(po, "gen\n")
+       tag opgen:
+	   stream$puts(po, "opgen\n")
+       tag unknown:
+	   stream$puts(po, "unknown\n")
+       end
+    end idnkind_print
+
+duspec_print = proc(d:duspecs, short: bool)
+    if ~debug_logit then return end
+    po: stream := stream$primary_output()
+    tagcase d
+       tag apply (a:applyinfo):
+	   stream$puts(po, "applyi: parms(size)" || 
+			   int$unparse(idnlist$size(a.parms)) || "\n")
+	   typespec_print(a.type_)
+	   stream$puts(po, "\n")
+	   
+       tag cluster_ (ti: typeinfo):
+	   stream$puts(po, "cluster_\n")
+	   if ~short then ti_print(ti) end
+       tag select:
+	   stream$puts(po, "select\n")
+       tag atype (ti: typeinfo):
+	   stream$puts(po, "atype\n")
+	   ti_print_1(ti)
+       tag none:
+	   stream$puts(po, "none\n")
+       end
+    end duspec_print
+
+ti_print = proc(t: typeinfo)
+    if ~debug_logit then return end
+    po: stream := get_stream()
+    stream$puts(po, "parms:\n")
+    for each_p: idn in idnlist$elements(t.parms) do
+	stream$puts(po, each_p.str || " ") end
+    stream$puts(po, "\nopers:\n")
+    for each_op: opinfo in opinfolist$elements(t.opers) do
+	stream$puts(po, each_op.name || " ")
+	typespec_print(each_op.info.type_)
+	stream$puts(po, "\n")
+	end
+    stream$puts(po, "\n")
+    end ti_print
+
+ti_print_1 = proc(t: typeinfo)
+    if ~debug_logit then return end
+    po: stream := get_stream()
+    stream$puts(po, "parms:\n")
+    for each_p: idn in idnlist$elements(t.parms) do
+	stream$puts(po, each_p.str || " ") end
+    stream$puts(po, "\nopers:\n")
+    for each_op: opinfo in opinfolist$elements(t.opers) do
+	stream$puts(po, each_op.name || " ")
+	stream$puts(po, "\n")
+	end
+    stream$puts(po, "\n")
+    end ti_print_1
+
+stmt_print = proc(s: stmt)
+    if ~debug_logit then return end
+    po: stream := get_stream()
+    tagcase s.abs
+       tag decl (sa: decl):
+	   stream$puts(po, "decl\n")
+       tag declinit (sa: declinit):
+	   stream$puts(po, "declinit\n")
+       tag assn (sa: assn):
+	   stream$puts(po, "assn\n")
+       tag invoke (sa: invoke):
+	   stream$puts(po, "invoke\n")
+       tag while_ (sa: whilestmt):
+	   stream$puts(po, "while_\n")
+       tag for_ (sa: forstmt):
+	   stream$puts(po, "for_\n")
+       tag if_ (sa: ifstmt):
+	   stream$puts(po, "if_\n")
+       tag tag_ (sa: tagstmt):
+	   stream$puts(po, "tag_\n")
+       tag return_ (sa: exprlist):
+	   stream$puts(po, "return_\n")
+       tag yield_ (sa: exprlist):
+	   stream$puts(po, "yield_\n")
+       tag signal_ (sa: condition):
+	   stream$puts(po, "signal_\n")
+       tag exit_ (sa: condition):
+	   stream$puts(po, "exit_\n")
+       tag break_:
+	   stream$puts(po, "break_\n")
+       tag continue_:
+	   stream$puts(po, "continue_\n")
+       tag body (sa: body):
+	   stream$puts(po, "body\n")
+       tag except_ (sa: exceptstmt):
+	   stream$puts(po, "except_\n")
+       tag resignal_ (sa: resignalstmt):
+	   stream$puts(po, "resignal_\n")
+       others:
+       end
+    end stmt_print
+
+expr_print = proc(exp: expr, stage: int)
+    if ~debug_logit then return end
+    po: stream := get_stream()
+    stream$puts(po, "expr_"||int$unparse(stage)||": ")
+    tagcase exp.abs
+       tag idn (id: idn):
+	   stream$puts(po, "idn: " || id.str || "\n")
+       tag any_ (xa: expr):
+	   stream$puts(po, "any_\n")
+       tag cand_ (xa: condop):
+	   stream$puts(po, "cand_\n")
+       tag cor_ (xa: condop):
+	   stream$puts(po, "cor_\n")
+       tag invoke (inv: invoke):
+	   stream$puts(po, "invoke:\n")
+       tag a_cons (xa: arraycons):
+	   stream$puts(po, "a_cons\n")
+       tag s_cons (xa: selectcons):
+	   stream$puts(po, "s_cons\n")
+       tag apply (xa: clutype):
+	   stream$puts(po, "apply : " || xa.gen.common || " parms(size)" 
+			     || int$unparse(exprlist$size(xa.parms)) || "\n")
+	   
+           specs: DUspecs, b:bool := du$read_specs(xa.gen)
+           if ~DUspecs$is_none(specs) then
+	      duspec_print(specs, true)
+	      else
+		   stream$puts(po, "none\n")
+	      end
+	   stream$puts(po, "\n")
+       tag op (xa: clusterop):
+	   stream$puts(po, "op : " || xa.name || "  parms(size):" 
+			     || int$unparse(exprlist$size(xa.parms)) || "\n      ")
+	   typespec_print(xa.type_)
+	   stream$puts(po, "\n")
+       tag force_ (xa: typespec):
+	   stream$puts(po, "force_\n")
+       tag up_ (xa: expr):
+	   stream$puts(po, "up_\n")
+       tag down_ (xa: expr):
+	   stream$puts(po, "down_\n")
+       tag type_ (xa: typespec):
+	   stream$puts(po, "type_\n")
+	   typespec_print(xa)
+	   stream$puts(po, "\n")
+       tag type_of_ (xa: expr):
+	   stream$puts(po, "type_of_\n")
+       tag null_:
+	   stream$puts(po, "null\n")
+       tag bool_:
+	   stream$puts(po, "bool\n")
+       tag int_ (i:int):
+	   stream$puts(po, "int: " || int$unparse(i) || "\n")
+       tag real_ (r: real):
+	   stream$puts(po, "real: " || real$unparse(r) ||"\n")
+       tag char_ (c: char):
+	   stream$puts(po, "char: " || string$c2s(c) || "\n")
+       tag str (s: string):
+	   stream$puts(po, "str: " || s || "\n")
+       others:
+	   stream$puts(po, "unknown expr type\n")
+       end
+       stream$puts(po, "--- ")
+       typespec_print(exp.typespec)
+
+    end expr_print
+
+other_print = proc(o: othertype)
+    if ~debug_logit then return end
+    po: stream := get_stream()
+    tagcase o
+       tag du:
+	   stream$puts(po, "du\n")
+       tag op:
+	   stream$puts(po, "op\n")
+       tag return_:
+	   stream$puts(po, "return_\n")
+       end
+    end other_print
+
+compiler_logit = proc(code:int, s:string)
+    po: stream := get_stream()
+    if debug_logit then stream$puts(po, s||"\n")
+	else stream$puts(po, "Probable compiler bug " || int$unparse(code)
+		|| "\n")
+	end
+    end compiler_logit
+
+get_stream = proc() returns (stream)
+	%return (g_env$get_erstr())
+	return (stream$primary_output())
+	end get_stream
+
+%%%
+%%% Procs for extending arrays and sequences
+%%%
+
+array_extend = proc[t:type](a: array[t], b: sequence[t])
+    for elt:t in sequence[t]$elements(b) do
+	array[t]$addh(a, elt)
+	end
+    end array_extend
+
+array_concat = proc[t:type](a: array[t], b: array[t])
+    for elt:t in array[t]$elements(b) do
+	array[t]$addh(a, elt)
+	end
+    end array_concat
+
+seq_extend = proc[t:type](a: sequence[t], b: sequence[t]) returns (sequence[t])
+	    where t has copy:proctype(t) returns (t)
+    c: sequence[t] := sequence[t]$copy(a)
+    for elt:t in sequence[t]$elements(b) do
+	c := sequence[t]$addh(c, elt)
+	end
+    return(c)
+    end seq_extend
+
+%%% Proc for converting initlist to stmtlist
+%%%
+
+initlist_to_stmtlist = proc(i:initlist) returns (stmtlist)
+
+    s: stmtlist := stmtlist$new()
+    for each_init: init in initlist$elements(i) do
+	tagcase each_init.stmt
+	   tag decl (d:decl):
+	       this_abs: stmtabs := stmtabs$make_decl(d)
+	       this_stmt: stmt := stmt$create(this_abs, each_init.line)
+	       s := stmtlist$addh(s, this_stmt)
+	   tag init (di:declinit):
+	       this_abs: stmtabs := stmtabs$make_declinit(di)
+	       this_stmt: stmt := stmt$create(this_abs, each_init.line)
+	       s := stmtlist$addh(s, this_stmt)
+	   end
+	end
+    return(s)
+    end initlist_to_stmtlist
+
+%%%
+%%% Outputting lists with commas or semicolons
+%%%
+
+g_commalist = proc [ltype, elt: type] (e: g_env, l: ltype, 
+				       eltproc: proctype (g_env, elt))
+	    where ltype has elements: itertype (ltype) yields (elt)
+    % iterates over l using ltype$elements, calling eltproc for each 
+    % iteration and adding commas to e after each iteration except the last.
+    % (i.e., intended to put a list of elts to e, with elts separated by ','s)
+
+    first: bool := true
+
+    for x: elt in ltype$elements(l) do
+	if ~first
+	   then g_env$puts(e, ", ")
+	   else first := false
+	   end
+	eltproc(e, x)
+	end
+    end g_commalist
+
+g_next_commalist = proc [ltype, elt: type] (e: g_env, l: ltype, 
+					    eltproc: proctype (g_env, elt), cont: int)
+	    where ltype has elements: itertype (ltype) yields (elt)
+    % iterates over l using ltype$elements, calling eltproc for each 
+    % iteration and adding commas to e before each iteration.
+    % When cont is zero, the first comma is omitted.
+    % (i.e., intended to put a list of elts to e, with elts separated by ','s)
+
+    for x: elt in ltype$elements(l) do
+	if cont ~= 0
+	   then g_env$puts(e, ", ")
+	   else cont := 1
+	   end
+	eltproc(e, x)
+	end
+    end g_next_commalist
+
+bool_unparse = proc(b: bool) returns (string)
+    if b then return("true")
+       else return("false")
+       end
+    end bool_unparse

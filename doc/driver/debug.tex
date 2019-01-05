@@ -1,0 +1,476 @@
+\documentstyle[12pt]{article}
+
+% Use full page
+\topmargin 0pt
+\advance \topmargin by -\headheight
+\advance \topmargin by -\headsep
+\textheight 8.9in
+\oddsidemargin 0pt
+\evensidemargin \oddsidemargin
+\marginparwidth 0.5in
+\textwidth 6.5in
+
+\newcommand{\dir}[1]{{\em #1}}
+\newcommand{\proc}[1]{{\em #1}}
+\newcommand{\cludir}[1]{\dir{\~{}CLU}{\em #1}}
+\newcommand{\fname}[1]{{\em #1}}
+\newenvironment{boxdisplay}{\begin{center}\begin{tabular}{|l|}\hline}{\hline\end{tabular}\end{center}}
+
+\title{The Portable CLU Debugger}
+\author{Dorothy Curtis}
+\date{February 17, 1992}
+
+\begin{document}
+
+\maketitle
+
+\noindent CLU programs compiled with portable CLU can be debugged by
+specifying the \verb|-debug| option consistently on each portable CLU
+invocation, and then running the resulting executable.  At that point,
+the debugger takes control and allows you to debug the program.
+
+\section{Basics}
+
+The debugger enables users to monitor execution of a program.  Users
+can single step a program, executing one line at a time, or they can
+set {\em breakpoints} in the program.  The debugger suspends execution
+of a program whenever it reaches a breakpoint, so that the user can
+determine how control reached that breakpoint and/or examine the
+values of program variables.
+
+Whenever a procedure is invoked, information about the invocation is
+pushed onto a runtime {\em stack}.  This information is known as a
+{\em stack frame}.  By examining the stack when a breakpoint is
+reached, the user can determine how control reached the current
+procedure.
+
+The debugger enables users to print the CLU objects referred to by
+program variables.  Users can control how much of the representations
+of such objects is displayed.  The printing {\em depth} is the maximum
+number of levels of nesting of an object that will be displayed.  The
+printing {\em width} is the maximum number of components of an object
+that are displayed at each depth.  The greater the width, the more
+elements in an array and the more fields in a record that are printed.
+The greater the depth, the more information about each element in an
+array or each field in a record that is displayed.
+
+\section{Hints}
+
+\subsection{Interrupting the debugger}
+
+When a program is running, typing {\tt control-c} (i.e., holding down
+the control or ctrl key and then pressing the letter {\tt c}), will
+cause control to be passed back to the debugger.  This assumes that
+{\tt control-c} is your {\tt INTR} (interrupt) character. (See {\em
+man (2) stty}.)  For {\tt control-c} to take effect, the program must
+pass through a procedure entry/exit point or a procedure with line
+breakpoints set in it (these lines do not need to be executed).  A
+program in an infinite loop, which does not call a procedure, will not
+respond to {\tt control-c}.  To kill off such a program, type {\tt
+control-z} (or your {\tt SUSP} (suspend) character), use the {\tt
+jobs} shell command to locate the errant program, and type
+\begin{verbatim}
+    kill -9 %number_associated_with_program
+\end{verbatim}
+You may need to use the {\tt reset} shell command to restore normal
+tty behavior.
+
+\subsection{Capturing output}
+
+The (Unix) {\tt script} command provides a method for capturing output
+created during a debugging session.
+
+\subsection{Line editing}
+
+The debugger supports a limited amount of line editing.  The following
+files are used to specify key bindings for line editing:
+\fname{\~{}/.lineedit.keys} and \fname{\~{}/.inputrc}.  These files
+override the default settings given by the following table.
+\begin{center}
+\begin{tabular}{|l|l|l|}\hline
+Key	   & Action	&Alternative key\\
+\hline
+ctrl-A & move to beginning of the line  	&ESC\\
+ctrl-B & move back (left) one character 	&left-arrow on lk-201's\\
+ctrl-D & delete current character		&\\
+ctrl-E & move to end of current line		&\\
+ctrl-F & move forward (right) one character     &right-arrow on lk-201's\\
+ctrl-J & complete entry				&\\
+ctrl-K & delete to the end of the line 		&remove-key on lk-201's\\
+ctrl-M & complete entry				&\\
+ctrl-N & move to next history item     		&down-arrow on lk-201's\\
+ctrl-P & move to previous history item 		&up-arrow on lk-201's\\
+ctrl-U & delete line				&\\
+ctrl-W & delete word				&\\
+del    & delete previous character              &\\
+       & move forward one word			& next-screen on lk-201's\\
+       & move back one word			& prev-screen on lk-201's\\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection{Fatal errors}
+
+When running a program, a fatal error may occur and result in a Unix
+{\tt Segmentation Violation} or {\tt Bus Error}.  When this happens,
+the debugger executes a {\tt where} command to display the stack and
+then terminates.  These errors are frequently caused by uninitialized
+variables.
+
+If a program accesses uninitialized variables without triggering a
+fatal error, the state of the debugger may be corrupted.
+
+If a circularly-linked object is printed, the debugger may terminate
+when the stack fills up.
+
+\subsection{How Printing Works}
+
+When printing an object of type t, the debugger uses {\tt t\$print},
+if it exists and takes an object of type t (or cvt) as its first
+argument and a pstream as its second argument.  If such an operation
+does not exist, {\tt rep\$print} for type t is used.
+
+\section{Command Overview}
+
+A debugger command consists of a command name followed by a sequence
+of arguments separated by spaces.  The following describes related
+groups of debugger commands.  The next section contains an
+alphabetical list of all debugger commands and describes them in
+detail.
+
+\begin{itemize}
+
+\item{\bf Running}
+  
+  The {\tt run} and {\tt continue} commands cause the program to run
+  continuously.  The {\tt next} command causes execution of a single
+  program line.
+  
+\item{\bf Breakpoints}
+  
+  The {\tt break} command sets breakpoints.  The {\tt show} command
+  shows the current breakpoints.  The {\tt delete} command deletes
+  breakpoints.  The {\tt step} command turns on single stepping for a
+  procedure.  The {\tt unstep} command turns off single stepping for a
+  procedure.  The {\tt trace} command turns on tracing for exceptions.
+  The {\tt untrace} command turns off tracing for exceptions.
+  
+\item{\bf The Stack}
+  
+  The {\tt where} command displays the stack.  The {\tt up} and {\tt
+  down} commands select different frames in the stack.
+  
+\item{\bf Printing}
+  
+  The {\tt print} command displays the values of variables.  The
+  {\tt width} and {\tt depth} commands control how much of the value
+  is displayed.
+  
+\item{\bf Invocation}
+  
+  The {\tt eval} command evaluates procedure invocations.
+  
+\item{\bf Source code}
+  
+  The {\tt list} command displays source code.  The {\tt func}
+  command selects a procedure to be displayed.  Reaching a breakpoint
+  also selects the procedure containing as the one to be displayed.
+  Moving up and down the stack changes the procedure to be displayed.
+  
+\item{\bf Miscellaneous}
+  
+  The {\tt help} command gives brief information on debugger
+  commands.  All commands can be displayed via {\tt help all}.  The
+  {\tt quit} command terminates the debugger.
+
+\end{itemize}
+
+\section{Commands}
+
+This section describes each command in detail.  Commands are listed
+alphabetically.  Users can repeat execution of the {\tt continue},
+{\tt eval}, {\tt up}, {\tt list}, {\tt down}, {\tt next} commands
+simply by pressing the {\tt <RETURN>} key.
+
+
+
+\begin{itemize}
+
+\item {\tt break} \{{\it breakpoint ...}\}
+  
+  The {\tt break} command instructs the debugger to stop when a
+  particular procedure or iterator is entered or exited or before a
+  particular line in a file is executed.  Each {\it breakpoint} is
+  either the name of a procedure, the name of an iterator, or a line
+  number, which refers to a line in the file containing the current
+  procedure (or iterator).  Note that the {\tt func}, {\tt up}, and {\tt
+  down} commands change the current procedure.  Some examples:
+  \begin{verbatim}
+    break start_up         % sets breakpoints on entry to and
+                           % exit from the top-most procedure
+  \end{verbatim}
+  \begin{verbatim}
+    break 10               % sets a breakpoint at line 10
+                           % in the current procedure
+  \end{verbatim}
+  \begin{verbatim}
+    break 10 20            % sets breakpoints at lines 10 and 20
+                           % in the current procedure
+  \end{verbatim}
+  \begin{verbatim}
+    break t$op1 t$op2      % sets breakpoints on entry to and
+                           % exit from procedures t$op1 and t$op2
+  \end{verbatim}
+  \begin{verbatim}
+    break t$op1 t$op2 10   % sets breakpoints on entry to and
+                           % exit from procedures t$op1 and t$op2       
+                           % and at line 10 in the current procedure
+                           % (which may not be either t$op1 or t$op2)
+  \end{verbatim}
+  \begin{verbatim}
+    func t$op1             % select function t$op1
+    break 10               % sets a breakpoint at line 10 in t$op1
+  \end{verbatim}
+  Whenever the debugger reaches a breakpoint, it displays the
+  corresponding line in the source file and stops before executing
+  that line.
+
+\item {\tt continue}
+  
+  The {\tt continue} command directs the debugger to continue running
+  the program, either until the next breakpoint or until the next
+  instruction in a procedure (or iterator) that is being single-stepped.
+  It terminates any single-stepping set by the {\tt next} command in the
+  current procedure (or iterator).
+
+\item {\tt delete} {\it breakpoint} \{{\it breakpoint ...}\}
+  
+  The {\tt delete} command removes the specified breakpoints.  (Note: If
+  there are two breakpoints with the same line number, only the first
+  will be deleted.)  The argument {\tt all} causes all breakpoints to be
+  removed.  Some examples:
+  \begin{verbatim}
+    delete t$op1              % deletes the breakpoints on entry to
+                              % and exit from the procedure t$op1
+  \end{verbatim}
+  \begin{verbatim}
+    delete all                % deletes all breakpoints
+  \end{verbatim}
+
+\item {\tt depth} \{{\it integer}\}
+  
+  The {\tt depth} command controls the printing depth for objects
+  printed by the {\tt print} command.  If the {\tt depth} command has
+  no argument, the debugger prints the current depth.  See also the
+  {\tt width} command.
+
+\item {\tt down} \{{\it integer}\}
+  
+  The {\tt down} command moves down the specified number of stack
+  frames.  If no argument is specified, then 1 is assumed.  See also
+  the {\tt where} command and the {\tt up} command.
+
+\item {\tt eval} {\it expression}
+  
+  The {\tt eval} command evaluates the specified expression.  The
+  following section describes the legal expressions.  Some examples:
+  \begin{verbatim}
+    eval a = "xyz"                    % sets the variable a to "xyz"
+    eval po = stream$primary_output() % sets po to primary output
+    eval stream$putl(po, a)           % prints a on po
+  \end{verbatim}
+  \noindent The assignment to the variable {\tt a} in the example
+  above changes the value of the variable {\tt a} in the current stack
+  frame, if such a variable exists.  Otherwise, it creates a debugger
+  variable named {\tt a} and assigns the value of the expression to
+  that variable.
+
+\item {\tt func} \{{\it name}\}
+  
+  The {\tt func} specifies the named procedure (or iterator) to be the
+  one of current interest, either for listing source code or for setting
+  breakpoints at line numbers.  If no argument is given, the current
+  line is printed, along with the five preceding and five succeeding
+  lines
+  \begin{verbatim}
+    func t$op1                  % select function t$op1
+    list                        % list lines surrounding t$op1
+    break 10                    % set a breakpoint at line 10 in 
+                                % the file containing t$op1
+  \end{verbatim}
+
+\item {\tt help} \{{\it command}\}
+  
+  The {\tt help} command, with no arguments, gives a summary of
+  command names.  When a command name is present as an argument, the
+  {\tt help} command will give a short description of the specified
+  command.  If the argument is the keyword {\tt all}, short
+  descriptions of all commands are displayed.
+
+\item {\tt list} \{{\it integer ...}\}
+  
+  The {\tt list} command displays source code in the current procedure
+  (or iterator).  By default, the current procedure is the routine that
+  last reached a breakpoint.  When the debugger first starts up, the
+  {\tt start\_up} procedure is selected as the current procedure.  The
+  {\tt func}, {\tt up}, and {\tt down} commands change the current
+  procedure to the specified procedure.  The arguments to {\tt list}
+  specify the line numbers of interest (use a space to separate the line
+  numbers).  The {\tt where} command can be used to show the current
+  line numbers in the currently active procedures.
+  \begin{verbatim}
+    list                         % list lines at current breakpoint
+    func t$op1                   % select function t$op1
+    list                         % list lines surrounding t$op1
+  \end{verbatim}
+
+\item {\tt next} \{{\it integer}\}
+  
+  The {\tt next} command directs the debugger to single step to the next
+  line in the current procedure.  When a numeric argument $n$ is
+  present, the debugger executes the next $n$ lines in the current
+  procedure and prints out the corresponding source code as each line is
+  executed.
+
+\item {\tt print} {\it variable}
+  
+  The {\tt print} command prints the values of variables, procedure
+  arguments, and {\bf own} variables.  Uninitialized variables are
+  printed as {\tt ???}.
+
+\item {\tt quit}
+  
+  The {\tt quit} command causes the debugger to terminate.
+
+\item {\tt rebuild}
+  
+  The {\tt rebuild} command causes the debugger to run {\tt make}
+  and then the program.
+
+\item {\tt restart}
+  
+  The {\tt restart} command causes the debugger to restart the
+  program: a new process is created, causing {\bf own} variables to be
+  initialized and the stack to be empty.
+
+\item {\tt run}
+  
+  The {\tt run} command causes the debugger to continue running the
+  program.
+
+\item {\tt show}
+  
+  The {\tt show} command displays the location of the current
+  breakpoints.
+
+\item {\tt step} {\it name}
+  
+  The {\tt step} command turns on single stepping for the specified
+  procedure.
+
+\item {\tt trace} {\it name}
+  
+  The {\tt trace} command turns on tracing for the named signal.
+  \begin{verbatim}
+    trace bounds                % trace the bounds exception
+    trace all                   % trace all exceptions
+  \end{verbatim}
+
+\item {\tt unstep} {\it name}
+  
+  The {\tt unstep} command turns off single stepping for the
+  specified procedure.
+
+\item {\tt trace} {\it name}
+
+  The {\tt untrace} command turns off tracing for the named signal.
+  \begin{verbatim}
+    untrace bounds              % stop tracing the bounds exception
+    untrace all                 % do not trace any exceptions
+  \end{verbatim}
+
+\item {\tt up} \{{\tt integer}\}
+  
+  The {\tt up} command moves up the specified number of stack
+  frames.  If no argument is specified, 1 is assumed.  See also the
+  {\tt where} command and the {\tt down} command.
+
+\item {\tt where} \{{\tt integer}\}
+  
+  The {\tt where} command displays the frames on the stack.  A numeric
+  argument $n$ limits the output to the last $n$ frames pushed on the
+  stack.
+
+\item {\tt width} \{{\tt integer}\}
+  
+  The {\tt width} command controls the printing width for objects
+  printed by the {\tt print} command.  If the {\tt width} command has
+  no argument, the debugger prints the current width.  See also the
+  {\tt depth} command.
+
+\end{itemize}
+
+\section{Expressions}
+
+The {\tt eval} command currently accepts the following expressions:
+
+\begin{itemize}
+\item{Constants:}
+  \begin{itemize}
+  \item{booleans: {\tt 0} for false, {\tt 1} for true}
+  \item{characters: {\tt $'$a$'$}}
+  \item{strings: {\tt "abc"}}
+  \item{integers: {\tt 1}}
+  \item{reals: {\tt 1.2}}
+  \end{itemize}
+
+\item{Variables:}
+  
+  The debugger first looks for a debugger variable with the given
+  name, then for a local variable in the current procedure (or
+  iterator), then for an {\bf own} variable in the current procedure
+  (or iterator) and finally for an {\bf own} variable in the current
+  type.
+  
+  The current version of the debugger does not always print the
+  value of the variable that one expects: if two parallel scopes use
+  the same name to denote variables of different types, the first
+  declaration determines the print operation.
+
+\item{Invocations:}
+  
+  The programmer may invoke stand-alone procedures and procedures
+  from unparameterized clusters.  The current version of the debugger
+  does not allow the user to invoke parametrized cluster procedures or
+  iterators.  Arguments to procedures can be constants or variables,
+  as described above.  The current debugger does not recognize sugars:
+  users must type {\tt eval int\$add(1,2)} rather than {\tt eval 1+2}.
+  The debugger does not type-check arguments for procedure
+  invocations; irrecoverable errors may result if arguments do not
+  have the appropriate types.
+\end{itemize}
+
+\section{Idiosyncrasies}
+
+\subsection{Auxiliary files}
+
+When a program is executed under the debugger, an auxiliary file with
+symbol information is created.  If the program is named \fname{ps1},
+then the file is named \fname{ps1.sym}.
+
+To preserve break point settings between debugging sessions, the
+debugger maintains the current breakpoints in a file.  If the program
+is named \fname{ps1}, then the file is named \fname{ps1.bkpts}.
+
+\subsection{Stacks}
+
+When an iterator is active, the invoking procedure will appear on the
+stack twice: once for the invocation and once for the body of the {\bf
+for} statement.  Also, low-level routines that are in-lined may not
+appear on the stack, so setting breakpoints at such low-level routines
+may have no effect.  Own initialization is not traceable and does not
+appear on the stack.
+
+\end{document}
+
+

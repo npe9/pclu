@@ -1,0 +1,5 @@
+% Copyright Massachusetts Institute of Technology 1981, 1989
+
+_cause_illegal_char = proc () signals (illegal_char)
+	signal	illegal_char
+	end _cause_illegal_char

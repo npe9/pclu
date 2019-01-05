@@ -1,0 +1,131 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	TKNTAB CLU
+%
+%	CLU Compiler: token table for keywords, idns, and "constant" tokens
+
+tokentab = cluster is	create,			% CE -> tokentab
+			reset,			% tokentab, CE ->
+			hack,			% tokentab ->
+			unhack,			% tokentab ->
+			get_token,		% tokentab, str -> token
+			add_token		% tokentab, str, token ->
+
+size = 500
+
+rep = table[str, token]
+
+map = rep$alter
+me  = token$make_expr
+mt  = token$make_type_
+mo  = token$make_op
+mtk = token$make_typekey
+msk = token$make_stmtkey
+mek = token$make_exprkey
+mdk = token$make_defnkey
+
+create = proc (e: CE) returns (cvt)
+	t: rep := rep$create(size, hash, string$equal)
+	map(t, "begin",    msk(stmtkey$make_begin_(nil)))
+	map(t, "break",    msk(stmtkey$make_break_(nil)))
+	map(t, "cand",     mo(infixop${prec: 2,
+				       op:   "cand",
+				       neg:  false}))
+	map(t, "cluster",  mdk(defnkey$make_cluster_(nil)))
+	map(t, "continue", msk(stmtkey$make_continue_(nil)))
+	map(t, "cor",      mo(infixop${prec: 1,
+				       op:   "cor",
+				       neg:  false}))
+	map(t, "do",       token$make_do_(nil))
+	map(t, "down",     mek(exprkey$make_down_(nil)))
+	map(t, "else",     token$make_else_(nil))
+	map(t, "elseif",   token$make_elseif_(nil))
+	map(t, "end",      token$make_end_(nil))
+	map(t, "except",   token$make_except_(nil))
+	map(t, "exit",     msk(stmtkey$make_exit_(nil)))
+	map(t, "false",    me(exprabs$make_bool_(false)))
+	map(t, "for",      msk(stmtkey$make_for_(nil)))
+	map(t, "force",    mek(exprkey$make_force_(nil)))
+	map(t, "has",      token$make_has_(nil))
+	map(t, "if",       msk(stmtkey$make_if_(nil)))
+	map(t, "in",       token$make_in_(nil))
+	map(t, "is",       token$make_is_(nil))
+	map(t, "nil",      me(exprabs$make_null_(nil)))
+	map(t, "others",   token$make_others_(nil))
+	map(t, "own",      msk(stmtkey$make_own_(nil)))
+	map(t, "resignal", token$make_resignal_(nil))
+	map(t, "return",   msk(stmtkey$make_return_(nil)))
+	map(t, "returns",  token$make_returns_(nil))
+	map(t, "signal",   msk(stmtkey$make_signal_(nil)))
+	map(t, "signals",  token$make_signals_(nil))
+	map(t, "tag",      token$make_tag_(nil))
+	map(t, "tagcase",  msk(stmtkey$make_tagcase_(nil)))
+	map(t, "then",     token$make_then_(nil))
+	map(t, "true",     me(exprabs$make_bool_(true)))
+	map(t, "up",       mek(exprkey$make_up_(nil)))
+	map(t, "when",     token$make_when_(nil))
+	map(t, "where",    token$make_where_(nil))
+	map(t, "while",    msk(stmtkey$make_while_(nil)))
+	map(t, "yield",    msk(stmtkey$make_yield_(nil)))
+	map(t, "yields",   token$make_yields_(nil))
+	reset(up(t), e)
+	return(t)
+	end create
+
+reset = proc (t: cvt, e: CE)
+	unhack(up(t))
+	rep$cond_flush(t, token$is_idn)
+	map(t, "any",      mt(e.any_type))
+	map(t, "array",    mtk(typekey$make_cluster_(e.array_)))
+	map(t, "bool",     mt(e.bool_type))
+	map(t, "char",     mt(e.char_type))
+	map(t, "cvt",      mt(e.cvt_type))
+	map(t, "int",      mt(e.int_type))
+	map(t, "iter",     mdk(defnkey$make_iter_(e.iter_)))
+	map(t, "itertype", mtk(typekey$make_applytype_(e.iter_)))
+	map(t, "null",     mt(e.null_type))
+	map(t, "oneof",    mtk(typekey$make_selector_(e.oneof_)))
+	map(t, "proc",     mdk(defnkey$make_proc_(e.proc_)))
+	map(t, "proctype", mtk(typekey$make_applytype_(e.proc_)))
+	map(t, "real",     mt(e.real_type))
+	map(t, "record",   mtk(typekey$make_selector_(e.record_)))
+	map(t, "rep",      mtk(typekey$make_rep_(ident(t, "REP"))))
+	map(t, "sequence", mtk(typekey$make_cluster_(e.seq_)))
+	map(t, "string",   mt(e.str_type))
+	map(t, "struct",   mtk(typekey$make_selector_(e.struct_)))
+	map(t, "type",     mt(e.type_type))
+	map(t, "variant",  mtk(typekey$make_selector_(e.variant_)))
+	end reset
+
+hack = proc (t: cvt)
+	map(t, "applytype",  mdk(defnkey$make_applytype_(nil)))
+	map(t, "selector",   mdk(defnkey$make_selector_(nil)))
+	map(t, "type_of",    mek(exprkey$make_type_of_(nil)))
+	map(t, "monitor",    mdk(defnkey$make_cluster_(nil)))
+	end hack
+
+unhack = proc (t: cvt)
+	ident(t, "applytype")
+	ident(t, "selector")
+	ident(t, "type_of")
+	ident(t, "monitor")
+	end unhack
+
+ident = proc (t: rep, s: str) returns (idn)
+	id: idn := idn$create(s, idnkind$make_unknown(nil))
+	map(t, s, token$make_idn(id))
+	return(id)
+	end ident
+
+get_token = proc (t: cvt, s: str) returns (token)
+	return(rep$lookup(t, s))
+	   except when not_found: end
+	k: token := token$make_idn(idn$create(s, idnkind$make_unknown(nil)))
+	rep$bind(t, s, k)
+	return(k)
+	end get_token
+
+add_token = proc (t: cvt, s: str, k: token)
+	map(t, s, k)
+	end add_token
+
+end tokentab

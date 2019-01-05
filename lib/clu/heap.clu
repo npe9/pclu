@@ -1,0 +1,107 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+% This cluster is an implementation of priority queues.  It
+% inserts elements in O(log n) time, and removes the 'best'
+% element in O(log n) time, where n is the number of items in
+% the queue, and 'best' is determined by a total ordering
+% predicate which the queue is created with.
+
+% A heap is a binary tree which is balanced such that every
+% element is 'better' than its descendents, and the minimum
+% depth of the tree differs from the maximum depth by one. The
+% tree is implemented by keeping the elements in an array, with
+% the left son of a[i] in a[i*2], and the right son in
+% a[i*2+1]. The root of the tree, a[1], is the 'best' element.
+
+% Each insertion or deletion must rebalance the tree. Since the
+% tree is of depth strictly less than log n (understood to be
+% the base 2 logarithm of n), the number of comparisons is less
+% than log n for insertion and less than 2 log n for removal of
+% an element. Consequently, a sort using this technique takes
+% less than 3 n log n comparisons.
+
+% This cluster also illustrates the use of a type parameter,
+% and the use of a procedure as an object.
+
+heap = cluster [t: type] is
+    create,         % create a heap with a particular sorting predicate
+    top,            % return the best element
+    size,           % return the number of elements
+    empty,          % return true if there are no elements
+    insert,         % insert an element of type t
+    remove,         % remove the best element and return it
+    copy	    % return a copy of the heap
+    
+    pt = proctype (t, t) returns (bool)
+    at = array[t]
+    rep = record [a: at, p: pt]
+
+    % The low index of the array must be 1.  Each "son" element
+    % must be "worse" than each "father" element, according to the
+    % comparison predicate p.  This requirement can be violated if
+    % objects of type t are mutable and they are changed while
+    % being held by the heap.  The sons of element a[i] are at
+    % a[i*2] and a[i*2+1], if such indexes to the array are valid.
+    
+    create = proc (p: pt) returns (cvt)
+	return (rep${a: at$create(1), p: p})
+	end create
+    
+    top = proc (x: cvt) returns (t) signals (empty)
+	return (at$bottom(x.a))
+	    except when bounds: signal empty end
+	end top
+    
+    size = proc (x: cvt) returns (int)
+	return (at$size(x.a))
+	end size
+    
+    empty = proc (x: cvt) returns (bool)
+	return (at$size(x.a) = 0)
+	end empty
+    
+    insert = proc (x: cvt, v: t)
+	a: at := x.a
+	p: pt := x.p
+	at$addh(a, v)                      % Make room for new item
+	son: int := at$high(a)             % Node to place v if father wins
+	dad: int := son/2                  % Get index of father
+	while dad > 0 cand p(v, a[dad]) do % While father loses
+	    a[son] := a[dad]		       % Move father down
+	    son, dad := dad, dad/2	       % Get new son, father
+	    end
+	a[son] := v                        % Insert the element into place
+	end insert
+    
+    remove = proc (x: cvt) returns (t) signals (empty)
+	a: at := x.a
+	p: pt := x.p
+	r: t := at$bottom(a)               % Save best for later return
+	    except when bounds: signal empty end
+	v: t := at$remh(a)                 % Remove last element
+	max_son: int := at$size(a)         % Get new size
+	if max_son = 0 then return (r) end % If now empty, we're done
+	max_dad: int := max_son/2          % Last node with a son
+	dad: int := 1                      % Node to place v if it beats sons
+	while dad <= max_dad do            % While node has a son
+	    son: int := dad*2		       % Get the first son
+	    s: t := a[son]
+	    if son < max_son		       % If there is a second son
+	       then			       % Find the best son
+		   ns: t := a[son + 1]
+		   if p(ns, s) then son, s := son + 1, ns end
+	       end
+	    if p(v, s) then break end	       % If v beats son, we're done
+	    a[dad] := s                        % Move son up
+	    dad := son			       % Move v down
+	    end
+	a[dad] := v                        % Insert the element into place
+	return (r)                         % Return the previous best element
+	end remove
+    
+    copy = proc (x: cvt) returns (cvt)
+	x := rep$copy1 (x)	% don't copy the procedure
+	x.a := at$copy1 (x.a)	% just copy the array, not the elements
+	return (x)
+	end copy
+
+    end heap

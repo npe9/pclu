@@ -1,0 +1,62 @@
+% Copyright Massachusetts Institute of Technology 1980, 1989
+
+e_form = proc (x: real, i, f: int) returns (string)
+				   signals (illegal_field_width)
+	zero = char$c2i('0')
+	m1 = -1
+	if i < 0  cor  f < 0  cor  (i = 0  cand  f = 0)
+	   then signal illegal_field_width end
+	minus: bool, digits: _bytevec, expon: int := _unparse_real(x)
+	ndigs: int := 0
+	n: int
+	if x ~= 0.0
+	   then n, ndigs := _round_real(digits, i + f)
+		expon := expon + n - i
+	   end
+	n := i + f + 5
+	if minus
+	   then n := n + 1 end
+	if f = 0
+	   then n := n - 1 end
+	res: _bytevec := _bytevec$create(n)
+	n := 1
+	if minus
+	   then res[1] := '-'
+		n := 2
+	   end
+	j: int := 1
+	while true do
+		if i = 0
+		   then if f = 0
+			   then break end
+			res[n] := '.'
+			n := n + 1
+			i := m1
+		   end
+		c: char := '0'
+		if j <= ndigs
+		   then c := digits[j]
+			j := j + 1
+		   end
+		res[n] := c
+		n := n + 1
+		if i > 0
+		   then i := i - 1
+			continue
+		   end
+		f := f - 1
+		if f = 0
+		   then break end
+		end
+	res[n] := 'e'
+	if x = 0.0
+	   then expon := 0 end
+	if expon >= 0
+	   then res[n + 1] := '+'
+	   else res[n + 1] := '-'
+		expon := - expon
+	   end
+	res[n + 2] := char$i2c(expon / 10 + zero)
+	res[n + 3] := char$i2c(expon // 10 + zero)
+	return(_cvt[_bytevec, string](res))
+	end e_form

@@ -1,0 +1,63 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	IDN	CLU
+%
+%	CLU Compiler: idns (created via the token table of the parser env)
+
+idn = cluster is	create,		% str, idnkind -> idn
+			get_str,	% idn -> str
+			set_kind,	% idn, idnkind ->
+			get_kind,	% idn -> idnkind
+			get_val,	% idn -> locate
+			set_val,	% idn, locate ->
+			copy,		% same object
+			equal,		% same object
+			similar,	% same object
+			_gcd
+
+    rep = record[str:  str,
+		 val:  locate,
+		 kind: idnkind]
+
+    create = proc (s: str, k: idnkind) returns (cvt)
+	return(rep${str:  s,
+		    val:  locate$make_a(nil),
+		    kind: k})
+	end create
+
+    get_str = proc (i: cvt) returns (str)
+	return(i.str)
+	end get_str
+
+    set_kind = proc (i: cvt, k: idnkind)
+	i.kind := k
+	end set_kind
+
+    get_kind = proc (i: cvt) returns (idnkind)
+	return(i.kind)
+	end get_kind
+
+    get_val = proc (i: cvt) returns (locate)
+	return(i.val)
+	end get_val
+
+    set_val = proc (i: cvt, val: locate)
+	i.val := val
+	end set_val
+
+    copy = proc (i: idn) returns (idn)
+	return(i)
+	end copy
+
+    equal = proc (i1: cvt, i2: cvt) returns (bool)
+	return(i1 = i2)
+	end equal
+
+    similar = proc (i1: cvt, i2: cvt) returns (bool)
+	return(i1 = i2)
+	end similar
+
+    _gcd = proc (i: cvt, tab: gcd_tab) returns (int)
+	return(rep$_gcd(i, tab))
+	end _gcd
+
+    end idn

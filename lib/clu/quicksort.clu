@@ -1,0 +1,163 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%%%% Sort routine using Quick Sort algorithm
+
+minSize = 10;			%% Minimum size of array below which
+%				%%-SISort is used rather than LQSort.
+
+%% Items:	array containing items (of type t) to be sorted.
+%% Low:		index of first item to be sorted.
+%% High:	index of last item to be sorted.
+%%		High >= (Low - 1).  If High = (Low - 1) then no items sorted
+%%		and no check is made for High or Low being legal indexes.
+%% Less:	comparison routine for items ( proctype (t, t) returns (bool) ).
+%%		Returns true if first arg is less than second.
+%%
+%% Sorts designated items in place in array.
+%% Signals bounds if (High - Low) < -1, or Low or High is invalid index of Items.
+
+QuickSort = proc [t:type] (Items: at, Low, High : int, Less: pt)
+	      signals (bounds);
+    pt = proctype (t, t) returns (bool)
+    at = array[t]
+
+    Size:int := High - Low;		%% NOTE: This is True_Size - 1.
+
+    if (Size > 0)
+       then if (Size < minSize)
+               then SISort[t](Items, Low, High, Less);
+               else LQSort[t](Items, Low, High, Size, Less);
+	       end;
+	       resignal Bounds;
+     elseif (Size < -1)
+       then signal Bounds;
+     end;
+    end QuickSort;
+
+
+%%%% Main loop routine of Quick Sort algorithm
+
+LQSort = proc [t: type] (Items: at, Low, High, Size: int, Less: pt)
+	  signals (bounds);
+    pt = proctype (t, t) returns (bool)
+    at = array[t]
+    Temp: t;
+    begin
+	while (minSize < Size) do
+
+	    Median: int := (Low + High) / 2;    %% Get median index.
+
+	    %  SetupMidValue (sort Low, Median, and High values).
+	    if (Less(Items[Low], Items[Median]))
+	       then if (~ Less(Items[Median], Items[High]))
+		       then %% SwapItems[t](Items,Median,High);
+			    Temp := Items[Median];
+			    Items[Median] := Items[High];
+			    Items[High] := Temp;
+			    if (~ Less(Items[Low], Items[Median]))
+			       then %% SwapItems[t](Items,Low,Median);
+				    Temp := Items[Low];
+				    Items[Low] := Items[Median];
+				    Items[Median] := Temp;
+			       end;
+		       end;
+	       else if (Less(Items[Median], Items[High]))
+		       then %% SwapItems[t](Items,Low,Median);
+			    Temp := Items[Low];
+			    Items[Low] := Items[Median];
+			    Items[Median] := Temp;
+			    if (~ Less(Items[Median], Items[High]))
+			       then %% SwapItems[t](Items,Median,High);
+				    Temp := Items[Median];
+				    Items[Median] := Items[High];
+				    Items[High] := Temp;
+			       end;
+		       else %% SwapItems[t](Items,Low,High);
+			    Temp := Items[Low];
+			    Items[Low] := Items[High];
+			    Items[High] := Temp;
+		       end;
+
+	       end;				%% End of SetupMidValue
+
+	    MidItem: t := Items[Median];
+
+	    Left: int  := Low;
+	    Right: int := High;                %% Working indices.
+
+	    while (Left < Right) do
+
+		Left := Left + 1;
+		while (Less(Items[Left], MidItem)) do Left := Left + 1; end;
+
+		Right := Right - 1;
+		while (Less(MidItem, Items[Right])) do Right := Right - 1; end;
+
+		if (Left < Right)               %% Test if done.
+		   then Temp := Items[Left];
+			Items[Left] := Items[Right];
+			Items[Right] := Temp;
+			%% If not, exchange items.
+		   end;
+		end;
+
+	    Left := Right + 1;               %% Adjust pointers to consistent
+	    %				     %%-positions.
+
+	    Size         := High - Left;     %% Find smallest sub region.
+	    SmlSize: int := Right - Low;
+
+	    if (SmlSize < Size)
+	       then Low,Left := Left,Low;
+	       else Right,High := High,Right;
+		    Size,SmlSize := SmlSize,Size;
+	       end;
+	    %				%% Now set to recursizely sort the
+	    %				%%-smaller region and interatively
+	    %				%%-sort the larger.
+
+	    if (SmlSize ~= 0) then
+	       if (SmlSize < minSize)
+		  then SISort[t](Items, Left, Right, Less);
+		  else LQSort[t](Items, Left, Right, SmlSize, Less);
+		  end;
+	       end;
+
+	    end;
+
+	SISort[t](Items, Low, High, Less);   %% Final small sort.  Size is > 0.
+
+	end;
+       resignal Bounds;
+    end LQSort;
+
+
+%%%% Straight Insertion Sort (fast for small number of items).
+
+SISort = proc [t: type] (Items: at, Low, High: int, Less: pt)
+	   signals (bounds)
+    pt = proctype (t, t) returns (bool)
+    at = array[t]
+
+    for Top: int in int$From_To(Low+1, High) do
+
+	Item: t := Items[Top];
+
+	Hole: int  := Top;
+	Trial: int := Top - 1;
+
+	while ( (Low <= Trial) cand
+		(Less(Item, Items[Trial]))
+	       ) do
+
+	    Items[Hole] := Items[Trial];
+	    Hole  := Trial;
+	    Trial := Trial - 1;
+
+	    end;
+
+	Items[Hole] := Item;
+
+	end;
+       resignal Bounds;
+
+    end SISort;

@@ -1,0 +1,6 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+_int_range = proc () returns (int, int)
+	_max_int = 2**29 + (2**29 - 1)
+	_min_int = -_max_int - 1
+	return(_min_int, _max_int)
+	end _int_range

@@ -1,0 +1,10 @@
+%% Copyright Massachusetts Institute of Technology 1982, 1989
+
+tan = proc (x: real) returns (real) signals (overflow, underflow);
+
+    return (sin(x)/cos(x));
+       resignal Overflow, Underflow;
+       except when Zero_Divide:
+		   signal Overflow;
+	      end;
+    end tan;

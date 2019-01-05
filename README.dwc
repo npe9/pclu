@@ -1,0 +1,11 @@
+FIXED (in _chan.c) need to type "reset" after running pclu or any other pclu program:
+echo is off and line feed is missing.
+
+FIXED _job.c not supported => example-debug doesn't link...
+	debugger seems ok, rebuild and restart seem to work.
+	no major guarantees on _job.c as a whole, although the
+	work done was only setting the masks for the sigactions:
+	the clearing is definitely correct, the setting seems
+	a little random (accurate per hex flags, but they didn't
+	seem totally sensible)
+

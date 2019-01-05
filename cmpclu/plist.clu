@@ -1,0 +1,123 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	PLIST	CLU
+%
+%	CLU Compiler: list parsing routines
+
+% clist => T  |  T , clist
+
+p_clist = proc [t: type] (e: p_env, p_t: ptype, what: str) returns (tlist)
+	ptype = proctype (p_env) returns (t) signals (none,bad)
+	tlist = sequence[t]
+	tbuf = array[t]
+	list: tlist := tlist$new()
+	for i: int in int$from_to_by(100, 1, -1) do
+		list := tlist$addh(list, p_t(e))
+		    except when bad: end
+		tagcase e.peek1
+		   tag comma:	p_env$next_token(e)
+		   others:	return(list)
+		   end
+		end
+	    except when none:
+			 what := what || "_list"
+			 if tlist$empty(list)
+			    then p_env$assume(e, what)
+			    else p_env$err(e, "extra comma at end of " || what, minor)
+			    end
+			 return(list)
+		   end
+	buf: tbuf := tlist$s2a(list)
+	while true do
+		tbuf$addh(buf, p_t(e))
+		    except when bad: end
+		tagcase e.peek1
+		   tag comma:	p_env$next_token(e)
+		   others:	return(tlist$a2s(buf))
+		   end
+		end
+	    except when none: end
+	p_env$err(e, "extra comma at end of " || what || "_list", minor)
+	return(tlist$a2s(buf))
+	end p_clist
+
+% slist => empty  |  T sc slist
+
+p_slist = proc [t: type] (e: p_env, p_t: ptype) returns (tlist)
+	ptype = proctype (p_env) returns (t) signals (none, bad)
+	tlist = sequence[t]
+	list: tlist := tlist$new()
+	while true do
+		list := tlist$addh(list, p_t(e))
+		    except when bad: end
+		p_semi(e)
+		end
+	    except when none: return(list) end
+	end p_slist
+
+% list => T  |  T list
+% if emptyok is true then no list need be present
+
+p_list = proc [t: type] (e: p_env, p_t: ptype, emptyok: bool, what: str)
+						returns (tlist)
+	ptype = proctype (p_env) returns (t) signals (none, bad)
+	tlist = sequence[t]
+	list: tlist := tlist$new()
+	while true do
+		list := tlist$addh(list, p_t(e))
+		    except when bad: end
+		end
+	    except when none: end
+	if ~emptyok  cand  tlist$empty(list)
+	   then p_env$assume(e, what || "_list") end
+	return(list)
+	end p_list
+
+% blist => [ clist ]
+% if noneok is true then the blist need not be present
+
+p_blist = proc [t: type] (e: p_env, p_t: ptype, noneok: bool, what: str)
+								returns (tlist)
+	ptype = proctype (p_env) returns (t) signals (none, bad)
+	tlist = sequence[t]
+	tagcase e.peek1
+	   tag l_bkt:	p_env$next_token(e)
+	   others:	if ~noneok
+			   then p_env$assume(e, "[" || what || "_list]") end
+			return(tlist$new())
+	   end
+	list: tlist := p_clist[t](e, p_t, what)
+	tagcase e.peek1
+	   tag r_bkt:	p_env$next_token(e)
+	   others:	p_env$assume(e, "] in [" || what || "_list]")
+	   end
+	return(list)
+	end p_blist
+
+% plist => ( clist )
+% if noneok is true then the plist need not be present
+% if emptyok is true then the clist need not be present
+
+p_plist = proc [t: type] (e: p_env, p_t: ptype, noneok: bool, emptyok: bool,
+					what: str) returns (tlist)
+	ptype = proctype (p_env) returns (t) signals (none, bad)
+	tlist = sequence[t]
+	tagcase e.peek1
+	   tag l_paren:	p_env$next_token(e)
+	   others:	if ~noneok
+			   then p_env$assume(e, "(" || what || "_list)") end
+			return(tlist$new())
+	   end
+	if emptyok
+	   then tagcase e.peek1
+		   tag r_paren: p_env$next_token(e)
+				return(tlist$new())
+		   others:
+		   end
+	   end
+	list: tlist := p_clist[t](e, p_t, what)
+	tagcase e.peek1
+	   tag r_paren:	p_env$next_token(e)
+	   others:	p_env$assume(e, ") in (" || what || "_list)")
+	   end
+	return(list)
+	end p_plist

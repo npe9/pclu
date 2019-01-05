@@ -1,0 +1,550 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	TOP1 CLU
+%
+%	CLU compiler: top level
+
+start_up = proc ()
+	own init: bool := false
+	allok: bool := true
+	if ~init
+	   then restore_compiler()
+		if ~init
+		   then init := true
+			initialize_compiler()
+		   end
+	   end
+	line: ac := str$s2ac(get_jcl())
+	c: char := flush_blanks(line)
+	if c ~= ' '
+	   then	if c ~= '#' cand c~= '-'
+		   then addl_chars(line, "clu ") end
+		tyo: stream := fake_stream()
+		stream$reset(tyo)
+		allok := process_commands(line, tyo, jcl_line_)
+		if allok then _exit(0) else _exit(-1) end
+		% return
+	   end
+	tyo: stream := stream$primary_output()
+	stream$puts(tyo, "\n\n***** CLU COMPILER 3.")
+	stream$puts(tyo, cmpvar$version())
+	stream$puts(tyo, " ***** (")
+	stream$puts(tyo, op_sys_name())
+	stream$puts(tyo, ") *****\n\n")
+	tyi: stream := stream$primary_input()
+	while true do
+		if stream$is_terminal(tyi) then
+		    tyi.prompt := "command(s): "
+		    line := str$s2ac(lineedit(tyi, "command(s): "))
+		    tyi.prompt := ""
+		  else
+		    stream$putl(tyo, "command(s): ")
+		    stream$flush(tyo)
+		    line := str$s2ac(stream$getl(tyi))
+		  end
+		stream$putl(tyo, "")
+		allok := process_commands(line, tyo, command_line_)
+		end except when end_of_file: end
+	if allok then _exit(0) else _exit(-1) end
+	end start_up
+
+addl_chars = proc (line: ac, chars: str)
+	i: int := str$size(chars)
+	while i > 0 do
+		ac$addl(line, chars[i])
+		i := i - 1
+		end
+	end addl_chars
+
+process_commands = proc (line: ac, tyo: stream, from: int) returns
+(bool)
+	allok: bool := true
+	comms: commandlist, rfs: str, rhave: bool := parse_command_line(line)
+	rtyo: stream := tyo
+	if rhave
+	   then rtyo := get_outstream(rfs, tyo)
+		if from = jcl_line_
+		   then errs: str := tyo.contents
+			if ~str$empty(errs)
+			   then stream$reset(tyo)
+				stream$putl(rtyo, errs)
+				   except when not_possible (*): end
+			   end
+		   end
+	elseif from = jcl_line_
+	   then rtyo := stream$primary_output() end
+	isterm: bool := stream$is_terminal(rtyo)
+	for i: int in commandlist$indexes(comms) do
+		comm: command := comms[i]
+		if as$size(comm.opts) > 0
+		   then stream$putl(rtyo, "options illegal")
+			   except when not_possible (*): end
+		   end
+		mode: int := get_command_mode(comm.cmnd)
+		if mode = execute_
+		   then execute_command(comm.cmnd, comm.args, rtyo)
+		elseif ~as$empty(comm.args)  cor  mode = ce_
+		   then allok1: bool := compile(mode, comm.args, rtyo)
+			if ~allok1 then allok := false end
+		else stream$putl(rtyo, "missing file name(s)") end
+		   except when not_possible (*): end
+		end
+	if rtyo ~= tyo
+	   then stream$flush(rtyo)
+		    except when not_possible (*): end
+		stream$close(rtyo)
+		    except when not_possible (*): stream$abort(rtyo) end
+		if ~isterm  cand  stream$is_terminal(tyo)
+		   then dump_file(rtyo.name, tyo) end
+	   end
+	return (allok)
+	end process_commands
+
+fake_stream = proc () returns (stream)
+	own fake: stream := stream$create_output()
+	return(fake)
+	end fake_stream
+
+get_outstream = proc (fs: str, tyo: stream) returns (stream)
+	if ~str$empty(fs)
+	   then fn: fname, subst: bool := make_file_name(fs, "", tyo)
+		return(open_stream(fn, "write", tyo))
+	   end except when bad_format, open_failed: end
+	return(open_stream(junk_name(), "write", tyo))
+	   except when open_failed: end
+	if tyo = fake_stream()
+	   then tyo := stream$primary_output() end
+	return(tyo)
+	end get_outstream	
+
+get_command_mode = proc (cmnd: str) returns (int)
+	if prefix(cmnd, "parse", 1)
+	   then return(parse_)
+	elseif prefix(cmnd, "check", 2)
+	   then return(check_)
+	elseif prefix(cmnd, "compile", 2)  cor  prefix(cmnd, "clu", 2)
+	   then return(binary_)
+	elseif prefix(cmnd, "specs", 2)
+	   then return(specs_)
+	elseif prefix(cmnd, "ce", 2)
+	   then return(ce_)
+	elseif prefix(cmnd, "xce", 2)
+	   then return(xce_)
+	else return(execute_) end
+	end get_command_mode
+
+prefix = proc (s, cmnd: str, cnt: int) returns (bool)
+	return(_bytevec$nc_indexv(_cvt[str, _bytevec](s),
+				  _cvt[str, _bytevec](cmnd),
+				  1) = 1
+		 cand
+	       str$size(s) >= cnt)
+	end prefix
+
+make_file_name = proc (fs: str, suffix: str, tyo: stream) returns (fname, bool)
+							  signals (bad_format)
+	fn: fname := fname$parse(fs)
+	   except when bad_format:
+			begin
+			stream$puts(tyo, "bad format file name - ")
+			stream$putl(tyo, fs)
+			end except when not_possible (*): end
+			signal bad_format
+		       end
+	return(file_name_fill(fn, suffix), str$empty(fn.suffix))
+	end make_file_name
+
+check_file_name = proc (fn: fname) returns (fname)
+	if ~file_exists(fn)  cand
+	   ~str$empty(fn.suffix)  cand  str$empty(fn.other)
+	   then fn1: fname := fn
+		dez1: int := _dir_ent_size() - 1
+		if str$size(fn.name) > dez1 - str$size(fn.suffix)  cand
+		   str$size(fn.suffix) < dez1
+		   then fn1 := fname$create(fn.dir,
+					    str$substr(fn.name, 1, dez1 - str$size(fn.suffix)),
+					    fn.suffix,
+					    "")
+			if file_exists(fn1)
+			   then return(fn1) end
+		   end
+		if fn1.suffix = "spc"
+		   then fn1 := fname$create(fn1.dir, fn1.name, "clu", "")
+			if file_exists(fn1)
+			   then return(fn1) end
+		   end
+		fn1 := fname$create(fn.dir, fn.name, "", "")
+		if file_exists(fn1)
+		   then return(fn1) end
+	   end except when not_possible (*): end
+	return(fn)
+	end check_file_name
+
+open_stream = proc (fn: fname, mode: str, tyo: stream) returns (stream)
+						       signals (open_failed)
+	if mode ~= "write"
+	   then fn := check_file_name(fn) end
+	return(stream$open(fn, mode))
+	   except when not_possible (why: str):
+			begin
+			if mode = "read"
+			   then stream$puts(tyo, "reading ")
+			   else stream$puts(tyo, "writing ")
+			   end
+			stream$puts(tyo, fname$unparse(fn))
+			stream$puts(tyo, ": ")
+			stream$putl(tyo, why)
+			end except when not_possible (*): end
+			signal open_failed
+		  end
+	end open_stream
+
+execute_command = proc (cmnd: str, args: as, tyo: stream)
+	as$set_low(args, 1)
+	nargs: int := as$size(args)
+	if prefix(cmnd, "xfile", 2)
+	   then	xfile_execute(args, tyo)
+	elseif prefix(cmnd, "dir", 2)
+	   then if nargs = 0
+		   then set_dir("", tyo)
+		elseif nargs = 1
+		   then set_dir(args[1], tyo)
+		else stream$putl(tyo, "DIR expects 1 argument") end
+	elseif prefix(cmnd, "kill", 1)  cor  prefix(cmnd, "quit", 1)
+	   then if nargs = 0
+		   then quit_()
+		   else stream$putl(tyo, "KILL/QUIT expects no arguments")
+		   end
+	elseif prefix(cmnd, "help", 1)  cor  cmnd = "?"
+	   then if nargs = 0
+		   then dump_file(help_name(), tyo)
+		   else stream$putl(tyo, "HELP (?) expects no arguments")
+		   end
+	elseif prefix(cmnd, "escape", 2)
+	   then if nargs = 0
+		   then stream$flush(tyo)
+			_stop()
+		   else stream$putl(tyo, "ESCAPE expects no arguments")
+		   end
+	elseif prefix(cmnd, "optimize", 1)
+	   then if nargs > 1
+		   then stream$putl(tyo, "OPTIMIZE expects 0 or 1 arguments")
+		   else ge: g_env := maybe_g_env$value_one(cmpvar$stuffs().genv)
+			if nargs = 0  cor  prefix(args[1], "time", 1)
+			   then ge.space := true
+				ge.time := true
+			elseif prefix(args[1], "space", 1)
+			   then ge.space := true
+				ge.time := false
+			elseif prefix(args[1], "false", 1)
+			   then ge.space := false
+				ge.time := false
+			else stream$putl(tyo, "bad OPTIMIZE option") end
+		   end
+	elseif prefix(cmnd, "safe", 2)
+	   then if nargs > 1
+		   then stream$putl(tyo, "SAFE expects 0 or 1 arguments")
+		elseif nargs = 0  cor  prefix(args[1], "true", 1)
+		   then if str$empty(cmpvar$modules())
+			   then st: stream := stream$open(safety_name(),
+							  "read")
+				cmpvar$set_modules(stream$gets(st, ""))
+				stream$close(st)
+			   end except when not_possible (*):
+					    stream$putl(tyo, "SAFE failed!")
+				      end
+
+		elseif prefix(args[1], "false", 1)
+		   then cmpvar$set_modules("")
+		else stream$putl(tyo, "bad SAFE option") end
+	elseif prefix(cmnd, "allow", 1)
+	   then if nargs > 1
+		   then stream$putl(tyo, "ALLOW expects 0 or 1 arguments")
+		elseif nargs = 0  cor  prefix(args[1], "true", 1)
+		   then cmpvar$set_allow(true)
+		elseif prefix(args[1], "false", 1)
+		   then cmpvar$set_allow(false)
+		else stream$putl(tyo, "bad ALLOW option") end
+	elseif prefix(cmnd, "expunge", 3)
+	   then if nargs > 1
+		   then stream$putl(tyo, "EXPUNGE expects 0 or 1 arguments")
+		elseif nargs = 0  cor  prefix(args[1], "true", 1)
+		   then cmpvar$set_expunge(true)
+		elseif prefix(args[1], "false", 1)
+		   then cmpvar$set_expunge(false)
+		else stream$putl(tyo, "bad EXPUNGE option") end
+	elseif prefix(cmnd, "externals", 3)
+	   then if nargs > 1
+		   then stream$putl(tyo, "EXTERNALS expects 0 or 1 arguments")
+		elseif nargs = 0  cor  prefix(args[1], "true", 1)
+		   then cmpvar$set_externals(true)
+		elseif prefix(args[1], "false", 1)
+		   then cmpvar$set_externals(false)
+		else stream$putl(tyo, "bad EXTERNALS option") end
+	elseif prefix(cmnd, "force", 4)
+	   then if nargs > 1
+		   then stream$putl(tyo, "FORCE expects 0 or 1 arguments")
+		elseif nargs = 0  cor  prefix(args[1], "true", 1)
+		   then cmpvar$set_force_(true)
+		elseif prefix(args[1], "false", 1)
+		   then cmpvar$set_force_(false)
+		else stream$putl(tyo, "bad FORCE option") end
+	elseif prefix(cmnd, "locals", 1)
+	   then if nargs > 1
+		   then stream$putl(tyo, "LOCALS expects 0 or 1 arguments")
+		elseif nargs = 0  cor  prefix(args[1], "true", 1)
+		   then cmpvar$set_locals(true)
+		elseif prefix(args[1], "false", 1)
+		   then cmpvar$set_locals(false)
+		else stream$putl(tyo, "bad LOCALS option") end
+	elseif prefix(cmnd, "ccdbg", 3)
+	   then if nargs = 0
+		   then stream$putl(tyo, cmpvar$cc_dbg_cmd())
+		elseif nargs = 1  cand  prefix(args[1], "reset", 5)
+		   then cmpvar$set_cc_dbg_cmd("")
+		else cmpvar$set_cc_dbg_cmd(as2str(args)) end
+	elseif prefix(cmnd, "ccopt", 3)
+	   then if nargs = 0
+		   then stream$putl(tyo, cmpvar$cc_opt_cmd())
+		elseif nargs = 1  cand  prefix(args[1], "reset", 5)
+		   then cmpvar$set_cc_opt_cmd("")
+		else cmpvar$set_cc_opt_cmd(as2str(args)) end
+	elseif prefix(cmnd, "cfiles", 2)
+	   then if nargs > 1
+		   then stream$putl(tyo, "CFILES expects 0 or 1 arguments")
+		elseif nargs = 0  cor  prefix(args[1], "true", 1)
+		   then cmpvar$set_save_c(true)
+		elseif prefix(args[1], "false", 1)
+		   then cmpvar$set_save_c(false)
+		else stream$putl(tyo, "bad CFILES option") end
+	elseif prefix(cmnd, "bindir", 4)
+	   then if nargs > 1
+		   then stream$putl(tyo, "BINDIR expects 0 or 1 arguments")
+		elseif nargs = 0
+		   then cmpvar$set_dir("")
+		elseif str$indexc('\000', args[1]) > 0
+		   then stream$putl(tyo, "bad format directory name")
+		else s: str := _fixup_dir_part(args[1])
+		     if s ~= "/"
+			then s := str$append(s, '/')
+			     if s[1] = '~'
+				then z: int := str$indexc('/', s)
+				     if z = 0
+					then s := _home_dir(str$rest(s, 2))
+					else s := _home_dir(str$substr(s, 2, z - 2))
+						    ||
+						  str$rest(s, z)
+					end
+			     elseif s[1] ~= '/'
+				then s := cmpvar$dir() || s
+			     end except when not_found: end
+			end
+		     cmpvar$set_dir(s)
+		end
+	elseif prefix(cmnd, "binsuf", 4)
+	   then if nargs > 1
+		   then stream$putl(tyo, "BINSUF expects 0 or 1 arguments")
+		elseif nargs = 1
+		   then cmpvar$set_suffix(fname$create("", "", args[1], "").suffix)
+			   except when bad_format:
+					stream$putl(tyo, "bad format suffix")
+				  end
+		else cmpvar$set_suffix("") end
+	elseif prefix(cmnd, "newlib", 1)
+	   then if nargs > 0
+		   then stream$putl(tyo, "NEWLIB expects no arguments")
+		   else DU$reset()
+		   end
+	elseif prefix(cmnd, "dump", 2)
+	   then if nargs ~= 1
+		   then stream$putl(tyo, "DUMP expects 1 argument")
+		   else begin
+			fn: fname := file_name_fill(fname$parse(args[1]), "lib")
+			fn := XLIB$dump(fn)
+			stream$puts(tyo, "Dumped to ")
+			stream$putl(tyo, fname$unparse(fn))
+			end except when bad_format: stream$putl(tyo, "bad format file name")
+				   when not_possible (why: str): stream$putl(tyo, why)
+				   end
+		   end
+	elseif prefix(cmnd, "callers", 2)
+	   then if nargs ~= 1
+		   then stream$putl(tyo, "CALLERS expects 1 argument")
+		   else begin
+			g_xref$lookup(tyo, args[1])
+			end except when not_found: stream$putl(tyo, "\t" ||
+							args[1] || "not called")
+				   when not_possible (why: str): stream$putl(tyo, why)
+				   end
+		   end
+	elseif prefix(cmnd, "merge", 1)
+	   then for fn: fname in all_input_names(args, "lib", tyo) do
+			stream$puts(tyo, "Merging ")
+			stream$puts(tyo, fname$unparse(fn))
+			stream$flush(tyo)
+			XLIB$merge(fn)
+			    except when not_possible (why: str):
+					 stream$puts(tyo, ": ")
+					 stream$puts(tyo, why)
+				   end
+			stream$putc(tyo, '\n')
+			end
+	elseif prefix(cmnd, "forget", 4)
+	   then for nm: str in as$elements(args) do
+			DU$forget_specs(XLIB$lookup(nm))
+			    except when not_found:
+					stream$puts(tyo, nm)
+					stream$putl(tyo, ": not found")
+				   end
+			end
+	elseif prefix(cmnd, "unmerge", 1)
+	   then for fn: fname in all_input_names(args, "lib", tyo) do
+			stream$puts(tyo, "Un-Merging ")
+			stream$puts(tyo, fname$unparse(fn))
+			stream$flush(tyo)
+			XLIB$unmerge(fn)
+			    except when not_possible (why: str):
+					 stream$puts(tyo, ": ")
+					 stream$puts(tyo, why)
+				   end
+			stream$putc(tyo, '\n')
+			end
+	elseif ~str$empty(cmnd)
+	   then stream$puts(tyo, "unknown command: ")
+		stream$putl(tyo, cmnd)
+	end except when not_possible (*): end
+	end execute_command
+
+xfile_execute = proc (args: as, tyo: stream)
+	for fn: fname in all_input_names(args, "xfile", tyo) do
+		st: stream := open_stream(fn, "read", tyo)
+		    except when open_failed: continue end
+		while true do
+			inl: str := stream$getl(st)
+			stream$putl(tyo, inl)
+			    except when not_possible (*): end
+			process_commands(str$s2ac(inl), tyo, xfile_line_)
+			end
+		    except when end_of_file: end
+		stream$close(st)
+		end
+	end xfile_execute
+
+set_dir = proc (dir: str, tyo: stream)
+	set_working_dir(dir)
+	    except when bad_format:
+				stream$putl(tyo, "bad format for directory!")
+		   end
+	    except when not_possible (*): end
+	end set_dir
+
+dump_file = proc (fn: fname, tyo: stream)
+	st: stream := open_stream(fn, "read", tyo)
+	   except when open_failed: return end
+	while true do
+		stream$putl(tyo, stream$getl(st))
+		end
+	    except when end_of_file, not_possible (*): end
+	stream$close(st)
+	stream$putc(tyo, '\n')
+	    except when not_possible (*): end
+	end dump_file
+
+all_input_names = iter (args: as, suffix: str, tyo: stream) yields (fname)
+	for fs: str in as$elements(args) do
+		for fn: fname in all_derived_names(fs, suffix, tyo) do
+			yield(fn)
+			end
+		end
+	end all_input_names
+
+all_derived_names = iter (fs: str, suffix: str, tyo: stream) yields (fname)
+	fspec = file_spec
+	if ~str$empty(fs)  cand  fs[1] = '@'
+	   then fs := str$rest(fs, 2)
+		fn: fname, subst: bool := make_file_name(fs, "xload", tyo)
+		if subst
+		   then fn := check_file_name(fn) end
+		st: stream := open_stream(fn, "read", tyo)
+		while true do
+			for fn in all_derived_names(stream$getl(st), suffix, tyo) do
+				yield(fn)
+				end
+			end
+		    except when end_of_file, not_possible (*): end
+		stream$close(st)
+		return
+	   end except when bad_format, open_failed: return end
+	if str$indexc('*', fs) = 0
+	   then fn: fname := fname$parse(fs)
+		subst: bool := str$empty(fn.suffix)
+		fn := file_name_fill(fn, suffix)
+		if subst
+		   then fn := check_file_name(fn) end
+		yield(fn)
+		return
+	   end except when bad_format: end
+	sp: fspec := fspec$parse(fs)
+	   except when bad_format:
+			begin
+			stream$puts(tyo, "bad format file name - ")
+			stream$putl(tyo, fs)
+			end except when not_possible (*): end
+			return
+		  end
+	ddir: str := sp.dir
+	dnam: str := sp.name
+	dsuf: str := sp.suffix
+	doth: str := sp.other
+	subst: bool := false
+	if str$empty(sp.dir)
+	   then ddir := working_dir() end
+	if str$empty(sp.suffix)
+	   then subst := true
+		dsuf := suffix
+	   end
+	sp := fspec$create(ddir, dnam, dsuf, doth)
+	    except when bad_format: subst := false end
+	fs := fspec$unparse(sp)
+	begin
+	for fn: fname in all_file_names(fs) do
+		yield(fn)
+		end
+	return
+	end except when not_possible (why: string):
+			begin
+			stream$puts(tyo, "reading ")
+			stream$puts(tyo, fs)
+			stream$puts(tyo, ": ")
+			stream$putl(tyo, why)
+			end except when not_possible (*): end
+			return
+		   when none:
+		   end
+	if subst  cand  dsuf = "spc"
+	   then sp := fspec$create(ddir, dnam, "clu", doth)
+		for fn: fname in all_file_names(fspec$unparse(sp)) do
+			yield(fn)
+			end
+		return
+	   end except when bad_format, none, not_possible (*): end
+	if subst
+	   then sp := fspec$create(ddir, dnam, "", doth)
+		for fn: fname in all_file_names(fspec$unparse(sp)) do
+			yield(fn)
+			end
+		return
+	   end except when bad_format, none, not_possible (*): end
+	begin
+	stream$puts(tyo, "reading ")
+	stream$puts(tyo, fs)
+	stream$putl(tyo, ": no matching files")
+	end except when not_possible (*): end
+	end all_derived_names
+
+as2str = proc(a: array[string]) returns (string)
+	res: string := ""
+	for each_s: string in array[string]$elements(a) do
+		res := res || each_s || " "
+		end
+	return (res)
+	end as2str

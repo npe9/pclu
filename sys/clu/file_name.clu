@@ -1,0 +1,184 @@
+% Copyright Massachusetts Institute of Technology 1981, 1989
+
+file_name = cluster is	create,		% create a multi-part file name
+			parse,		% parse according to system format
+			unparse,	% unparse a file name
+			get_dir,	% and the directory
+			get_name,	% and the name
+			get_suffix,	% and the suffix
+			get_other,	% and the rest
+			make_output,	% make appropriate output file
+			make_temp,	% make a temporary file
+			equal,		% test for name equality
+			similar,	% same test
+			copy,		% null copy
+			print,
+			encode,
+			decode,
+			_gcd
+		    
+rep     = record[dir:    str,
+		 name:   str,
+		 suffix: str,
+		 other:  str]
+
+str     = string
+fname   = file_name
+
+create = proc (dir, name, suffix, other: str) returns (cvt)
+					      signals (bad_format)
+	if str$indexc('\000', dir) > 0  cor
+	   str$indexc('/', name) > 0  cor
+	   str$indexc('\000', name) > 0  cor
+	   str$indexc('/', suffix) > 0  cor
+	   str$indexc('\000', suffix) > 0  cor
+	   str$indexc('/', other) > 0  cor
+	   str$indexc('\000', other) > 0
+	   then signal bad_format end
+	i: int := str$indexc('.', name)
+	if i > 0
+	   then while true do
+			i := i + 1
+			if name[i] ~= '.'
+			   then signal bad_format end
+			end
+	   end except when bounds: end
+	i := str$indexc('.', suffix)
+	if i > 0
+	   then if i = 1
+		   then signal bad_format end
+		while true do
+			i := i + 1
+			if suffix[i] ~= '.'
+			   then signal bad_format end
+			end
+	   end except when bounds: end
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %    Removed as not consistent with rest of package    %
+    %                                                      %
+    %  	if ~str$empty(other)  cand  other[1] = '.'         %
+    %  	   then signal bad_format end                      %
+    %                                                      %
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+	return(rep${dir:    _fixup_dir_part(dir),
+		    name:   name,
+		    suffix: suffix,
+		    other:  other})
+	end create
+
+parse = proc (s: str) returns (cvt) signals (bad_format)
+	if str$indexc('\000', s) > 0
+	   then signal bad_format end
+	i: int := _last_indexc('/', s)
+	dir, name, suffix: str
+	if i = 0
+	   then dir := ""
+	   else if i = 1
+		   then dir := "/"
+		   else dir := _fixup_dir_part(str$substr(s, 1, i - 1))
+		   end
+		s := str$rest(s, i + 1)
+	   end
+	name, suffix, s := _split_name_part(s)
+	return(rep${dir:    dir,
+		    name:   name,
+		    suffix: suffix,
+		    other:  s})
+	end parse
+
+unparse = proc (x: cvt) returns (str)
+	s: str := x.dir
+	if ~str$empty(s)  cand  s ~= "/"
+	   then s := str$append(s, '/') end
+	s := s || x.name
+	if ~str$empty(x.suffix)  cor  ~str$empty(x.other)
+	   then s := str$append(s, '.') || x.suffix end
+	if ~str$empty(x.other)
+	   then s := str$append(s, '.') || x.other end
+        return(s)
+	end unparse
+
+get_dir = proc (x: cvt) returns (str)
+	return(x.dir)
+	end get_dir
+
+get_name = proc (x: cvt) returns (str)
+	return(x.name)
+	end get_name
+
+get_suffix = proc (x: cvt) returns (str)
+	return(x.suffix)
+	end get_suffix
+
+get_other = proc (x: cvt) returns (str)
+	return(x.other)
+	end get_other
+
+make_output = proc (x: cvt, ext: str) returns (cvt) signals (bad_format)
+	x := rep$copy1(x)
+	if str$indexc('/', ext) > 0  cor  str$indexc('.', ext) > 0
+	   then signal bad_format end
+	x.suffix := ext
+	if str$empty(x.name)
+	   then	x.name := "output" end
+	return(x)
+	end make_output
+
+make_temp = proc (tdir: str, prog: str, kind: str) returns (fname)
+						   signals (bad_format)
+	own extend_number: int := 0
+	extend_number := extend_number + 1
+	prog := "_" || prog || int$unparse(extend_number) || kind
+	kind := int$unparse(_get_pid())
+	return(create(tdir,
+		      str$substr(prog, 1, _dir_ent_size() - str$size(kind)) ||
+		      kind,
+		      "",
+		      ""))
+	   resignal bad_format
+	end make_temp
+
+equal = proc (x, y: cvt) returns (bool)
+	return(rep$similar(x, y))
+	end equal
+
+similar = proc (x, y: cvt) returns (bool)
+	return(rep$similar(x, y))
+	end similar
+
+copy = proc (x: fname) returns (fname)
+	return(x)
+	end copy
+
+print = proc (x: cvt, ps: pstream)
+	pstream$text(ps, x.dir)
+	if ~str$empty(x.dir)  cand  x.dir ~= "/"
+	   then pstream$textc(ps, '/') end
+	pstream$text(ps, x.name)
+	if ~str$empty(x.suffix)  cor  ~str$empty(x.other)
+	   then pstream$textc(ps, '.')
+		pstream$text(ps, x.suffix)
+	   end
+	if ~str$empty(x.other)
+	   then pstream$textc(ps, '.')
+		pstream$text(ps, x.other)
+	   end
+	end print
+
+encode = proc (fn: fname, ist: istream) signals (not_possible(str))
+	str$encode(unparse(fn), ist)
+	   resignal not_possible
+	end encode
+
+decode = proc (ist: istream) returns (fname)
+			     signals (end_of_file, not_possible(str))
+	return(parse(str$decode(ist)))
+	   resignal end_of_file, not_possible
+	   except when bad_format: signal not_possible("bad format") end
+	end decode
+
+_gcd = proc (x: cvt, tab: gcd_tab) returns (int)
+	return(rep$_gcd(x, tab))
+	end _gcd
+
+end file_name

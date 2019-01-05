@@ -1,0 +1,12 @@
+% Copyright Massachusetts Institute of Technology 1981, 1989
+
+_get_termcap = proc () returns (string) signals (not_found)
+	s: string
+	begin
+	s := _environ("TERMCAP")
+	if string$empty(s)  cor  s[1] ~= '/'
+	   then return(s) end
+	end except when not_found: s := "/etc/termcap" end
+	return(_termcap_entry(s, _environ("TERM")))
+	   resignal not_found
+	end _get_termcap

@@ -1,0 +1,28 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+% This routine splits a string into fields based on the
+% separator character given.  Any character (including the
+% separator) may be quoted by the quote character (user-supplied).
+
+as = array[string]
+
+split_line = proc (line: string, sep, quote: char) returns (as)
+   parts: as := as$new()
+   start: int := 1
+   len: int := string$size(line)
+   quote_flag: bool := false
+   for idx: int in int$from_to(1, len) do
+      if quote_flag then
+	    quote_flag := false
+	 else
+	    cc: char := line[idx]
+	    if cc = quote then
+		  quote_flag := true
+	       elseif cc = sep then
+		  as$addh(parts, string$substr(line, start, idx-start))
+		  start := idx + 1
+	       end
+	 end
+      end
+   if start <= len then as$addh(parts, string$rest(line, start)) end
+   return (parts)
+   end split_line

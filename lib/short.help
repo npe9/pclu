@@ -1,0 +1,532 @@
+useful.lib contains:
+	_all_file_names_
+	_change_mode
+	_change_owner
+	_dir_ent_size
+	_exit
+	_file_access
+	_file_exists
+	_file_facts
+	_file_owner
+	_gc_read
+	_get_pname
+	_get_runtime
+	_get_version
+	_get_xjname
+	_host_name
+	_longsub
+	_match_name_spec
+	_qindexc
+	_real_time
+	_restar
+	_signal
+	_sleep
+	_stop
+	_system_root
+	_time_format
+	_unquote
+	all_file_names
+	array_replace
+	asin
+	atan
+	connected_dir
+	cos
+	create_directory
+	delete_directory
+	delete_expunge
+	exp
+	file_date
+	file_exists
+	file_name_fill
+	gc
+	gc_copy
+	gc_dump
+	gc_read
+	get_argv
+	get_jcl
+	hash
+	hash_int
+	hash_obj
+	hex
+	host_address
+	link_file
+	log
+	maybe
+	mint
+	octal
+	open_append
+	open_read
+	open_write
+	quit_
+	run_time
+	set_connected_dir
+	sin
+	sleep
+	sqrt
+	symlink_file
+	table
+	tan
+	time
+	unify_spacing
+
+lowlev.lib contains:
+	_adv
+	_anyize
+	_byteptr
+	_byteptr8
+	_bytevec
+	_chan
+	_change_signal
+	_cvt
+	_dtable_size
+	_environ
+	_environs
+	_erstr
+	_event
+	_fixup_dir_part
+	_fixup_file_name
+	_free_space
+	_gc
+	_get_gid
+	_get_pid
+	_get_priority
+	_get_termcap
+	_get_uid
+	_groups
+	_heap_size
+	_home_dir
+	_host_id
+	_ioctl
+	_job
+	_last_indexc
+	_lstat
+	_obj
+	_page_size
+	_pause
+	_read_link
+	_round_real
+	_rusage
+	_select
+	_set_alarm
+	_set_limit
+	_set_priority
+	_signal_type
+	_split_name_part
+	_stat
+	_tagcell
+	_termcap
+	_termcap_decode
+	_termcap_entry
+	_umask
+	_unparse_real
+	_vec
+	_wordvec
+	_working_dir
+	gcd_tab
+	istream2chan
+	stream2chan
+
+misc.lib contains:
+	_int_range
+	bigint
+	dparse
+	heap
+	lex_scan
+	os
+	parse_line
+	quicksort
+	quick_sort
+	random
+	scase
+	split_line
+	strim
+	string_lindexs
+	string_ops
+	xref
+
+Binaries are in ~CLU/bin.  All are auto-load unless starred.
+
+all_file_names	(lib/clu)
+	Yields all file names matching a pattern in a string.
+
+array_replace	(lib/clu)
+	Replaces an arbitrary part of one array with an arbitrary part of
+	some other array.
+
+asin		(lib/clu)
+	Arcsine.
+
+atan		(lib/clu)
+	Arctangent.
+
+atan4900	(lib/asm)
+	Support for atan.
+
+bigint		(lib/clu)
+	Infinite precision integer cluster.
+
+connected_dir	(sys/asm)
+	Returns string name of current connected directory.
+
+cos		(lib/clu)
+	Cosine.
+
+create_directory (lib/asm)
+	Create a directory.
+
+delete_directory (lib/asm)
+	Delete a directory.
+
+delete_expunge	(lib/clu)
+	Same as delete_file.
+
+dparse	*	(lib/clu)
+	Date parser and subtracter.
+
+exp		(sys/asm)
+	Exponential.
+
+file_date	(lib/asm)
+	Returns read/write date of a file.
+
+file_exists	(lib/asm)
+	Tests existence of a file.
+
+file_name_fill	(sys/clu)
+	Fill in file_name parts.
+
+gc		(lib/asm)
+	Forces a garbage collection.
+
+gc_copy		(lib/clu)
+	Makes a rep-level copy of an object, preserving sharing.
+
+gc_dump		(lib/clu)
+	Writes an object to a file.
+
+gcd_tab		(lib/clu)
+	Support for gc_dump.
+
+gc_read		(lib/asm)
+	Reads a gc_dump'ed object from a file.
+
+get_argv	(lib/asm)
+	Returns C-style sequence[string] command line without program name.
+
+get_jcl		(lib/asm)
+	Returns job control line with program name stripped off.
+
+hash		(lib/asm)
+	String hashing function.
+
+hash_int	(lib/asm)
+	Integer hashing function (modulus).
+
+hash_obj	(lib/asm)
+	_obj hashing function (address modulus).
+
+heap		(lib/clu)
+	Heapsort.
+
+hex	*	(lib/clu)
+	Hex parse and unparse routines.
+
+host_address	(lib/clu)
+	Lookup address of host.
+
+istream		(lib/clu)
+	As per reference manual.
+
+lex_scan	(lib/clu)
+	Line parser.
+
+link_file	(lib/asm)
+	Make link to file.
+
+log		(sys/asm)
+	Logarithm.
+
+maybe		(lib/asm)
+	maybe[t] is like oneof[exists: t, none: null], only different.
+
+mint	*	(lib/asm)
+	Integer bit hacking routines.
+
+octal	*	(lib/clu)
+	Octal parse and unparse routines.
+
+open_append	(lib/clu)
+	Lazy man's open stream for appending.
+
+open_read	(lib/clu)
+	Lazy man's open stream for reading.
+
+open_write	(lib/clu)
+	Lazy man's open stream for writing.
+
+os	*	(lib/clu)
+	OS and host names.
+
+parse_line	(lib/clu)
+	Line parser.
+
+pstream		(lib/clu)
+	Formatted print stream.
+
+quicksort	(lib/clu)
+	Quicksort routine.
+
+quick_sort	(lib/clu)
+	Quicksort routine.
+
+quit_		(lib/asm)
+	_cleanup_() and terminate process normally.
+
+random		(lib/asm)
+	Random number generator.
+
+run_time	(lib/clu)
+	Returns current runtime.
+
+scase	*	(lib/clu)
+	String case changing routines.
+
+set_connected_dir	(lib/asm)
+	Changes connected directory.
+
+sin		(lib/asm)
+	Sine.
+
+sleep		(lib/asm)
+	Sleeps for N seconds.
+
+split_line	(lib/clu)
+	Line splitter.
+
+sqrt		(lib/asm)
+	Square root routine.
+
+stream2chan	(lib/asm)
+	Hack to get the _chan out of a stream.
+
+strim	*	(lib/clu)
+	Routines to trims blanks from head and tail of a string.
+
+string_lindexs	(lib/clu)
+	Returns last indexs.
+
+string_ops   *  (lib/clu)
+	Various string hacking routines.
+
+symlink_file	(lib/asm)
+	Make symbolic link to file.
+
+table		(lib/clu)
+	Hash table from arbitrary key to arbtrary value.
+
+time		(lib/clu)
+	Elapsed time cluster.
+
+unify_spacing	(lib/clu)
+	Reduces sequences of blanks to single space.
+
+xref		(lib/clu)
+	Cross reference cluster.
+
+_all_dir_entries_	(lib/asm)
+	Low level support for all_file_names
+
+_all_file_names_	(lib/clu)
+	Lower level version of all_file_names.
+
+_byteptr	(lib/asm)
+	Sequential access byte pointer into _bytevec.
+
+_byteptr8	(lib/asm)
+	Sequential access byte pointer in _wordvec.
+
+_change_mode	(lib/asm)
+	Change file mode.
+
+_change_signal	(lib/asm)
+	Signal interface.
+
+_dir_ent_size	(sys/clu)
+	Max size of file name component.
+
+_dtable_size	(lib/asm)
+	Maximum number of open files.
+
+_environ	(sys/asm)
+	Lookup environment variable.
+
+_erstr.equ	(lib)
+	Equates for Unix error message strings.
+
+_exit		(lib/asm)
+	_cleanup_() and terminate process with particular status.
+
+_file_access	(lib/asm)
+	Test file accessibility.
+
+_file_exists	(lib/asm)
+	Test file type and existence.
+
+_file_facts	(lib/asm)
+	Gets file info.
+
+_file_owner	(lib/asm)
+	Gets file owner info.
+
+_fixup_dir_part	(sys/clu)
+	Remove double slashes.
+
+_fixup_file_name	(sys/clu)
+	Canonicalize file name.
+
+_free_space	(lib/asm)
+	Returns amount of free storage left.
+
+_gc_read	(lib/asm)
+	Lower level version of gc_read.
+
+_get_gid	(lib/asm)
+	Get real and effective group ids.
+
+_get_pid	(sys/asm)
+	Get current process id.
+
+_get_pname	(lib/asm)
+	Get program name with directory, if any.
+
+_get_priority	(lib/asm)
+	Get priority of process/group/user.
+
+_get_runtime	(lib/asm)
+	Returns current runtime.
+
+_get_termcap	(sys/clu)
+	Get TERMCAP string.
+
+_get_uid	(lib/asm)
+	Get real and effective user ids.
+
+_get_version	(lib/asm)
+	Get program version number.
+
+_get_xjname	(lib/asm)
+	Get program name with directory removed.
+
+_groups		(lib/asm)
+	Get group access list.
+
+_heap_size	(lib/asm)
+	Returns size of current heap.
+
+_home_dir	(sys/clu)
+	Get home dir of user.
+
+_host_id	(lib/asm)
+	Get host id.
+
+_host_name	(lib/asm)
+	Get host name.
+
+_int_range	(lib/clu)
+	Returns minimum and maximum integers.
+
+_ioctl		(lib/asm)
+	For low level IOCTL hackery.
+
+_job_stuff	(lib/clu)
+	For low level job hackery.
+
+_job		(lib/asm)
+	For low level job hackery.
+
+_last_indexc	(sys/clu)
+	Reverse indexc.
+
+_longsub	(lib/clu)
+	For subtracting runtimes.
+
+_lstat		(lib/asm)
+	Stat a symbolic link.
+
+_obj		(lib/asm)
+	For low level object manipulation.
+
+_page_size	(lib/asm)
+	Get system page size in bytes.
+
+_pause		(lib/asm)
+	Wait for interrupt.
+
+_printn		(lib/clu)
+	_obj printer.
+
+_qindexc	(lib/clu)
+	Quoted indexc.
+
+_read_link	(lib/asm)
+	Read value of symbolic link.
+
+_real_time	(lib/asm)
+	Samples real time clock.
+
+_rusage		(lib/asm)
+	Get resource utilization info.
+
+_select		(lib/asm)
+	Select ready file descriptors.
+
+_set_alarm	(lib/asm)
+	Set real-time alarm to go off in N seconds.
+
+_set_limit	(lib/asm)
+	Set resource consumption.
+
+_set_priority	(lib/asm)
+	Set priority of process/group/user.
+
+_signal		(lib/asm)
+	Count signals, output messages on signals.
+
+_signal_type	(lib/clu)
+	Convert signal number to string.
+
+_sleep		(lib/asm)
+	Sleeps for N milliseconds.
+
+_split_name_part	(sys/clu)
+	Split file name.
+
+_stat		(lib/asm)
+	Stat a file.
+
+_stop		(lib/asm)
+	Force ^Z (SIGTSTP).
+
+_system_root	(lib/clu)
+	Returns CLU system root directory name.
+
+_termcap	(sys/clu)
+	Get TERMCAP capability.
+
+_termcap_entry	(sys/clu)
+	Get TERMCAP entry.
+
+_time_format	(lib/clu)
+	Formats runtime.
+
+_type_base	(lib/asm)
+	Returns base of type ids.
+
+_umask		(lib/asm)
+	Set new umask and return old.
+
+_unquote	(lib/clu)
+	Remove quoting slashes.
+
+_wordvec	(lib/asm)
+	Word vector.

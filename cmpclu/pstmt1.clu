@@ -1,0 +1,247 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	PSTMT1	CLU
+%
+%	CLU 3 compiler:  parsing routines for statements
+
+% stmtlist => empty | stmt except stmtlist
+
+% stmt => if | for | tagcase | while | RETURN | RETURN (exprlist) | YIELD |
+%	  YIELD (exprlist) | SIGNAL condition | EXIT condition | BREAK | CONTINUE |
+%	  BEGIN body END | decl | assn | declinit | sugarassn | invoke | forcestmt
+
+p_stmt = proc (e: p_env) returns (stmt) signals (none, bad)
+	abs: stmtabs
+	l: int := e.peekline
+	tagcase e.peek1
+	   tag stmtkey (k: stmtkey):
+		p_env$next_token(e)
+		tagcase k
+		   tag if_:       abs := p_if(e)
+		   tag for_:      abs := p_for(e)
+		   tag tagcase_:  abs := p_tagcase(e)
+		   tag while_:    abs := p_while(e)
+		   tag return_:   opt: bool := ~(p_env$in_proc(e)  cand
+						    p_env$specd_vals(e))
+				  abs := stmtabs$make_return_(
+						p_plist[expr](e, p_expr, opt,
+							_no_empty, "expression"))
+		   tag yield_:    opt: bool := p_env$in_proc(e)  cor
+						  ~p_env$specd_vals(e)
+				  abs := stmtabs$make_yield_(
+						p_plist[expr](e, p_expr, opt,
+							_no_empty, "expression"))
+		   tag signal_:   abs := stmtabs$make_signal_(p_condition(e))
+		   tag exit_:     abs := stmtabs$make_exit_(p_condition(e))
+		   tag break_:    abs := stmtabs$make_break_(nil)
+		   tag continue_: abs := stmtabs$make_continue_(nil)
+		   tag begin_:    abs := stmtabs$make_body(p_body(e, misc_body))
+				  p_end(e, "END of BEGIN-END statement")
+		   tag own_:	     abs := p_ownstmt(e)
+		   end
+	   tag idn:
+		tagcase p_env$peek(e, 2)
+		   tag comma, assn, colon:
+			abs := p_decl_or_assn(e)
+		   tag equal:
+			tagcase p_env$peek(e, 3)
+			   tag defnkey: signal none
+			   others:	abs := p_decl_or_assn(e)
+			   end
+		   others:
+			abs := p_expr_stmt(e)
+		   end
+	   tag exprkey (k: exprkey):
+		tagcase k
+		   tag force_:
+			tagcase p_env$peek(e, 2)
+			   tag idn: abs := p_forcestmt(e)
+			   others:  abs := p_expr_stmt(e)
+			   end
+		   others:
+			abs := p_expr_stmt(e)
+		   end
+	   tag type_, typekey, expr:
+		abs := p_expr_stmt(e)
+	   tag op, not, l_paren:
+		p_env$err(e, "operator or ( starts statement", minor)
+		abs := p_expr_stmt(e)
+	   tag except_:
+		p_env$err(e, "EXCEPT clause not attached to statement", minor)
+		abs := stmtabs$make_bad(nil)
+	   others:
+		if p_find_a_stmt(e)
+		   then abs := stmtabs$make_bad(nil)
+		   else signal none
+		   end
+	   end
+	   except when bad: abs := stmtabs$make_bad(nil) end
+	return(p_except(e, stmt$create(abs, l)))
+	end p_stmt
+
+% if => IF <> ifarmlist END | IF <> ifarmlist ELSE body END
+% ifarmlist => ifarm | ifarm ELSEIF ifarmlist
+% ifarm => expr THEN body
+
+p_if = proc (e: p_env) returns (stmtabs)
+	arms: ifarmlist := ifarmlist$new()
+	else_: mbody := mbody$make_none(nil)
+	while true do
+		line: int := e.peekline
+		x: expr := p_expr1(e)
+		tagcase e.peek1
+		   tag then_: p_env$next_token(e)
+		   others:    p_env$assume(e, "THEN in IF statement")
+		   end
+		bod: body := p_body(e, then_body)
+		arms := ifarmlist$addh(arms, ifarm${test: x,
+						    body: bod,
+						    line: line})
+		tagcase e.peek1
+		   tag elseif_: p_env$next_token(e)
+				continue
+		   tag else_:   p_env$next_token(e)
+				else_ := mbody$make_body(p_body(e, misc_body))
+		   others:
+		   end
+		p_end(e, "END of IF statement")
+		
+		return(stmtabs$make_if_(ifstmt${arms:  arms,
+						else_: else_}))
+		end
+	end p_if
+
+% for => FOR <> forvars IN invoke do
+
+p_for = proc (e: p_env) returns (stmtabs)
+	vars: forvars
+	tagcase e.peek1
+	   tag in_:  vars := forvars$make_old(idnlist$new())
+	   others:   vars := p_idns_or_decls(e)
+	   end
+	tagcase e.peek1
+	   tag in_:  p_env$next_token(e)
+	   tag assn: p_env$err(e, "use of := instead of IN", minor)
+		     p_env$next_token(e)
+	   others:   p_env$assume(e, "IN in FOR statement")
+	   end
+	call: invoke := p_make_invoke(e, p_expr1(e),
+					"expression not an invocation")
+	bod: body := p_do(e)
+	return(stmtabs$make_for_(forstmt${vars: vars,
+					  anys: decllist$new(),
+					  call: call,
+					  body: bod,
+					  xent: false}))
+	end p_for
+
+% do => DO body END
+
+p_do = proc (e: p_env) returns (body)
+	tagcase e.peek1
+	   tag do_: p_env$next_token(e)
+	   others:  p_env$assume(e, "DO of DO...END clause")
+	   end
+	bod: body := p_body(e, misc_body)
+	p_end(e, "END of DO...END clause")
+	return(bod)
+	end p_do
+
+% forvars => idnlist | decllist
+
+p_idns_or_decls = proc (e: p_env) returns (forvars)
+	idns: idnlist := p_clist[idn](e, p_idn, "idn")
+	tagcase e.peek1
+	   tag colon:
+		p_env$next_token(e)
+		t: typespec := p_type1(e)
+		decls: decllist
+		tagcase e.peek1
+		   tag comma: p_env$next_token(e)
+			      decls := p_clist[decl](e, p_decl, "decl")
+		   others:    decls := decllist$new()
+		   end
+		decls := decllist$addl(decls, decl${idns:  idns,
+						    type_: t})
+		return(forvars$make_new(decls))
+	   others:
+		return(forvars$make_old(idns))
+	   end
+	end p_idns_or_decls
+
+% idnlist => idn | idn , idnlist
+
+p_idn = proc (e: p_env) returns (idn) signals (none, bad)
+	tagcase e.peek1
+	   tag idn (k: idn):
+		p_env$next_token(e)
+		return(k)
+	   others:
+		signal none
+	   end
+	end p_idn
+
+p_idn1 = iter (e: p_env) yields (idn)
+	yield(p_idn(e))
+	    except when none: end
+	end p_idn1
+
+% decllist => decl | decl , decllist
+
+% decl => idnlist : type
+
+p_decl = proc (e: p_env) returns (decl) signals (none, bad)
+	idns: idnlist := p_clist[idn](e, p_idn, "idn")
+	t: typespec
+	tagcase e.peek1
+	   tag colon: p_env$next_token(e)
+		      t := p_type1(e)
+	   others:    p_env$assume(e, ": type in declaration")
+		      t := e.unknown_type
+	   end
+	return(decl${idns:  idns,
+		     type_: t})
+	end p_decl
+
+% tagcase => TAGCASE <> expr tagarmlist tagothers END
+% tagarmlist => tagarm | tagarm tagarmlist
+% tagothers => empty | OTHERS cbody
+
+p_tagcase = proc (e: p_env) returns (stmtabs)
+	obj: expr := p_expr1(e)
+	tagcase e.peek1
+	   tag in_: p_env$err(e, "use of IN after tagcase expression", minor)
+		    p_env$next_token(e)
+	   others:  
+	   end
+	arms: tagarmlist := p_list[tagarm](e, p_tagarm, _no_empty, "TAG arm")
+	tst: tagstmt := tagstmt${obj:     obj,
+				 arms:    arms,
+				 others_: mbody$make_none(nil)}
+	abs: stmtabs := stmtabs$make_tag_(tst)
+	tagcase e.peek1
+	   tag others_:
+		p_env$next_token(e)
+		tst.others_ := mbody$make_body(
+				    p_cbody(e, misc_body, ": in OTHERS: body"))
+	   others:
+	   end
+	p_end(e, "END of TAGCASE statement")
+	return(abs)
+	end p_tagcase
+
+% tagarm => TAG namelist mdecl cbody
+
+p_tagarm = proc (e: p_env) returns (tagarm) signals (none, bad)
+	tagcase e.peek1
+	   tag tag_: p_env$next_token(e)
+	   others:   signal none
+	   end
+	line: int := e.line
+	tags: namelist := p_clist[name](e, p_name, "name")
+	var: mdecl := p_mdecl(e)
+	bod: body := p_cbody(e, tag_body, ": in TAG...: body")
+	return(tagarm${tags: tags,
+		       var:  var,
+		       body: bod,
+		       line: line})
+	end p_tagarm

@@ -1,0 +1,6 @@
+% Copyright Massachusetts Institute of Technology 1982, 1989
+
+delete_expunge = proc (fn: file_name) signals (not_possible(string))
+	delete_file(fn)
+	   resignal not_possible
+	end delete_expunge

@@ -1,0 +1,6 @@
+externals false
+me ~CLU/lib/*.lib
+specs ~CLU/cmpclu/stable
+specs ~CLU/cmpclu/lineedit
+ce debug
+specs debug_c.spc

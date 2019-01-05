@@ -1,0 +1,7 @@
+% Copyright Massachusetts Institute of Technology 1985, 1989
+
+_cleanup_ = proc ()
+	stream$_close_all()	% close open streams
+	_gprof$control(false)
+	_gprof$dump("gmon.out")
+	end _cleanup_

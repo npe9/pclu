@@ -1,0 +1,162 @@
+stable = cluster [value_t: type] is create, lookup, insert, change,
+					  delete, empty, entries, unparse,
+					  completions, match
+    % Note that this implementation is designed for applications
+    % where lookups are much more common than insertions or deletions.
+
+    table_entry = record[ key: string, value: value_t ]
+    % Each table entry contains the key and its associated value.
+
+    rep = array[table_entry]
+    % A stable will be represented as an array of table_entry
+    % records.  These records will be kept ordered so that they can be
+    % lookup up using a binary search.
+
+    create = proc() returns( cvt )
+        return( rep$new() )
+        end create
+
+    lookup = proc( tbl: cvt, name: string ) returns( value_t )
+	       signals( not_found )
+        index: int := find_index( tbl, name, true ) resignal not_found
+	%     If find_index can't find the entry, signal that lookup can't
+	%     find it either.
+        return( tbl[ index ].value )
+	end lookup
+
+    completions = proc( tbl: cvt, name: string ) returns( bool, bool )
+	% First return value is true if name is a key in tbl
+	% Second is true if there is some entry ~= name, but that starts with
+	% the string name.
+	exact: bool:= FALSE
+	completion: bool := FALSE
+
+	for key:string, val:value_t in match( up(tbl), name ) do
+	    if key = name then
+		exact := true
+	      else
+		completion := true
+		end % if
+	    end % for
+
+	return( exact, completion )
+	end completions
+
+    match = iter( tbl:cvt, ms: string ) yields( string, value_t )
+	len: int := string$size( ms )
+	i: int := find_index( tbl, ms, false )
+	while string$substr( tbl[i].key, 1, len ) = ms do
+	    yield( tbl[i].key, tbl[i].value )
+	    i := i + 1
+	    end except when bounds: end
+	end match
+
+    insert = proc( tbl: cvt, name: string, val: value_t )
+	       signals( duplicate )
+	i: int := find_index( tbl, name, false )
+
+	if tbl[i].key = name then
+	    signal duplicate
+	  else
+	    
+	    rep$addh( tbl, table_entry${ key: name, value: val } )
+
+	    for j: int in int$from_to_by( rep$high( tbl ), i+1, -1) do
+	    	tbl[j] := tbl[j-1]
+		end % for
+	    % move all elements up to make room to insert this one.
+
+	    tbl[i] := table_entry${ key: name, value: val }
+	    end except when bounds:
+	    	rep$addh( tbl, table_entry${key:name, value:val } )
+		end % when
+
+	end insert
+
+    change = proc( tbl:cvt, name: string, new_val: value_t )
+		signals( not_found )
+	tbl[find_index( tbl, name, true )].value := new_val
+		resignal not_found
+        end change
+
+    find_index = proc( tbl: rep, look_for: string, exact: bool ) returns( int )
+		   signals( not_found )
+	% If exact = true, returns i such that tbl[i].key = look_for.
+	% If exact = false, returns lowest i such that tbl[i].key >= look_for.
+	low: int := rep$low( tbl ) - 1
+	high: int := rep$high( tbl ) + 1
+
+	while true do
+	    % Loop invariant (true at beginning of every loop) is that
+	    % tbl[low].key < look_for < tbl[high].key.
+
+	    guess:int := int$div((low + high), 2)
+
+	    if tbl[guess].key < look_for then
+		low:= guess
+	      elseif tbl[guess].key > look_for then
+		high:= guess
+	      else % tbl[guess].key must equal look_for!
+		return( guess )
+		end except when bounds:
+			if exact then
+			    signal not_found
+			  else
+			    return( high )
+			    end % if
+			end % when
+	    % only signals bounds if tbl was empty!
+
+	    if low + 1 = high then
+		if exact then
+		    signal not_found
+		  else
+		    return( high )
+		    end % if
+		end % if
+	    % if straddling it, must not be exact!
+
+	    end % while
+
+        end find_index
+
+    delete = proc( tbl: cvt, name: string ) signals( not_found )
+        index: int := find_index( tbl, name, true ) resignal not_found
+	%     If find_index can't find the entry, signal that delete can't
+	%     find it either.
+	for i:int in int$from_to( index, rep$high( tbl ) - 1) do
+	    tbl[i] := tbl[i+1]
+	    end % for
+	rep$remh( tbl )
+	% Shift all elements down one to preserve the order.
+        end delete
+
+    entries = iter( tbl: cvt ) yields( string, value_t )
+        for el:table_entry in rep$elements( tbl ) do
+            yield( el.key, el.value )
+            end % for
+        %     Since the rep$elements iterator already exists, just iterate
+        %     through each element of the array, returning the key.
+        end entries
+
+    empty = proc( tbl: cvt ) returns( bool )
+        return( rep$empty( tbl ) )
+        end empty
+
+    unparse = proc( tbl:stable[ value_t ] ) returns( string )
+	    where value_t has unparse: proctype( value_t ) returns( string )
+
+	string_to_return: string := ""
+	% Start with an empty string and add a line for each table entry.
+	
+	for key:string, value:value_t in stable[value_t]$entries(tbl) do
+	    string_to_return := string_to_return || key || ": " ||
+	        value_t$unparse( value ) || "\n"
+	    end % for
+	% Iterate through all table entries and add them onto the string to
+	% return, adding a newline character after each one.
+
+	return( string_to_return )
+	end unparse
+
+    end stable

@@ -1,0 +1,33 @@
+make_upper_case = proc (s: string) returns (string)
+    for i: int in int$from_to(1, string$size(s)) do
+	c: char := s[i]
+	if c >= 'a' cand c <= 'z' then
+	   a: act := string$s2ac(s)
+	   for i in int$from_to(i, act$size(a)) do
+	       c := a[i]
+	       if c >= 'a' cand c <= 'z' then
+		  a[i] := i2c(c2i(c) - 32)
+		  end
+	       end
+	   return(ac2s(a))
+	   end
+	end
+    return(s)
+    end make_upper_case
+
+make_lower_case = proc (s: string) returns (string)
+    for i: int in int$from_to(1, string$size(s)) do
+	c: char := s[i]
+	if c >= 'A' cand c <= 'Z' then
+	   a: act := string$s2ac(s)
+	   for i in int$from_to(i, act$size(a)) do
+	       c := a[i]
+	       if c >= 'A' cand c <= 'Z' then
+		  a[i] := i2c(c2i(c) + 32)
+		  end
+	       end
+	   return(ac2s(a))
+	   end
+	end
+    return(s)
+    end make_lower_case

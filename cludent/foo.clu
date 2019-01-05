@@ -1,0 +1,915 @@
+buf = cluster is create,
+		 flush,         % flushes contents of buffer
+		 replace,       % put contents of 2nd buf in 1st, flush 2nd
+		 copy,
+		 get_cursor,    % returns current line and pos in line
+		 set_cursor,
+		 get_mark,      % returns marked line and pos in line
+		 set_mark,
+		 add_cursor,    % returns a new cursor but does not update
+		 new_cursor,    % bumps cursor by (nlines, npos)
+		 insert,        % inserts string at cursor
+		 % cursor is updated to after the string
+		 can_insert,
+		 addh,          % adds string to the end of the buffer
+		 delete,        % deletes from cursor to (nline, npos)
+		 % returns real (nline, npos) deleted to
+		 % returns (0, 0) if deleting illegal
+		 % cursor is unchanged
+		 del_frame,     % deletes nframes forward or back
+		 b2s,           % returns string between cursor and (nline, npos)
+		 % cursor is updated to after the string
+		 fetch,
+		 store,
+		 get_changed,
+		 set_changed,
+		 any_changed,
+		 empty,
+		 equal,
+		 size,          % returns # of lines in buffer
+		 insert_buf,    % inserts 2nd buf at cursor in 1st
+		 sub_buf,       % copies part from cursor to (nline, npos)
+		 % cursor is updated to (nline, npos)
+		 get_name,      % returns name of current frame
+		 set_name,      % sets name of current frame
+		 get_frame,     % returns (start, end) lines of frame text
+		 new_frame,     % moves relative nframes
+		 frame_num,     % current frame number
+		 read           % create buf from _chan contents
+
+
+    ab      = array[bool]
+    afm     = array[frame]
+    frame   = record[name:    string,
+		     length:  int,
+		     empty:   bool,
+		     changed: bool]
+    rep     = record[as:            ast,
+		     simple:        bool,
+		     mline, mpos:   int,
+		     line, pos:     int,
+		     idx:           int,
+		     base, max:     int,
+		     frames:        afm]
+
+    % The cursor is the combination of line and pos.
+    % The rep invariant:
+    %
+    % simple <-> size(frames) = 1  &  size(frames[1].name) = 0
+    % 1 = low(as) = low(frames)
+    % 1 <= line, mline <= high(as)
+    % 1 <= pos <= size(as[line]) + 1
+    % 1 <= mpos <= size(as[mline]) + 1
+    % 1 <= i <= high(as) -> string$indexc('\n', as[i]) = 0
+    % 1 <= i <= high(frames) -> frames[i].len > 0 & (~simple -> frames[i].len > 2)
+    % SUM{frames[i].length} = size(as)1 <= i <= high(frames)
+    % 1 <= idx <= high(frames)
+    % base < line <= max
+    % SUM{frames[i].length} = base1 <= i < idx
+    % base + frames[idx].length = max
+
+    own done: bool := false
+    own temp: ast
+
+    create = proc () returns (cvt)
+	if ~done
+	   then temp := ast$new()
+		done := true
+	   end
+	return(rep${as:                 ast$[""],
+		    simple:             true,
+		    mline, mpos:        1,
+		    line, pos:          1,
+		    idx:                1,
+		    base:               0,
+		    max:                1,
+		    frames:             afm$[frame${name:    "",
+						    length:  1,
+						    empty:   true,
+						    changed: false}]})
+	end create
+
+    flush = proc (b: cvt)
+	b.as := ast$[""]
+	b.simple := true
+	b.mline := 1
+	b.mpos := 1
+	b.line := 1
+	b.pos := 1
+	b.idx := 1
+	b.base := 0
+	b.max := 1
+	b.frames := afm$[frame${name:    "",
+				length:  1,
+				empty:   true,
+				changed: false}]
+	end flush
+
+    replace = proc (b1, b2: cvt)
+	b1.as := b2.as
+	b1.simple := b2.simple
+	b1.mline := b2.mline
+	b1.mpos := b2.mpos
+	b1.line := b2.line
+	b1.pos := b2.pos
+	b1.idx := b2.idx
+	b1.base := b2.base
+	b1.max := b2.max
+	b1.frames := b2.frames
+	flush(up(b2))
+	end replace
+
+    copy = proc (b: cvt) returns (cvt)
+	r: rep := rep$copy1(b)
+	r.as := ast$copy1(r.as)
+	r.frames := afm$copy(r.frames)
+	return(r)
+	end copy
+
+    get_cursor = proc (b: cvt) returns (int, int)
+	return(b.line, b.pos)
+	end get_cursor
+
+    set_cursor = proc (b: cvt, nline, npos: int)
+	as: ast := b.as
+	if nline < 1
+	   then nline := 1
+		npos := 1
+	 elseif nline > ast$size(as)
+	   then nline := ast$size(as)
+		npos := string$size(ast$top(as)) + 1
+	 elseif npos < 1
+	   then npos := 1
+	 else lim: int := string$size(as[nline])
+	      if npos > lim
+		 then npos := lim + 1 end
+	 end
+	if ~b.simple
+	   then if nline > b.line
+		   then while nline > b.max do
+			    b.idx := b.idx + 1
+			    b.base := b.max
+			    b.max := b.max + b.frames[b.idx].length
+			    end
+		 elseif nline < b.line
+		   then while nline <= b.base do
+			    b.max := b.base
+			    b.idx := b.idx - 1
+			    b.base := b.base - b.frames[b.idx].length
+			    end
+		 end
+	   end
+	b.line := nline
+	b.pos := npos
+	end set_cursor
+
+    get_mark = proc (b: cvt) returns (int, int)
+	return(b.mline, b.mpos)
+	end get_mark
+
+    set_mark = proc (b: cvt, nline, npos: int)
+	as: ast := b.as
+	if nline < 1
+	   then nline := 1
+		npos := 1
+	 elseif nline > ast$size(as)
+	   then nline := ast$size(as)
+		npos := string$size(ast$top(as)) + 1
+	 elseif npos < 1
+	   then npos := 1
+	 else lim: int := string$size(as[nline])
+	      if npos > lim
+		 then npos := lim + 1 end
+	 end
+	b.mline := nline
+	b.mpos := npos
+	end set_mark
+
+    add_cursor = proc (b: cvt, nlines, nchars: int) returns (int, int)
+	as: ast := b.as
+	lim: int := ast$size(as)
+	begin
+	    line: int := b.line + nlines
+	    if line > lim
+	       then exit overflow
+	     elseif line < 1
+	       then return(1, 1) end
+	    pos: int
+	    if nlines ~= 0
+	       then pos := nchars + 1
+	       else pos := b.pos + nchars
+	       end
+	    if nchars > 0
+	       then while true do
+			slim: int := string$size(as[line]) + 1
+			if pos <= slim
+			   then break
+			 elseif line = lim
+			   then exit overflow end
+			line := line + 1
+			pos := pos - slim
+			end
+	     elseif nchars < 0
+	       then while pos <= 0 do
+			if line = 1
+			   then return(1, 1) end
+			line := line - 1
+			pos := string$size(as[line]) + 1 + pos
+			end
+	     end
+	    return(line, pos)
+	    end except when overflow: return(lim, string$size(ast$top(as)) + 1)
+		       end
+	end add_cursor
+
+    new_cursor = proc (b: cvt, nlines, nchars: int) returns (int, int)
+	as: ast := b.as
+	lim: int := ast$size(as)
+	begin
+	    oline: int := b.line
+	    line: int := oline + nlines
+	    if line > lim
+	       then exit overflow
+	     elseif line < 1
+	       then exit underflow end
+	    pos: int
+	    if nlines ~= 0
+	       then pos := nchars + 1
+	       else pos := b.pos + nchars
+	       end
+	    if nchars > 0
+	       then while true do
+			slim: int := string$size(as[line]) + 1
+			if pos <= slim
+			   then break
+			 elseif line = lim
+			   then exit overflow end
+			line := line + 1
+			pos := pos - slim
+			end
+	     elseif nchars < 0
+	       then while pos <= 0 do
+			if line = 1
+			   then exit underflow end
+			line := line - 1
+			pos := string$size(as[line]) + 1 + pos
+			end
+	     end
+	    if ~b.simple
+	       then if line > oline
+		       then while line > b.max do
+				b.idx := b.idx + 1
+				b.base := b.max
+				b.max := b.max + b.frames[b.idx].length
+				end
+		     elseif line < oline
+		       then while line <= b.base do
+				b.max := b.base
+				b.idx := b.idx - 1
+				b.base := b.base - b.frames[b.idx].length
+				end
+		     end
+	       end
+	    b.line := line
+	    b.pos := pos
+	    return(line, pos)
+	    end except when overflow:
+			    b.line := lim
+			    b.pos := string$size(ast$top(as)) + 1
+			    b.idx := afm$size(b.frames)
+			    b.max := lim
+			    b.base := lim - afm$top(b.frames).length
+			    return(lim, b.pos)
+		       when underflow:
+			    b.line := 1
+			    b.pos := 1
+			    b.idx := 1
+			    b.base := 0
+			    b.max := afm$bottom(b.frames).length
+			    return(1, 1)
+		       end
+	end new_cursor
+
+    insert = proc (b: cvt, s: string) returns (bool)
+	sl: int := string$size(s)
+	if sl = 0
+	   then return(true) end
+	as: ast := b.as
+	line: int := b.line
+	pos: int := b.pos
+	extra: bool := false
+	fm: frame
+	if ~b.simple  cand  line < b.base + 4
+	   then if line = 1  cor  line > b.base + 1  cor
+		   pos > 1  cor  s[sl] ~= '\n'
+		   then return(false) end
+		fm := b.frames[b.idx - 1]
+		extra := true
+	   else fm := b.frames[b.idx]
+	   end
+	fm.empty := false
+	fm.changed := true
+	rest: string := as[line]
+	first: string := string$substr(rest, 1, pos - 1)
+	rest := string$rest(rest, pos)
+	i: int := string$indexc('\n', s)
+	if i = 0
+	   then % special case when no newlines in string
+		as[line] := first || s || rest
+		if b.mline = line  cand  b.mpos > pos
+		   then b.mpos := b.mpos + sl end
+		b.pos := pos + sl
+		return(true)
+	   end
+	ast$trim(temp, 1, 0)
+	lag: int := 1
+	for ptr: int in int$from_to(i, sl) do
+	    if s[ptr] = '\n'
+	       then ast$addh(temp, string$substr(s, lag, ptr - lag))
+		    lag := ptr + 1
+	       end
+	    end
+	s := string$rest(s, lag)
+	as[line] := first || ast$bottom(temp)
+	num: int := ast$size(temp)
+	fm.length := fm.length + num
+	if extra
+	   then b.base := b.base + num end
+	b.max := b.max + num
+	b.line := line + num
+	b.pos := string$size(s) + 1
+	ast$addh(temp, s || rest)
+	if b.mline > line
+	   then b.mline := b.mline + num
+	 elseif b.mline = line  cand  b.mpos > pos
+	   then b.mline := b.line
+		b.mpos := b.pos + b.mpos - pos
+	 end
+	array_replace[string](as, line + 1, 0, temp, 2, num)
+	ast$trim(temp, 1, 0)
+	return(true)
+	end insert
+
+    can_insert = proc (b: cvt) returns (bool)
+	return(b.simple  cor  b.line > b.base + 3)
+	end can_insert
+
+    addh = proc (b: cvt, s: string)
+	fm: frame := afm$top(b.frames)
+	fm.changed := true
+	as: ast := b.as
+	hi: int := ast$size(as)
+	if fm.empty
+	   then ast$trim(as, 1, hi - 1)
+		fm.length := 0
+		fm.empty := false
+	   end
+	i: int := string$indexc('\n', s)
+	if i = 0
+	   then ast$addh(as, s)
+		fm.length := fm.length + 1
+		if b.max = hi
+		   then b.max := ast$size(as) end
+		return
+	   end
+	sum: int := 1
+	lag: int := 1
+	for ptr: int in int$from_to(i, string$size(s)) do
+	    if s[ptr] = '\n'
+	       then % split the string
+		    ast$addh(as, string$substr(s, lag, ptr - lag))
+		    lag := ptr + 1
+		    sum := sum + 1
+	       end
+	    end
+	ast$addh(as, string$rest(s, lag))
+	fm.length := fm.length + sum
+	if b.max = hi
+	   then b.max := ast$size(as) end
+	end addh
+
+    delete = proc (b: cvt, nline, npos: int) returns (int, int)
+	if nline > b.max
+	   then nline := b.max
+		npos := max_int
+	 elseif b.simple  cand  nline < 1
+	   then nline := 1
+		npos := 1
+	 elseif ~b.simple  cand  nline < b.base + 4
+	   then nline := b.base + 4
+		npos := 1
+	 elseif npos < 1
+	   then npos := 1 end
+	as: ast := b.as
+	s: string := as[nline]
+	if npos > string$size(s)
+	   then npos := string$size(s) + 1 end
+	line: int := b.line
+	pos: int := b.pos
+	xline: int := nline
+	xpos: int := npos
+	if nline < line
+	   then if ~b.simple  cand  nline < b.base + 4
+		   then return(0, 0) end
+		line, nline := nline, line
+		pos, npos := npos, pos
+		b.line := line
+		b.pos := pos
+		s := as[nline]
+	 elseif nline = line
+	   then if ~b.simple  cand  line < b.base + 4
+		   then return(0, 0)
+		 elseif npos < pos
+		   then pos, npos := npos, pos
+			b.pos := pos
+		 elseif npos = pos
+		   then return(xline, xpos) end
+		fm: frame := b.frames[b.idx]
+		as[line] := string$substr(s, 1, pos - 1) ||
+			    string$rest(s, npos)
+		if fm.length = 1  cand  string$empty(as[line])
+		   then fm.empty := true
+			fm.changed := false
+		   else fm.changed := true
+		   end
+		if b.mline = line
+		   then if b.mpos >= npos
+			   then b.mpos := b.mpos - (npos - pos)
+			 elseif b.mpos > pos
+			   then b.mpos := pos end
+		   end
+		return(xline, xpos)
+	 elseif ~b.simple  cand  line < b.base + 4
+	   then return(0, 0) end
+	num: int := nline - line
+	mline: int := b.mline
+	mpos: int := b.mpos
+	s := string$rest(s, npos)
+	if mline > nline
+	   then b.mline := mline - num
+	 elseif mline = nline  cand  mpos > npos
+	   then b.mline := line
+		b.mpos := pos + (mpos - npos)
+	 elseif mline > line  cor  (mline = line  cand  mpos > pos)
+	   then b.mline := line
+		b.mpos := pos
+	 end
+	as[line] := string$substr(as[line], 1, pos - 1) || s
+	array_replace[string](as, line + 1, num, temp, 1, 0)
+	fm: frame := b.frames[b.idx]
+	fm.length := fm.length - num
+	if fm.length = 1  cand  string$empty(as[line])
+	   then fm.empty := true
+		fm.changed := false
+		b.max := 1
+	   else fm.changed := true
+		b.max := b.max - num
+	   end
+	return(xline, xpos)
+	end delete
+
+    del_frame = proc (b: cvt, nframes: int) returns (int, int, buf)
+	if nframes = 0
+	   then return(b.line, b.line - 1, create()) end
+	frames: afm := b.frames
+	idx: int := b.idx
+	nidx: int := idx + nframes
+	hi: int := afm$size(frames)
+	base: int := b.base
+	if nframes < 0
+	   then if nidx < 0
+		   then nidx := 0 end
+		base := 0
+		for i: int in int$from_to(1, nidx) do
+		    base := base + frames[i].length
+		    end
+		idx, nidx := nidx + 1, idx + 1
+	 elseif nidx > hi
+	   then nidx := hi + 1 end
+	as: ast := b.as
+	if idx = 1  cand  nidx > hi
+	   then nb: buf := copy(up(b))
+		hi := ast$size(as)
+		ast$trim(as, 1, 0)
+		ast$addh(as, "")
+		afm$trim(frames, 1, 0)
+		afm$addh(frames, frame${name:    "",
+					length:  1,
+					empty:   true,
+					changed: false})
+		b.simple := true
+		b.base := 0
+		b.max := 1
+		b.idx := 1
+		b.line := 1
+		b.pos := 1
+		b.mline := 1
+		b.mpos := 1
+		return(1, hi, nb)
+	   end
+	nb: rep := down(create())
+	nafm: afm := afm$new()
+	array_replace[frame](nafm, 1, 0, frames, idx, nidx - idx)
+	nb.frames := nafm
+	add: int := 0
+	for i: int in int$from_to(0, hi - nidx) do
+	    fm: frame := frames[nidx + i]
+	    frames[idx + i] := fm
+	    add := add + fm.length
+	    end
+	afm$trim(frames, 1, hi - (nidx - idx))
+	hi := ast$size(as)
+	mid: int := hi - add
+	nas: ast := ast$new()
+	array_replace[string](nas, 1, 0, as, base + 1, mid - base)
+	nb.as := nas
+	nb.simple := false
+	nb.max := afm$bottom(nafm).length
+	array_replace[string](as, base + 1, mid - base, temp, 1, 0)
+	if add = 0
+	   then b.max := base
+		b.line := base
+		b.pos := string$size(ast$top(as)) + 1
+		b.idx := idx - 1
+		b.base := base - frames[b.idx].length
+	   else b.idx := idx
+		b.base := base
+		b.max := base + frames[idx].length
+		b.line := base + 1
+		b.pos := 1
+	   end
+	if b.mline > base  cand  b.mline <= mid
+	   then b.mline := b.line
+		b.mpos := b.pos
+	 elseif b.mline > mid
+	   then b.mline := b.mline - (mid - base) end
+	return(base + 1, mid, up(nb))
+	end del_frame
+
+    b2s = proc (b: cvt, nline, npos: int) returns (string)
+	as: ast := b.as
+	s: string
+	if nline > ast$size(as)
+	   then nline := ast$size(as)
+		s := ast$top(as)
+		npos := string$size(s) + 1
+	   else if nline < 1
+		   then nline := 1
+			npos := 1
+		 elseif npos < 1
+		   then npos := 1 end
+		s := as[nline]
+		if npos > string$size(s)
+		   then npos := string$size(s) + 1 end
+	   end
+	line: int := b.line
+	pos: int := b.pos
+	b.line := nline
+	b.pos := npos
+	if nline > line
+	   then sum: string := string$rest(as[line], pos)
+		while true do
+		    line := line + 1
+		    if line < nline
+		       then sum := sum || "\n" || as[line]
+			    continue
+		       end
+		    return(sum || "\n" || string$substr(s, 1, npos - 1))
+		    end
+	 elseif nline = line  cand  npos >= pos
+	   then return(string$substr(s, pos, npos - pos))
+	 else return ("") end
+	end b2s
+
+    fetch = proc (b: cvt, line: int) returns (string)
+	return(b.as[line])
+	   except when bounds: return("") end
+	end fetch
+
+    store = proc (b: cvt, line: int, s: string) returns (bool) signals (bounds)
+	if line < 1  cor  line > ast$size(b.as)
+	   then signal bounds end
+	idx: int := b.idx
+	if ~b.simple
+	   then base: int := b.base
+		if line > b.line
+		   then max: int := b.max
+			while line > max do
+			    idx := idx + 1
+			    base := max
+			    max := max + b.frames[idx].length
+			    end
+		   else while line <= base do
+			    idx := idx - 1
+			    base := base - b.frames[idx].length
+			    end
+		   end
+		if line - base <= 3
+		   then return(false) end
+	   end
+	if b.line = line  cand  b.pos > string$size(s)
+	   then b.pos := string$size(s) + 1 end
+	b.as[line] := s
+	fm: frame := b.frames[idx]
+	if fm.length = 1  cand  string$empty(s)
+	   then fm.empty := true
+		fm.changed := false
+	   else fm.empty := false
+		fm.changed := true
+	   end
+	if b.mline = line  cand  b.mpos > string$size(s)
+	   then b.mpos := string$size(s) + 1 end
+	return(true)
+	end store
+
+    get_changed = proc (b: cvt) returns (bool)
+	return(b.frames[b.idx].changed)
+	end get_changed
+
+    set_changed = proc (b: cvt, change: bool)
+	fm: frame := b.frames[b.idx]
+	if ~fm.empty
+	   then fm.changed := change end
+	end set_changed
+
+    any_changed = proc (b: cvt) returns (bool)
+	for fm: frame in afm$elements(b.frames) do
+	    if fm.changed
+	       then return(true) end
+	    end
+	return(false)
+	end any_changed
+
+    empty = proc (b: cvt) returns (bool)
+	return(b.simple  cand  afm$bottom(b.frames).empty)
+	end empty
+
+    equal = proc (b1, b2: cvt) returns (bool)
+	return(b1 = b2)
+	end equal
+
+    size = proc (b: cvt) returns (int)
+	return(ast$size(b.as))
+	end size
+
+    insert_buf = proc (b: cvt, nb: cvt) returns (bool)
+	as: ast := b.as
+	hi: int := ast$size(as)
+	line: int := b.line
+	pos: int := b.pos
+	extra: bool := false
+	if hi = 1  cand  afm$bottom(b.frames).empty
+	   then b.as := ast$copy1(nb.as)
+		b.frames := afm$copy(nb.frames)
+		b.simple := nb.simple
+		b.line := ast$size(b.as)
+		b.pos := string$size(ast$top(b.as)) + 1
+		b.max := b.line
+		fm: frame := afm$top(b.frames)
+		b.base := b.max - fm.length
+		b.idx := afm$size(b.frames)
+		if b.simple  cand  ~fm.empty
+		   then fm.changed := true end
+		return(true)
+	 elseif nb.simple
+	   then if ~b.simple  cand  line < b.base + 4
+		   then if line = 1  cor  line > b.base + 1  cor
+			   pos > 1  cor  ~string$empty(ast$top(nb.as))
+			   then return(false) end
+			extra := true
+		   end
+	 elseif b.simple  cor
+		((line > b.base + 1  cor  pos > 1)  cand
+		 (line < hi  cor  pos <= string$size(ast$top(as))))
+	   then return(false) end
+	nas: ast := nb.as
+	num: int := ast$size(nas) - 1
+	s: string := ast$bottom(nas)
+	rest: string := as[line]
+	first: string := string$substr(rest, 1, pos - 1)
+	rest := string$rest(rest, pos)
+	if num = 0
+	   then fm: frame := b.frames[b.idx]
+		fm.changed := true
+		fm.empty := false
+		as[line] := first || s || rest
+		if b.mline = line  cand  b.mpos > pos
+		   then b.mpos := b.mpos + string$size(s) end
+		b.pos := pos + string$size(s)
+		return(true)
+	   end
+	low: int := 2
+	last: string := ast$top(nas)
+	switch: bool := true
+	if ~nb.simple
+	   then num := num + 1
+		if line < hi
+		   then last := ""
+			switch := false
+		   else s := ""
+			low := 1
+		   end
+	   end
+	as[line] := first || s
+	b.line := line + num
+	b.pos := string$size(last) + 1
+	last := last || rest
+	if b.mline > line
+	   then b.mline := b.mline + num
+	 elseif b.mline = line  cand  b.mpos > pos
+	   then b.mline := b.line
+		b.mpos := b.pos + b.mpos - pos
+	 end
+	if switch
+	   then array_replace[string](as, line + 1, 0, nas, low, num)
+		as[line + num] := last
+	   else array_replace[string](as, line + 1, 0, nas, low, num - 1)
+		array_replace[string](as, line + num, 0, ast$[last], 1, 1)
+	   end
+	frames: afm := b.frames
+	if nb.simple
+	   then fm: frame
+		if extra
+		   then fm := frames[b.idx - 1]
+			b.base := b.base + num
+		   else fm := frames[b.idx]
+		   end
+		fm.changed := true
+		fm.empty := false
+		fm.length := fm.length + num
+		b.max := b.max + num
+		return(true)
+	   end
+	nframes: afm := nb.frames
+	hi := afm$size(nframes)
+	idx: int := b.idx
+	b.idx := idx + hi
+	if low = 1
+	   then idx := idx + 1 end
+	array_replace[frame](frames, idx, 0, nframes, 1, hi)
+	for fm: frame in afm$elements(nframes) do
+	    frames[idx] := frame$copy1(fm)
+	    idx := idx + 1
+	    end
+	if low = 1
+	   then b.max := ast$size(as)
+		b.base := b.max - frames[b.idx].length
+	   else b.base := b.base + num
+		b.max := b.base + frames[b.idx].length
+	   end
+	return(true)
+	end insert_buf
+
+    sub_buf = proc (b: cvt, nline, npos: int) returns (cvt)
+	if nline > b.max
+	   then nline := b.max
+		npos := max_int
+	 elseif b.simple  cand  nline < 1
+	   then nline := 1
+		npos := 1
+	 elseif ~b.simple  cand  nline < b.base + 4
+	   then nline := b.base + 4
+		npos := 1
+	 elseif npos < 1
+	   then npos := 1 end
+	as: ast := b.as
+	s: string := as[nline]
+	if npos > string$size(s)
+	   then npos := string$size(s) + 1 end
+	line: int := b.line
+	pos: int := b.pos
+	b.line := nline
+	b.pos := npos
+	if nline < line
+	   then line, nline := nline, line
+		pos, npos := npos, pos
+		s := as[nline]
+	 elseif nline = line  cand  npos < pos
+	   then pos, npos := npos, pos end
+	num: int := nline - line + 1
+	nfm: frame := frame${name:    "",
+			     empty:   false,
+			     length:  num,
+			     changed: false}
+	nas: ast := ast$new()
+	nb: rep := rep${as:             nas,
+			simple:         true,
+			mline, mpos:    1,
+			line, pos:      1,
+			idx:            1,
+			base:           0,
+			max:            num,
+			frames:         afm$[nfm]}
+	if ~b.simple  cand  line < b.base + 4
+	   then ast$addh(nas, "")
+		nfm.empty := true
+		return(nb)
+	 elseif nline = line
+	   then ast$addh(nas, string$substr(s, pos, npos -  pos))
+		if npos = pos
+		   then nfm.empty := true end
+		return(nb)
+	 end
+	array_replace[string](nas, 1, 0, as, line, num)
+	nas[1] := string$rest(ast$bottom(nas), pos)
+	nas[num] := string$substr(s, 1, npos - 1)
+	return(nb)
+	end sub_buf
+
+    get_name = proc (b: cvt) returns (string)
+	return(b.frames[b.idx].name)
+	end get_name
+
+    set_name = proc (b: cvt, name: string) signals (illegal)
+	if b.simple
+	   then if string$empty(name)
+		   then return end
+		b.simple := false
+		as: ast := b.as
+		ast$addl(as, "")
+		ast$addl(as, "% " || name)
+		ast$addl(as, "\p")
+		as.low := 1
+		b.max := ast$size(as)
+		b.line := b.line + 3
+		b.mline := b.mline + 3
+		fm: frame := afm$bottom(b.frames)
+		fm.name := name
+		fm.length := b.max
+	 elseif ~string$empty(name)
+	   then b.frames[b.idx].name := name
+		b.as[b.base + 2] := "% " || name
+		if b.line = b.base + 2  cand  b.pos > string$size(name) + 3
+		   then b.pos := string$size(name) + 3 end
+	 else signal illegal end
+	end set_name
+
+    get_frame = proc (b: cvt) returns (int, int)
+	if b.simple
+	   then return(1, b.max)
+	   else return(b.base + 4, b.max)
+	   end
+	end get_frame
+
+    new_frame = proc (b: cvt, nframes: int)
+	frames: afm := b.frames
+	idx: int := b.idx + nframes
+	if idx > afm$size(frames)
+	   then b.idx := afm$size(frames)
+		b.line := ast$size(b.as)
+		b.pos := string$size(ast$top(b.as)) + 1
+		b.max := b.line
+		b.base := b.max - afm$top(frames).length
+		return
+	 elseif idx < 1  cor  b.simple
+	   then b.idx := 1
+		b.line := 1
+		b.pos := 1
+		b.base := 0
+		b.max := afm$bottom(frames).length
+		return
+	 elseif nframes > 0
+	   then for i: int in int$from_to(b.idx + 1, idx) do
+		    b.base := b.max
+		    b.max := b.max + frames[i].length
+		    end
+	 elseif nframes < 0
+	   then minus1 = -1
+		for i: int in int$from_to_by(b.idx - 1, idx, minus1) do
+		    b.max := b.base
+		    b.base := b.base - frames[i].length
+		    end
+	 end
+	b.idx := idx
+	b.line := b.base + 4
+	b.pos := 1
+	end new_frame
+
+    frame_num = proc (b: cvt) returns (int)
+	return(b.idx)
+	end frame_num
+
+    read = proc (chan: _chan) returns (cvt, string)
+	as: ast, msg: string := _buffered_read(chan)
+	fm: frame := frame${name:    "",
+			    length:  ast$size(as),
+			    empty:   false,
+			    changed: true}
+	if ast$empty(as)
+	   then ast$addh(as, "")
+		fm.length := 1
+		fm.empty := true
+		fm.changed := false
+	   end
+	return(rep${as:          as,
+		    simple:      true,
+		    mline, mpos: 1,
+		    line, pos:   1,
+		    idx:         1,
+		    base:        0,
+		    max:         fm.length,
+		    frames:      afm$[fm]},
+	       msg)
+	end read
+
+    end buf

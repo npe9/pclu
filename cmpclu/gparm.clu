@@ -1,0 +1,1874 @@
+
+%  Copyright    Massachusetts Institute of Technology     1990,1991
+
+%%%
+%%% Code related to generating parameter blocks
+%%%
+
+% returns true if any operation is parameterized
+
+parmd_dus = proc(gen: DU) returns (bool)
+    specs: DUspecs, b:bool := du$read_specs(gen)
+    if ~DUspecs$is_none(specs) then
+       tagcase specs
+	  tag apply(a:applyinfo):
+	      if idnlist$size(a.parms) > 0 then 
+		 return (true)
+		 end
+	  tag cluster_(t:typeinfo):
+	      if tinfo_parms(t) then 
+		 return (true)
+		 end
+	  tag select(t:typeinfo):
+	      if tinfo_parms(t) then 
+		 return (true)
+		 end
+	  tag atype(t:typeinfo):
+	      if tinfo_parms(t) then 
+		 return (true) end
+	  others:
+	      logit(600, "apply:DUspecs say none") return (false) 
+	  end
+       end
+    if current_type$exists() cand current_type$get().idn.str = gen.common then
+       return(is_internal_op_parmd("")) end
+    return (false)
+    end parmd_dus
+
+tinfo_parms = proc(t:typeinfo) returns(bool)
+    if idnlist$size(t.parms) > 0 then 
+       return(true) end
+    for each_op: opinfo in opinfolist$elements(t.opers) do
+	if idnlist$size(each_op.info.parms) > 0
+	   then 
+		return(true) end
+	if typesetlist$size(each_op.where_) > 0
+	   then 
+		return(true) end
+	end % for
+    return (false)
+    end tinfo_parms
+
+% returns true if specified operation has a where clause on it
+
+parmd_op = proc(gen: DU, op:name) returns (bool)
+    specs: DUspecs, b:bool := du$read_specs(gen)
+    if ~DUspecs$is_none(specs) then
+       tagcase specs
+	  tag apply(a:applyinfo):
+	      if idnlist$size(a.parms) > 0 then 
+		 return (true)
+		 end
+	  tag cluster_(t:typeinfo):
+	      if tinfo_op(t, op) then 
+		 return (true)
+		 end
+	  tag select(t:typeinfo):
+	      if tinfo_op(t, op) then 
+		 return (true)
+		 end
+	  tag atype(t:typeinfo):
+	      if tinfo_op(t, op) then 
+		 return (true) end
+	  others:
+	      logit(601, "apply:DUspecs say none") return (false) 
+	  end
+       end
+    return (false)
+    end parmd_op
+
+% returns true if specified type itself is parameterized
+
+parmd_type = proc(gen: DU) returns (bool)
+    specs: DUspecs, b: bool := du$read_specs(gen)
+    if ~DUspecs$is_none(specs) then
+       tagcase specs
+	  tag apply(a:applyinfo):
+	      if idnlist$size(a.parms) > 0 then 
+		 return (true)
+		 end
+	  tag cluster_(t:typeinfo):
+	      if idnlist$size(t.parms) > 0 then
+		 return (true)
+		 end
+	  tag select(t:typeinfo):
+	      if idnlist$size(t.parms) > 0 then
+		 return (true)
+		 end
+	  tag atype(t:typeinfo):
+	      if idnlist$size(t.parms) > 0 then
+		 return (true)
+		 end
+	  others:
+	      logit(602, "apply:DUspecs say none") return (false) 
+	  end
+       else
+	    % logit("specs missing: " || gen.common) 
+	    return (false)
+       end
+    return (false)
+    end parmd_type
+
+% returns true, true if specified operation has a where clause on it 
+%			(or ind is a constant parm)
+%	and ind indicates a parm belonging to op, as opposed to type
+
+parmd_op_op_parm = proc(gen: DU, op:clusterop, ind: int) returns (bool, bool)
+    specs: DUspecs, b:bool := du$read_specs(gen)
+    if ~DUspecs$is_none(specs) then
+       tagcase specs
+	  tag apply(a:applyinfo):
+	      if idnlist$size(a.parms) > 0 then 
+		 return (true, false)
+		 end
+	  tag cluster_(t:typeinfo):
+	      if idnlist$size(t.parms) ~= 0
+		   cor tinfo_op(t, op.name)
+		   cor any_const_parm(t)
+		   cor current_type_restricted()
+		   cor current_type_op_restricted(op)
+		 then
+		      if ind > idnlist$size(t.parms) then return (true, true)
+			 else return (true, false)
+			 end
+		 end
+	  tag select(t:typeinfo):
+	      if tinfo_op(t, op.name) then 
+		 return (true, false)
+		 end
+	  tag atype(t:typeinfo):
+	      if tinfo_op(t, op.name) then 
+		 return (true, false) end
+	  others:
+	      logit(603, "apply:DUspecs say none") return (false, false) 
+	  end
+       end
+    return (false, false)
+    end parmd_op_op_parm
+
+% returns count of parameters belonging to cluster
+
+cluster_parm_count = proc(gen: DU) returns (int)
+    specs: DUspecs, b:bool := du$read_specs(gen)
+    if ~DUspecs$is_none(specs) then
+       tagcase specs
+	  tag apply(a:applyinfo):
+	      return (idnlist$size(a.parms))
+	  tag cluster_(t:typeinfo):
+	      return(idnlist$size(t.parms))
+	  tag select(t:typeinfo):
+	      return (idnlist$size(t.parms))
+	  tag atype(t:typeinfo):
+	      return (idnlist$size(t.parms))
+	  others:
+	      logit(604, "apply:DUspecs say none") return (0) 
+	  end
+       end
+    return (0)
+    end cluster_parm_count
+
+current_type_restricted = proc() returns (bool)
+
+    if current_type$exists()
+       then
+	    ct: typedefn := current_type$get()
+	    if restrictlist$size(ct.where_) ~= 0
+	       then return(true)
+	       end
+       end
+    return(false)
+
+    end current_type_restricted
+
+current_type_op_restricted = proc(op:clusterop) returns (bool)
+
+    nm: string := op.name
+    %    if nm[1] = '%' then nm := string$rest(nm,2) end
+    if current_type$exists()
+       then
+	    ct: typedefn := current_type$get()
+	    for each_ap: applydefn in applydefnlist$elements(ct.body) do
+		%		logit(each_ap.idn.str || " :: " || nm)
+		if each_ap.idn.str = nm cand 
+		   restrictlist$size(each_ap.where_) ~= 0
+		   then return (true)
+		   end
+		end
+       end
+    return(false)
+
+    end current_type_op_restricted
+
+any_const_parm = proc(t:typeinfo) returns (bool)
+    for each_idn: idn in idnlist$elements(t.parms) do
+	tagcase each_idn.kind
+	   tag vparm:
+	       return(true)
+	   tag tparm:
+	       continue
+	   others:
+	       logit(605, "const_parm: idn not vparm or tparm")
+	       idnkind_print(each_idn.kind)
+	       return(false)
+	   end % tag
+	end % for
+    return (false)
+    end any_const_parm
+
+const_parm = proc(p:expr) returns (bool)
+    tagcase p.abs
+       tag bool_, int_, real_, char_, str, null_, idn:
+	   return(true)
+       others:
+       end % tag
+    return (false)
+    end const_parm
+
+const_parm_idn = proc(i:idn) returns (bool)
+    tagcase i.kind
+       tag vparm:
+	   return(true)
+       others:
+       end % tag
+    return (false)
+    end const_parm_idn
+
+type_parm = proc(p:expr) returns (bool)
+    tagcase p.abs
+       tag type_:
+	   return(true)
+       tag bool_, int_, real_, char_, str, null_:
+	   return(false)
+       tag idn (i:idn):
+	   tagcase i.kind
+	      tag tparm:
+		  return(true)
+	      others:
+		  %	  logit("not a type parm? " || i.str)
+		  %	  idnkind_print(i.kind)
+		  return(false)
+	      end
+       others:
+	   logit(606, "? type parm")
+	   expr_print(p, 20)
+       end % tag
+    return (false)
+    end type_parm
+
+% returns the number of parameters that are type parameters in exprlist
+
+type_parm_count = proc(el: exprlist) returns (int)
+    ans: int := 0
+    for each_expr: expr in exprlist$elements(el) do
+	tagcase each_expr.abs
+	   tag type_:
+	       ans := ans + 1
+	   others:
+	   end % tag
+	end % for
+    return (ans)
+    end type_parm_count
+
+tinfo_op = proc(t:typeinfo, op:name) returns(bool)
+    for each_op: opinfo in opinfolist$elements(t.opers) do
+	if op ~= each_op.name then continue end
+	if typesetlist$size(each_op.where_) > 0
+	   then 
+		return(true)
+	   else
+		info: applyinfo := each_op.info
+		ty: typespec := info.type_
+		%typespec_print(ty)
+		%logit(int$unparse(idnlist$size(info.parms)))
+		return(false)
+	   end
+	end % for
+    return (false)
+    end tinfo_op
+
+pb_formals = proc(p: pb) returns (idnlist)
+    formals: idnlist := idnlist$new()
+    tagcase(p)
+       tag apply(ct:clutype):
+	   gen: DU := ct.gen
+    	   specs: DUspecs, b:bool := du$read_specs(gen)
+	   if DUspecs$is_none(specs) then
+	      % the following occurs plenty for array, sequence
+	      %    something may need to be fixed
+	      %logit("g_parm_blocks: no formals:" || ct.gen.common )
+	      else
+		   tagcase specs
+		      tag cluster_(t:typeinfo):
+			  formals := t.parms
+		      tag atype(t:typeinfo):
+			  formals := t.parms
+		      tag apply (a:applyinfo):
+			  formals := a.parms
+		      others:
+			  logit (607, "g_parm_blocks: unhandled: none or select")
+			  return(formals)
+		      end % tag
+	      end % if
+       tag op(cop: clusterop):
+	   % ADD THIS IN
+	   gen: DU
+	   tagcase cop.type_.abs
+	      tag cluster_, type_ (ct: clutype):
+		  gen := ct.gen
+                  specs: DUspecs, b:bool := du$read_specs(gen)
+                  if ~DUspecs$is_none(specs) then
+		     tagcase specs
+			tag cluster_(t:typeinfo):
+			    formals := find_typeinfo_formals(cop, t)
+			tag atype(t:typeinfo):
+			    formals := find_typeinfo_formals(cop, t)
+			tag apply (a:applyinfo):
+			    formals := a.parms
+			others:
+			    logit (608, "g_parm_blocks: unhandled: none or select")
+			    return(formals)
+			end % tag
+		     end % if
+	      tag select (xa: seltype):
+		  logit(609, "g_parm_blocks: unhandled: select")
+	      tag apply (at:applytype):
+		  gen := at.gen
+                  specs: DUspecs, b:bool := du$read_specs(gen)
+                  if ~DUspecs$is_none(specs) then
+		     tagcase specs
+			tag cluster_(t:typeinfo):
+			    formals := find_typeinfo_formals(cop, t)
+			tag atype(t:typeinfo):
+			    formals := find_typeinfo_formals(cop, t)
+			tag apply (a:applyinfo):
+			    formals := a.parms
+			others:
+			    logit (610, "g_parm_blocks: unhandled: none or select")
+			    return(formals)
+			end % tag
+		     end % if
+	      tag idn, any_:
+	      others:
+	      end % tag
+       tag a_cons(ar: arraycons):
+	   tagcase (ar.type_.abs)
+	      tag cluster_(ct:clutype):
+		  gen: DU := ct.gen
+                  specs: DUspecs, b:bool := du$read_specs(gen)
+                  if DUspecs$is_none(specs) then
+		     logit(611, "g_parm_blocks: no formals" || ct.gen.common)
+		     else
+			  tagcase specs
+			     tag cluster_(t:typeinfo):
+				 formals := t.parms
+			     tag atype(t:typeinfo):
+				 formals := t.parms
+			     tag apply (a:applyinfo):
+				 formals := a.parms
+			     others:
+				 logit (612, "g_parm_blocks: unhandled: none or select")
+				 return(formals)
+			     end % tag
+		     end % if
+	      others:
+		  logit(613, "pb_formals: arraycons: not cluster_")
+	      end
+       others:
+       end % tag
+    return(formals)
+    end pb_formals
+
+find_typeinfo_formals = proc(cop: clusterop, t: typeinfo) returns (idnlist)
+    idns: idnlist
+    idns := t.parms
+    for oper: opinfo in opinfolist$elements(t.opers) do
+	if oper.name = cop.name then
+	   idns := seq_extend[idn](idns, oper.info.parms)
+	   return(idns)
+	   end
+	end % for
+    if cop.name[1] = '%' cand exprlist$size(cop.parms) ~= 0 then
+       % cons up some formal idns!
+       %       for i: int in exprlist$indexes(cop.parms) do
+       %	   newidn: idn := idn$create("tf_" || int$unparse(i),
+       %				     idnkind$make_var(cop.parms[i].typespec))
+       %	   idns := idnlist$addh(idns, newidn)
+       %	   end % for
+       current_cluster : typedefn := current_type$get()
+       for each_apply: applydefn in applydefnlist$elements(current_cluster.body) do
+	   if each_apply.idn.str ~= cop.name then continue end
+	   for each_d: decl in decllist$elements(each_apply.parms) do
+	       idns := seq_extend[idn](idns, each_d.idns)
+	       end % for
+	   end % for
+       end % if
+    return(idns)
+    end find_typeinfo_formals
+
+pb_actuals = proc(p: pb) returns (exprlist)
+    actuals: exprlist := exprlist$new()
+    temp: string
+    tagcase(p)
+       tag apply(ct:clutype):
+	   actuals := ct.parms
+       tag op(cop: clusterop):
+	   actuals := cop.parms
+	   temp := cop.name
+	   ct: clutype := typeabs$value_cluster_(cop.type_.abs)
+	   actuals := seq_extend[expr](ct.parms, cop.parms)
+       tag a_cons(a: arraycons):
+	   tagcase (a.type_.abs)
+	      tag cluster_(ct: clutype):
+		  actuals := ct.parms
+	      others:
+		  logit(614, "pb_actuals: unimplemented arraycons type_")
+	      end
+       others:
+       end
+       except when wrong_tag:
+		   logit(615, "pb_act: cop is not a cluster_ " || temp)
+	      end
+    return(actuals)
+    end pb_actuals
+
+pb_gen = proc(p: pb) returns (DU) signals (a_cons)
+    tagcase p
+       tag apply(ct:clutype):
+	   return(ct.gen)
+       tag op(cop: clusterop):
+	   tagcase cop.type_.abs
+	      tag cluster_(ct:clutype):
+		  return(ct.gen)
+	      tag type_(ct:clutype):
+		  return(ct.gen)
+	      tag apply (a:applytype):
+		  return(a.gen)
+	      others:
+		  logit(616, "pb_gen: cop: not c/a/t")
+	      end
+       tag a_cons(a: arraycons):
+	   signal a_cons
+       others:
+	   logit(617, "pb_gen: unimplemented pb type")
+       end
+    end pb_gen
+
+% returns count of parms on type or apply excludes parms on op of type
+% UNUSED 10/29/91
+pb_inst_parms_count = proc(p: pb) returns (int) signals (a_cons)
+    gen: DU := pb_gen(p)
+    specs: DUspecs, b:bool := du$read_specs(gen)
+    if ~DUspecs$is_none(specs) then
+       tagcase specs
+	  tag apply(a:applyinfo):
+	      return (idnlist$size(a.parms))
+	  tag cluster_(t:typeinfo):
+	      return (idnlist$size(t.parms))
+	  tag select(t:typeinfo):
+	      return (idnlist$size(t.parms))         % ? should be 0
+	  tag atype(t:typeinfo):
+	      return (idnlist$size(t.parms))
+	  others:
+	      logit(618, "apply:DUspecs say none") return (0) 
+	  end
+       end
+    return (0)
+    end pb_inst_parms_count
+
+midn = oneof[idn:idn, none:null]
+
+g_parm_table = proc(e: g_env, each_pb: pb)
+    index: int
+    % pb_print(each_pb)
+    tagcase each_pb
+       tag apply, op:
+	   formals: idnlist := pb_formals(each_pb)
+	   actuals: exprlist := pb_actuals(each_pb)
+	   gen: DU := pb_gen(each_pb)
+           op_name: string := ""
+	   if idnlist$size(formals) = exprlist$size(actuals) then
+	      index := 1
+ 	      for each_parm:idn in idnlist$elements(formals) do
+	          op_name := ""
+		  if pb$is_op (each_pb) then
+		     if is_op_parm(each_parm, gen) then
+			tail: string := pb$value_op(each_pb).name
+			if tail[1] = '%' then
+			   tail := string$rest(tail, 2) end
+			op_name := "_op_" || tail end
+		     end
+		  nm: string := gen.common || op_name || "_of_" 
+				  || s_expr4(actuals[index]) || "_table"
+		  if own_defn$test(nm) then
+		     % logit(98, "11 " || nm)
+		     dbg_info$add_own(nm)
+		     g_env$putl(e, "struct OPS *" || nm || ";")
+		     end
+		  index := index + 1
+		  end % for
+	      else
+   		   % logit(334, "gpt mismatch f,a :" || gen.common || " " 
+   			   % || int$unparse(idnlist$size(formals))
+   			   % || " " || int$unparse(exprlist$size(actuals)))
+	      end
+	   % INSTANTIATED TABLES
+	   parmct: int := exprlist$size(actuals)
+	   nm: string := ""
+	   if parmct ~= 0 then  % new 2/11/93 dwc suppress bad entries in popowns
+	      if pb$is_op(each_pb) then
+		 if is_op_parmd(each_pb) then
+		    tail: string := pb$value_op(each_pb).name
+		    if tail[1] = '%' then
+		       tail := string$rest(tail, 2) end
+		    op_name := "_op_" || tail end
+		 end
+	      nm := gen.common || op_name || "_of"
+	      for each_parm:expr in exprlist$elements(actuals) do
+		  nm := nm ||  "_" || s_expr4(each_parm)
+		  end
+	      nm := nm || "_ops"
+	      if own_defn$test(nm) then
+		 % logit(98, "12 " || nm)
+		 dbg_info$add_own(nm)
+		 g_env$putl(e, "struct OPS *" || nm ||";") end
+	      end
+
+	   pcount: int := cluster_parm_count(gen)
+	   if pcount > 0 then
+	      nm := gen.common || "_of"
+	      for index2:int in int$from_to(1, pcount) do
+		  nm := nm || "_" || s_expr4(actuals[index2])
+		  end
+	      nm := nm || "_ops"
+	      if own_defn$test(nm) then
+		 % logit(98, "13 " || nm)
+		 dbg_info$add_own(nm)
+		 g_env$putl(e, "struct OPS *" || nm || ";")
+		 end
+	      end
+
+	   % INSTANCE INFO FOR FINDING OWNS
+	   if parmct ~= 0 then
+	      if pb$is_op(each_pb) then
+		 if is_op_parmd(each_pb) then
+		    tail: string := pb$value_op(each_pb).name
+		    if tail[1] = '%' then
+		       tail := string$rest(tail, 2) end
+		    op_name := "_op_" || tail end
+		 end
+	      sname: string := gen.common || op_name || "_of"
+	      for each_parm:expr in exprlist$elements(actuals) do
+		  sname := sname || "_" || s_expr4(each_parm)
+		  end
+	      % OWN PTR DECLARATION
+              % if g_env$add_global(sname || "_owns") then
+	      % changed preceding line to following 2 lines 12/4/91 dcurtis
+	      nm := sname || "_owns"
+	      if own_defn$test(nm) then
+		 % logit(98, "14 " || nm)
+		 dbg_info$add_own(nm)
+		 g_env$puts(e, "OWNPTR ")
+		 g_env$putl(e, nm || ";")
+		 end
+	      end
+       tag a_cons(a:arraycons):
+	   % typespec_print(a.type_)
+	   tagcase (a.type_.abs)
+	      tag cluster_(ct: clutype):
+		  for each_expr:expr in exprlist$elements(ct.parms) do
+		      nm: string := ct.gen.common || "_of_" 
+				      || s_expr4(each_expr) || "_table"
+		      if own_defn$test(nm) then
+			 % logit(98, "15 " || nm)
+			 dbg_info$add_own(nm)
+			 g_env$putl(e, "struct OPS *" || nm || ";") end
+		      end % for
+		
+		  % INSTANTIATED OPS
+
+		  nm: string := ct.gen.common || "_of"
+		  for each_expr:expr in exprlist$elements(ct.parms) do
+		      nm := nm || "_" || s_expr4(each_expr)
+		      end
+		  nm := nm || "_ops"
+		  if own_defn$test(nm) then
+		     % logit(98, "16 " || nm)
+		     dbg_info$add_own(nm)
+		     g_env$putl(e, "struct OPS *" || nm || ";") end
+
+		  % OWN PTR
+	          nm := ct.gen.common || "_of"
+		  for each_parm:expr in exprlist$elements(ct.parms) do
+		      nm := nm || "_" s_expr4(each_parm)
+		      end
+		  nm := nm || "_owns"
+		  if own_defn$test(nm) then
+		     % logit(98, "17 " || nm)
+		     dbg_info$add_own(nm)
+		     g_env$putl(e, "OWNPTR " || nm || ";") end
+	      others:
+		  logit(619, "g_parm_blocks array type unhandled")
+		  typespec_print(a.type_)
+	      end % tag
+       tag any_(ex: expr):
+	   %	   nm: string := "_anyize_of_" || s_expr4(ex) || "_table"
+	   %	   if own_defn$test(nm) then
+	   %	      g_env$putl(e, "struct OPS *" || nm || ";") end
+		
+	   % INSTANTIATED OPS
+
+	   nm: string := "_anyize_of_" || s_name_typespec(ex.typespec) || "_ops"
+	   % logit (nm)
+	   if own_defn$test(nm) then
+	      % logit(98, "18 " || nm)
+	      dbg_info$add_own(nm)
+	      g_env$putl(e, "struct OPS *" || nm || ";") end
+
+	   % OWN PTR
+	   nm := "_anyize_of_" || s_name_typespec(ex.typespec) || "_owns"
+	   if own_defn$test(nm) then
+	      % logit(98, "19 " || nm)
+	      dbg_info$add_own(nm)
+	      g_env$putl(e, "OWNPTR " || nm || ";") end
+       tag force_(ty: typespec):
+
+	   % INSTANTIATED OPS
+	   nm: string := "_anyize_of_" || s_name_typespec(ty) || "_ops"
+	   if own_defn$test(nm) then
+	      % logit(98, "20 " || nm)
+	      dbg_info$add_own(nm)
+	      g_env$putl(e, "struct OPS *" || nm || ";") end
+
+	   % OWN PTR
+	   nm := "_anyize_of_" || s_name_typespec(ty) || "_owns"
+	   if own_defn$test(nm) then
+	      % logit(98, "21 " || nm)
+	      dbg_info$add_own(nm)
+	      g_env$putl(e, "OWNPTR " || nm || ";") end
+       others:
+	   logit(620, "g_parm_blocks: t/ainfo 1")
+       end % tag
+    end g_parm_table
+
+% declare instance information tables as locals & static
+
+g_parm_table_inst_info = proc(e: g_env, each_pb: pb)
+
+    return
+    end g_parm_table_inst_info
+
+g_parm_extern = proc(e: g_env, each_pb: pb)
+    index: int
+    % logit("g_parm_extern")
+    % pb_print(each_pb)
+    tagcase each_pb
+       tag apply, op:
+	   formals: idnlist := pb_formals(each_pb)
+	   actuals: exprlist := pb_actuals(each_pb)
+	   gen: DU := pb_gen(each_pb)
+	   if idnlist$size(formals) = exprlist$size(actuals) then
+	      index := 1
+	      op_name: string := ""
+	      for each_parm:idn in idnlist$elements(formals) do
+		  % PARAMETER REQUIREMENTS
+		  if pb$is_op (each_pb) then
+		     if is_op_parm(each_parm, gen) then
+			tail: string := pb$value_op(each_pb).name
+			if tail[1] = '%' then
+			   tail := string$rest(tail, 2) end
+			op_name := "_op_" || tail end
+		     end
+		  rname: string := gen.common || op_name 
+				     ||"_of_"||each_parm.str || "_reqs"
+		  if g_env$add_extern(rname) then
+		     g_env$putl(e, "extern struct REQS *"|| rname || ";")
+		     end
+		  % TYPE OPERATIONS TABLE
+		  doit: bool := true
+		  tagcase actuals[index].abs
+		     tag type_ (ty: typespec):
+			 if typeabs$is_idn(ty.abs) then doit := false end
+		     tag null_, int_, bool_, str, char_, real_, idn:
+			 doit := false
+		     others:
+		     end
+		  if doit then
+		     oname: string := s_expr4(actuals[index]) || "_ops"
+		     if g_env$add_extern(oname) then
+			g_env$putl(e, "extern struct OPS *" || oname || ";")
+			end
+		     end
+		  index := index + 1
+		  end % for
+	      % OWNS REQS
+	      op_name := ""
+	      if pb$is_op(each_pb) then
+		 if is_op_parmd(each_pb) then
+		    tail: string := pb$value_op(each_pb).name
+		    if tail[1] = '%' then
+		       tail := string$rest(tail, 2) end
+		    op_name := "_op_" || tail end
+		 end
+	      ename: string := gen.common || op_name || "_ownreqs"
+	      if g_env$add_extern(ename) then
+		 g_env$putl(e, "extern OWN_req " || ename || ";")
+		 end
+	      else
+		   %		   logit("ext mismatch f,a:  " || gen.common || " "
+		   %			   || int$unparse(idnlist$size(formals))
+		   %			   || " " || int$unparse(exprlist$size(actuals)))
+	      end
+	   yes: bool := false
+	   if pb$is_apply(each_pb) then 
+	      ct:clutype := pb$value_apply(each_pb)
+              specs: DUspecs, b:bool := du$read_specs(gen)
+              if ~DUspecs$is_none(specs) then
+		 if DUspecs$is_cluster_(specs) then yes := true
+		    else
+			 %logit("suppressed")
+			 %duspec_print(specs, false)
+		    end
+		 else
+		      yes := true
+		      %logit("no specs " || ct.gen.common)
+		 end
+	      end
+	   if pb$is_op(each_pb) cor yes then
+	      % UNINSTANTIATED OPS TABLE
+	      if g_env$add_extern(gen.common || "_ops") then
+		 g_env$putl(e, "extern struct OPS *" || gen.common || "_ops;")
+		 end
+	      if g_env$add_extern(gen.common || "_ownreqs") then
+		 g_env$putl(e, "extern OWN_req " || gen.common || "_ownreqs;")
+		 end
+	      end
+       tag a_cons(a:arraycons):
+	   tagcase (a.type_.abs)
+	      tag cluster_(ct: clutype):
+		  aname: string
+		  for each_expr:expr in exprlist$elements(ct.parms) do
+		      % REQUIREMENTS TABLE
+		      aname := s_typespec(a.type_) || "_of_t_reqs"  % pretty bogus
+		      if g_env$add_extern(aname) then
+			 g_env$putl(e, "extern struct REQS *"||aname||";") % new 3/23/90
+			 end
+		      % TYPE OPERATIONS TABLE
+		      doit: bool := true
+		      if exprabs$is_type_(each_expr.abs) then
+			 ty: typespec := exprabs$value_type_(each_expr.abs)
+			 if typeabs$is_idn(ty.abs) then doit := false end
+			 end
+		      if doit then
+			 aname := s_expr4(each_expr) || "_ops"
+			 if g_env$add_extern(aname) then
+			    g_env$putl(e, "extern struct OPS *"|| aname || ";")
+			    end
+			 end
+		      end
+		  % OWNS REQS
+		  op_name: string := ""
+		  if pb$is_op(each_pb) then
+		     if is_op_parmd(each_pb) then
+			tail: string := pb$value_op(each_pb).name
+			if tail[1] = '%' then
+			   tail := string$rest(tail, 2) end
+			op_name := "_op_" || tail end
+		     end
+		  aname := s_typespec(a.type_) || "_ownreqs"
+		  if g_env$add_extern(aname) then
+		     g_env$putl(e, "extern OWN_req " || aname || ";")
+		     end
+		  % UNINSTANTIATED OPS TABLE
+		  aname := s_typespec(a.type_) || "_ops"
+		  if g_env$add_extern(aname) then
+		     g_env$puts(e, "extern struct OPS *")
+		     g_env$puts(e, aname)
+		     g_env$putl(e, ";")
+		     end
+	      others:
+		  logit(621, "g_parm_blocks array type unhandled")
+		  typespec_print(a.type_)
+	      end % tag
+       tag any_(ex: expr):
+	   aname: string
+	   % FUNCTION ITSELF
+	   aname := "_anyize"
+	   if g_env$add_extern(aname) then
+	      g_env$putl(e, "errcode "||aname||"();")
+	      end
+	   % REQUIREMENTS TABLE
+	   aname := "_anyize_of_t_reqs"
+	   if g_env$add_extern(aname) then
+	      g_env$putl(e, "extern struct REQS *"||aname||";")
+	      end
+	   % TYPE OPERATIONS TABLE
+	   doit: bool := true
+	   if exprabs$is_type_(ex.abs) then
+	      ty: typespec := exprabs$value_type_(ex.abs)
+	      if typeabs$is_idn(ty.abs) then doit := false end
+	      end
+	   if doit then
+	      aname := s_name_typespec(ex.typespec) || "_ops"
+	      if g_env$add_extern(aname) then
+		 g_env$putl(e, "extern struct OPS *"|| aname || ";")
+		 end
+	      end
+	   % OWNS REQS
+	   op_name: string := ""
+	   if pb$is_op(each_pb) then
+	      if is_op_parmd(each_pb) then
+		 tail: string := pb$value_op(each_pb).name
+		 if tail[1] = '%' then
+		    tail := string$rest(tail, 2) end
+		 op_name := "_op_" || tail end
+	      end
+	   aname := "_anyize_ownreqs"
+	   if g_env$add_extern(aname) then
+	      g_env$putl(e, "extern OWN_req " || aname || ";")
+	      end
+	   % UNINSTANTIATED OPS TABLE
+	   aname := "_anyize_ops"
+	   if g_env$add_extern(aname) then
+	      g_env$putl(e, "extern struct OPS *_anyize_ops;")
+	      end
+       tag force_(ty: typespec):
+	   aname: string
+	   % FUNCTION ITSELF
+	   aname := "force"
+	   if g_env$add_extern(aname) then
+	      g_env$putl(e, "errcode "||aname||"();")
+	      end
+	   % REQUIREMENTS TABLE
+	   aname := "_anyize_of_t_reqs"
+	   if g_env$add_extern(aname) then
+	      g_env$putl(e, "extern struct REQS *"||aname||";")
+	      end
+	   % TYPE OPERATIONS TABLE
+	   % logit("1: " || s_name_typespec(ty))
+	   doit: bool := true
+	   if typeabs$is_idn(ty.abs) then doit := false end
+	   if doit then
+	      % logit("2: " || s_name_typespec(ty))
+	      aname := s_name_typespec(ty) || "_ops"
+	      if g_env$add_extern(aname) then
+		 g_env$putl(e, "extern struct OPS *"|| aname || ";")
+		 end
+	      end
+	   % OWNS REQS
+	   op_name: string := ""
+	   if pb$is_op(each_pb) then
+	      if is_op_parmd(each_pb) then
+		 tail: string := pb$value_op(each_pb).name
+		 if tail[1] = '%' then
+		    tail := string$rest(tail, 2) end
+		 op_name := "_op_" || tail end
+	      end
+	   aname := "_anyize_ownreqs"
+	   if g_env$add_extern(aname) then
+	      g_env$putl(e, "extern OWN_req " || aname || ";")
+	      end
+	   % UNINSTANTIATED OPS TABLE
+	   aname := "_anyize_ops"
+	   if g_env$add_extern(aname) then
+	      g_env$putl(e, "extern struct OPS *_anyize_ops;")
+	      end
+       others:
+	   logit(622, "g_parm_blocks: t/ainfo 2")
+       end % tag
+    end g_parm_extern
+
+% returns true if idn is a parameter on an operation
+%         false if idn is a type parameter
+
+is_op_parm = proc(id: idn, gen: DU) returns (bool)
+    specs: DUspecs, b:bool := du$read_specs(gen)
+    if ~DUspecs$is_none(specs) then
+       tagcase specs
+	  tag apply:
+	      return (false)
+	  tag cluster_(t:typeinfo):
+	      for each_idn: idn in idnlist$elements(t.parms) do
+		  if idn$similar(id, each_idn) then
+		     return (false) end
+		  end % for
+	      return (true)
+	  tag select:
+       	      return (false)
+	  tag atype:
+	      return (false)
+	  tag none:
+	      return (false)
+	  end
+       else
+	    return (false)
+       end
+    end is_op_parm
+
+% returns true if operation itself has any parameters 
+%         false otherwise
+
+is_op_parmd = proc(apb: pb) returns (bool)
+    op: string := pb$value_op(apb).name
+    gen: DU := pb_gen(apb)
+    specs: DUspecs, b:bool := du$read_specs(gen)
+    if ~DUspecs$is_none(specs) then
+       tagcase specs
+	  tag apply:
+	      return (false)
+	  tag cluster_(t:typeinfo):
+    	      if op[1] = '%' then return (is_internal_op_parmd(op)) end
+	      for each_op: opinfo in opinfolist$elements(t.opers) do
+		  if name$equal(op, each_op.name) then
+		     if idnlist$size(each_op.info.parms) ~= 0
+			then return (true)
+			else return (false)
+			end
+		     end
+		  end
+	  tag select:
+	      return (false)
+	  tag atype:
+	      return (false)
+	  tag none:
+	      return (false)
+	  end
+       else
+	    return (false)
+       end
+    end is_op_parmd
+
+is_internal_op_parmd = proc(nm: string) returns (bool)
+    %	nm2: string := string$rest(nm, 2)	% strip off %
+    ct: typedefn := current_type$get()
+    for each_app:applydefn in applydefnlist$elements(ct.body) do
+	if each_app.idn.str = nm cor nm = "" then
+	   %  logit("decllist size: " || int$unparse(decllist$size(each_app.parms)))
+	   if decllist$size(each_app.parms) ~= 0 then
+	      return (true)
+	      end
+	   end
+	end % for
+    return (false)
+    end is_internal_op_parmd
+
+g_parm_build_one = proc(e: g_env, each_pb:pb)
+    index: int
+    % pb_print(each_pb)
+    tagcase each_pb
+       tag apply, op:
+	   formals: idnlist := pb_formals(each_pb)
+	   actuals: exprlist := pb_actuals(each_pb)
+	   gen: DU := pb_gen(each_pb)
+	   yes: bool := false
+	   if pb$is_apply(each_pb) then
+	      ct:clutype := pb$value_apply(each_pb)
+              specs: DUspecs, b:bool := du$read_specs(gen)
+              if ~DUspecs$is_none(specs) then
+		 if DUspecs$is_cluster_(specs) then yes := true end
+		 else
+		      yes := true  % to get sequence, array
+		 end
+	      end
+           type_name: string := gen.common
+	   if pb$is_op(each_pb) cor yes
+	      then
+		   %		   if pb$is_op(each_pb) cand parmd_type(gen) then
+		   if parmd_type(gen) 
+			cor gen.common = "sequence"
+			cor gen.common = "array"
+		      then
+
+			   parm_count: int := cluster_parm_count(gen)
+			   if gen.common = "sequence" cor gen.common = "array"
+			      then parm_count := 1 end
+		           % logit("fti #1 " || gen.common)
+			   % build ops table for instantiated type
+			   g_env$puts(e, "find_type_instance(")
+
+			   % TABLE OF ALL OPS (UNINSTANTIATED)
+			   g_env$puts(e, gen.common)
+			   g_env$puts(e, "_ops, ")
+
+			   % COUNT of PARAMETERS
+			   g_env$puts(e, int$unparse(parm_count) || ", ")
+
+			   % OWNREQS 
+			   g_env$puts(e, "&" || type_name || "_ownreqs, ")
+
+			   % TABLE OF ALL OPS (OUTPUT)
+			   t_actuals: exprlist := exprlist$subseq(actuals, 1, parm_count)
+			   prefix: string := s_owns_prefix_exprlist(t_actuals)
+			   g_env$puts(e, "&(" || prefix || type_name || "_of")
+			   for index2: int in int$from_to(1, parm_count) do
+			       g_env$puts(e, "_" || s_expr4(actuals[index2]))    % actual
+			       end
+			   g_env$putl(e, "_ops));")
+		      else
+			   % logit("type not parameterized: " || gen.common)
+		      end
+		   if pb$is_op(each_pb) cand is_op_parmd(each_pb) then
+		      % build ops table for instantiated type
+		      g_env$puts(e, "find_typeop_instance(")
+
+		      % TABLE OF ALL OPS (UNINSTANTIATED)
+		      g_env$puts(e, gen.common)
+		      g_env$puts(e, "_ops, ")
+
+		      % (NAME COMPUTATION FOR FOLLOWING SECTIONS)
+		      op_name: string := ""
+		      tail: string := pb$value_op(each_pb).name
+		      if tail[1] = '%' then
+			 tail := string$rest(tail, 2) end
+		      op_name := "_op_" || tail
+		      all_name: string := gen.common || op_name
+
+		      % ADDRESS OF ACTUAL PROCEDURE
+		      g_env$puts(e, gen.common || sep || tail || ", ")		      
+
+		      % COUNT of PARAMETERS
+		      g_env$puts(e, int$unparse(exprlist$size(actuals)) || ", ")
+		      g_env$puts(e, int$unparse(cluster_parm_count(gen)) || ", ")
+
+		      % OWNREQS 
+		      g_env$puts(e, "&" || all_name || "_ownreqs, ")
+		      % if current_type$exists() cand current_type$parmd()
+		      % then
+		      g_env$puts(e, "&" || type_name || "_ownreqs, ")
+		      % else
+		      %  g_env$puts(e, "&0, ")
+		      % end
+
+		      % TABLE OF ALL OPS (OUTPUT)
+		      prefix: string := s_owns_prefix_exprlist(actuals)
+		      g_env$puts(e, "&(" || prefix || all_name || "_of")
+		      for each_expr: expr in exprlist$elements(actuals) do
+			  g_env$puts(e, "_" || s_expr4(each_expr))    % actual
+			  end
+		      g_env$putl(e, "_ops));")
+		      end
+	    elseif pb$is_apply(each_pb)
+	      then
+		   if parmd_dus(gen) then
+		      % build ops table for instantiated proc/iter
+		      g_env$puts(e, "find_prociter_instance(")
+
+		      % PROCEDURE NAME
+		      g_env$puts(e, gen.common || ", ")
+
+		      % COUNT of PARAMETERS
+		      g_env$puts(e, int$unparse(cluster_parm_count(gen)) || ", ")
+
+		      % (NAME COMPUTATION FOR FOLLOWING SECTIONS)
+		      op_name: string := ""
+		      if pb$is_op(each_pb) then
+			 if is_op_parmd(each_pb) then
+			    tail: string := pb$value_op(each_pb).name
+			    if tail[1] = '%' then
+			       tail := string$rest(tail, 2) end
+			    op_name := "_op_" || tail end
+			 end
+		      all_name: string := gen.common || op_name
+
+		      % OWNREQS 
+		      g_env$puts(e, "&" || all_name || "_ownreqs, ")
+
+		      % TABLE OF ALL OPS (OUTPUT)
+		      prefix: string := s_owns_prefix_exprlist(actuals)
+		      g_env$puts(e, "&(" || prefix || all_name || "_of")
+		      for each_expr: expr in exprlist$elements(actuals) do
+			  g_env$puts(e, "_" || s_expr4(each_expr))    % actual
+			  end
+		      g_env$putl(e, "_ops));")
+		      end
+		
+	    end
+       tag a_cons(a:arraycons):
+	   tagcase (a.type_.abs)
+	      tag cluster_(ct: clutype):
+		  % build ops table for instantiated type
+		  % logit("fti #2 " || ct.gen.common)
+		  g_env$puts(e, "find_type_instance(")
+
+		  % TABLE OF ALL OPS (UNINSTANTIATED)
+		  g_typespec(e, a.type_)
+		  g_env$puts(e, "_ops, 1, &")
+		  g_typespec(e, a.type_)
+		  g_env$puts(e, "_ownreqs, ")
+
+		  % TABLE OF ALL OPS
+		  prefix: string := s_owns_prefix_exprlist(ct.parms)
+		  g_env$puts(e, "&(" || prefix)
+		  g_typespec(e, a.type_)
+		  g_env$puts(e, "_of")
+		  for each_expr: expr in exprlist$elements(ct.parms) do
+		      g_env$puts(e, "_")
+		      g_expr4(e, each_expr)    % actual
+		      end
+		  g_env$puts(e, "_ops)); ")
+		  g_env$newline(e)
+	      others:
+		  logit(623, "g_parm_blocks array type unhandled")
+		  typespec_print(a.type_)
+	      end % tag
+       tag any_(ex: expr):
+	   % build ops table for instantiated type
+	   g_env$puts(e, "find_type_instance(")
+
+	   % TABLE OF ALL OPS (UNINSTANTIATED)
+	   g_env$puts(e, "_anyize_ops, 1, &_anyize_ownreqs, ")
+
+	   % TABLE OF ALL OPS
+	   prefix: string := s_owns_prefix_exprlist(exprlist$fill(1,ex))
+	   g_env$puts(e, "&(" || prefix)
+	   g_env$puts(e, "_anyize_of_")
+	   g_name_typespec(e, ex.typespec)    % actual
+	   g_env$putl(e, "_ops));")
+       tag force_(ty: typespec):
+	   % build ops table for instantiated type
+	   g_env$puts(e, "find_type_instance(")
+
+	   % TABLE OF ALL OPS (UNINSTANTIATED)
+	   g_env$puts(e, "_anyize_ops, 1, &_anyize_ownreqs, ")
+
+	   % TABLE OF ALL OPS
+	   % ex: expr := expr$create(exprabs$make_type_(ty), ty)
+	   prefix: string := s_owns_prefix_type(ty)
+	   g_env$puts(e, "&(" || prefix)
+	   g_env$puts(e, "_anyize_of_")
+	   g_name_typespec(e, ty)    % actual
+	   g_env$putl(e, "_ops));")
+       others:
+	   logit(624, "g_parm_blocks: t/ainfo 3")
+       end % tag
+    end g_parm_build_one
+
+parm_elements = iter(gen:DU) yields (idn)
+    specs: DUspecs, b:bool := du$read_specs(gen)
+    if ~DUspecs$is_none(specs) then
+       tagcase specs
+	  tag apply(a:applyinfo):
+	      for each_idn: idn in idnlist$elements(a.parms) do
+		  yield(each_idn)
+		  end % for
+	  tag cluster_(t:typeinfo):
+	      for each_idn: idn in idnlist$elements(t.parms) do
+		  yield(each_idn)
+		  end % for
+	      for each_oper: opinfo in opinfolist$elements(t.opers) do
+		  for each_ts: typeset in 
+		      typesetlist$elements(each_oper.where_) do
+		      yield(each_ts.parm)
+		      end % for
+		  end % for
+	  tag select(t:typeinfo):
+	      for each_idn: idn in idnlist$elements(t.parms) do
+		  yield(each_idn)
+		  end % for
+	      for each_oper: opinfo in opinfolist$elements(t.opers) do
+		  for each_ts: typeset in 
+		      typesetlist$elements(each_oper.where_) do
+		      yield(each_ts.parm)
+		      end % for
+		  end % for
+	  tag atype(t:typeinfo):
+	      for each_idn: idn in idnlist$elements(t.parms) do
+		  yield(each_idn)
+		  end % for
+	      for each_oper: opinfo in opinfolist$elements(t.opers) do
+		  for each_ts: typeset in 
+		      typesetlist$elements(each_oper.where_) do
+		      yield(each_ts.parm)
+		      end % for
+		  end % for
+	  others:
+	      logit(625, "apply:DUspecs say none")
+	  end
+       end
+	
+    end parm_elements
+
+%%%
+%%%	Cluster for remembering current parameter context
+%%%		to generate table of operations provided by procs/clusters
+%%%
+
+%	enter is used on entering an iter or proc
+%	enter_base is used on entering a cluster (may not be needed)
+%	these operations save the parameters
+
+parm = cluster is enter, leave, enter_base, leave_base, member, 
+		  member_base, get_base, member_op
+
+    rep = null
+
+    aidn = array[idn]
+
+    own ap: aidn := aidn$new()
+    own ap_base: aidn := aidn$new()
+    own ap_base_decl: decllist := decllist$new()
+
+    enter = proc(d:decllist)
+	for each_d:decl in decllist$elements(d) do
+	    for each_idn:idn in idnlist$elements(each_d.idns) do
+		aidn$addh(ap, each_idn)
+		end % for
+	    end % for
+	end enter
+
+    leave = proc()
+	ap := aidn$new()
+	end leave
+
+    enter_base = proc(d:decllist)
+	ap_base_decl := d
+	for each_d:decl in decllist$elements(d) do
+	    for each_idn:idn in idnlist$elements(each_d.idns) do
+		aidn$addh(ap_base, each_idn)
+		end % for
+	    end % for
+	end enter_base
+
+    leave_base = proc()
+	ap_base := aidn$new()
+	ap_base_decl := decllist$new()
+	end leave_base
+
+    get_base = proc() returns(decllist)
+	return(ap_base_decl)
+	end get_base
+
+    member = proc(t:typespec) returns (bool)
+	tagcase t.abs
+	   tag idn(i:idn):
+	       for each_parm:idn in aidn$elements(ap) do
+		   if idn$similar(i, each_parm) then
+		      return(true) end
+		   end
+	       for each_parm:idn in aidn$elements(ap_base) do
+		   if idn$similar(i, each_parm) then
+		      return(true) end
+		   end
+	   others:
+	       return(false)
+	   end
+	end member
+
+    member_base = proc(s:string) returns (bool)
+	for each_parm:idn in aidn$elements(ap_base) do
+	    % logit("member_base: " || each_parm.str || " " || s)
+	    if string$similar(s, each_parm.str) then
+	       % logit("true")
+	       return(true) 
+	       end
+	    end
+	% logit("false")
+	return(false)
+	end member_base
+
+    member_op = proc(s:string) returns (bool)
+	for each_parm:idn in aidn$elements(ap) do
+	    % logit("member_base: " || each_parm.str || " " || s)
+	    % logit(s || " vs " || each_parm.str)
+	    if string$similar(s, each_parm.str) then
+	       % logit("true")
+	       return(true) 
+	       end
+	    end
+	% logit("false")
+	return(false)
+	end member_op
+
+    end parm
+
+%%%
+%%% Cluster to compute and generate tables of required operations for
+%%%	parameterized routines and clusters
+%%%
+
+reqs = cluster is start, preprocessing, more, parms, output, 
+		  initial_output, get_id, get_tid, reset
+
+    restrict_elt = record[restricts: restrictlist, id: name]
+    arl = array[restrict_elt]
+    rep = null
+
+    own cluster_context: bool := false
+    own cluster_prep : bool := false
+    own ar: arl := arl$new()
+    own arp: decllist := decllist$new()
+    own type_name: str := ""
+    own op_name: str := ""
+
+    % beginning of a typedefn
+    % note that context is a typedefn, save name of type
+
+    start = proc(id:idn)
+	cluster_context := true
+	type_name := id.str
+	end start
+
+    % early phases of typedefn processing flag
+
+    preprocessing = proc(val:bool)
+	cluster_prep := val
+	end preprocessing
+
+    % type parms and later applydefn parms
+    %	i.e. save current parameters
+
+    parms = proc(op: idn, p: decllist)
+	%logit("reqs$parms: " || int$unparse(decllist$size(p)))
+	arp := p
+	if cluster_prep then op_name := ""
+	   else
+		op_name := op.str
+		if op_name[1] = '%'
+		   then op_name := string$rest(op_name, 2)  end
+		return
+	   end
+	end parms
+
+    % type's where clauses, its applydefn where clauses (prep = true)
+    %	then its applydefn where clauses as applydefn is processed
+    %		(prep = false)
+
+    more = proc(e:g_env, id: idn, rl: restrictlist)
+	%	logit ("restrictlist size: " || int$unparse(restrictlist$size(rl)))
+	if cluster_context then
+	   if cluster_prep 
+	      then
+		   extend(rl, id.str)
+	      else 
+		   output_no_ops(e)  % to output empty structures
+	      end
+	   else
+		type_name := id.str
+		op_name := ""
+		extend(rl, id.str)
+		output(e)
+		output_no_ops(e)
+	        ar := arl$new()
+	   end
+	end more
+
+    % called by more to save restrictlists
+	
+    extend = proc(rl: restrictlist, nm: name)
+	if restrictlist$size(rl) = 0 then return end
+
+	% look at each restrict in input restrictlist
+	for each_r: restrict in restrictlist$elements(rl) do
+	    each_idn: idn := each_r.idn
+	    each_kind: restrictkind := each_r.kind
+	    %logit("looking at :" || each_idn.str)
+
+	    op: name
+	    if cluster_context cand nm ~= type_name cand ~op_parm(each_idn)
+	       then
+		    op := nm
+		    if op[1] = '%' then
+		       op := string$rest(op, 2) end
+	       else
+		    op := ""
+	       end
+
+	    % compare this restrict in input list to existing restrictlists
+	    % 	existing restrictlists are arranged one per parameter
+	    add_restrictlist: bool := true
+	    for i:int in arl$indexes(ar) do
+		ith_rl:restrictlist := ar[i].restricts
+	        ith_op: name := ar[i].id	% new 7/11/90
+		ith_idn: idn := restrictlist$bottom(ith_rl).idn
+		if ith_idn.str = each_idn.str 
+		     cand ith_op = op		% new 7/11/90
+		   then
+			%logit ("parameter names matched")
+			% the parameters match on new restrict and an existing restrict lsit
+			add_restrict: bool := true
+			for this_r: restrict in restrictlist$elements(ith_rl) do
+			    % see if the restriction in the new restrict is
+			    %	already represented
+			    if restrictkind_similar(this_r.kind, each_kind) then
+			       % restrictions matched
+			       add_restrict := false
+			       end
+			    end % for
+			if add_restrict then
+			   ar[i].restricts := restrictlist$addh(ar[i].restricts, each_r)
+			   end
+			add_restrictlist := false
+		   end
+		end % for
+	    if add_restrictlist then
+	       arl$addh(ar, restrict_elt${restricts:
+					  restrictlist$fill(1, each_r), 
+					  id: op})
+	       end
+	    end
+	end extend
+
+    % returns true if i is a parameter of the current type/operation
+    %	  false otherwise
+
+    op_parm = proc(i: idn) returns (bool)
+	for each_d: decl in decllist$elements(arp) do
+	    for each_i: idn in idnlist$elements(each_d.idns) do
+		if idn$similar(each_i, i) then return (true) end
+		end
+	    end
+	return (false)
+	end op_parm
+
+    % returns name of type
+
+    get_tid = proc() returns (string)
+	return(type_name)
+	end get_tid
+
+    % returns name of type/op or name of proc
+
+    get_id = proc() returns (string)
+	if ~cluster_context then return (type_name) end
+	if op_name ~= "" then
+	   return(type_name || "_op_" || op_name) end
+	return(type_name)
+	end get_id
+
+    % called at end of typedefn, also by more if not cluster_context
+    % emit reqs structures
+
+    output = proc(e:g_env)
+	rl_count : int := 1
+	for each_relt: restrict_elt in arl$elements(ar) do
+	    each_rl: restrictlist := each_relt.restricts
+	    op_id: string
+	    parm_list: decllist
+	    if each_relt.id = "" 
+	       then
+		    op_id := ""
+		    parm_list := current_apply$get().parms
+	       else
+		    op_id := "_op_" || each_relt.id
+		    parm_list := find_parms(current_type$get(), op_id)
+	       end
+	    this_name: string := type_name || op_id || "_of_" || 
+				 restrictlist$bottom(each_rl).idn.str
+	    %alt_name: string := type_name.str || "_of_tf_" || int$unparse(rl_count)
+	    if g_env$add_global(this_name) then
+
+	       % type_name is new: therefore generate the structures
+	       % first gather operations
+
+	       ops: operdecllist := operdecllist$new()
+	       for each_r: restrict in restrictlist$elements(each_rl) do
+		   these_ops: operdecllist
+		   tagcase each_r.kind
+		      tag has_(o:operdecllist):
+			  these_ops := o
+		      tag idn:
+		      tag set(s: xtypeset):
+			  these_ops := s.ops
+		      end % tag
+		   for each_o: operdecl in operdecllist$elements(these_ops) do
+		       ops := operdecllist$addh(ops, each_o)
+		       end
+		   end
+	       ops := ops_uniq(ops)
+	       names: namelist := namelist$new()
+	       for each_opd:operdecl in operdecllist$elements(ops) do
+		   for each_op: opspec in opspeclist$elements(each_opd.opers) do
+		       names := namelist$addh(names, each_op.name)
+		       end % for
+		   end % for
+
+	       % generate typedef for REQS structure
+
+	       output_reqs(e, this_name, names)
+
+	       % generate OPS structures
+
+	       if ~cluster_context then output_ops_def(e, this_name, ops, parm_list) end
+	       for each_opd:operdecl in operdecllist$elements(ops) do
+		   for each_op: opspec in opspeclist$elements(each_opd.opers) do
+		       names := namelist$addh(names, each_op.name)
+		       end % for
+		   end % for
+
+
+	       end
+	    rl_count := rl_count + 1
+	    end % for
+	end output
+
+    % called at end of typedefn
+
+    reset = proc()
+	cluster_context := false
+	ar := arl$new()
+	type_name := ""
+	op_name := ""
+	end reset
+
+    % called in typedefn just after setting preprocessing = false
+
+    initial_output = proc(e:g_env)
+	for each_relt: restrict_elt in arl$elements(ar) do
+	    each_rl: restrictlist := each_relt.restricts
+	    op_id: string
+	    parm_list: decllist
+	    if each_relt.id = "" 
+	       then
+		    op_id := ""
+		    % 9/7/90: the following conditional replaces
+		    %    parm_list := current_apply$get().parms
+		    % cf compiling genlib/keyed_mapping
+		    if current_type$exists()
+		       then
+			    parm_list := current_type$get().parms
+		       else
+			    parm_list := current_apply$get().parms
+		       end
+	       else
+		    op_id := "_op_" || each_relt.id
+		    parm_list := find_parms(current_type$get(), each_relt.id)
+	       end
+	    this_name: string := type_name || op_id || "_of_" || 
+				 restrictlist$bottom(each_rl).idn.str
+	    if g_env$add_global(this_name) then
+
+	       % type_name is new: therefore generate the structures
+	       % first gather operations
+
+	       ops: operdecllist := operdecllist$new()
+	       for each_r: restrict in restrictlist$elements(each_rl) do
+		   these_ops: operdecllist
+		   tagcase each_r.kind
+		      tag has_(o:operdecllist):
+			  these_ops := o
+		      tag idn:
+		      tag set(s: xtypeset):
+			  these_ops := s.ops
+		      end % tag
+		   for each_o: operdecl in operdecllist$elements(these_ops) do
+		       ops := operdecllist$addh(ops, each_o)
+		       end
+		   end
+	       ops := ops_uniq(ops)
+	       names: namelist := namelist$new()
+	       for each_opd:operdecl in operdecllist$elements(ops) do
+		   for each_op: opspec in opspeclist$elements(each_opd.opers) do
+		       names := namelist$addh(names, each_op.name)
+		       end % for
+		   end % for
+
+	       output_reqs(e, this_name, names)
+	       output_ops_def(e, this_name, ops, parm_list)
+	       end % if
+	    end % for
+	output_no_ops(e)
+	end initial_output
+
+    find_parms = proc(t: typedefn, op: name) returns (decllist)
+	
+	for each_ap:applydefn in applydefnlist$elements(t.body) do
+	    if each_ap.idn.str = op then
+	       return(each_ap.parms)
+	       end
+	    return(decllist$new())
+	    end
+	end find_parms
+
+    ops_uniq = proc(ops:operdecllist) returns (operdecllist)
+	new: operdecllist := operdecllist$new()
+	for each_od: operdecl in operdecllist$elements(ops) do
+	    for each_opspec:opspec in opspeclist$elements(each_od.opers) do
+		for exist_od: operdecl in operdecllist$elements(new) do
+		    if opspec$similar(each_opspec,
+				      exist_od.opers[1])
+		       then exit found end
+		    end % for
+		   except when found: continue end
+		new := operdecllist$addh(new,
+					 operdecl${opers: opspeclist$fill(1,each_opspec),
+						   line: each_od.line})
+		end % for
+	    end % for
+	return (new)
+	end ops_uniq
+
+
+    % called by output and initial output
+
+    output_reqs = proc(e:g_env, this_name: string, names: namelist)
+	g_env$blankline(e)
+	g_env$putl(e, "typedef struct {")
+	g_env$putl(e, "long count;")
+	g_env$indent(e)
+	for each_name: name in namelist$elements(names) do
+	    g_env$puts(e, "char *" || each_name || "_name;")
+	    g_env$newline(e)
+	    end % for
+	g_env$outdent(e)
+	g_env$puts(e, "} ")
+	g_env$putl(e, this_name || "_REQS;")
+
+	% initialize REQS structure
+
+	g_env$blankline(e)
+	g_env$putl(e, this_name || "_REQS " || this_name
+			|| "_reqs_actual = " ||
+		      "{" || int$unparse(namelist$size(names)) ||",")
+	g_env$indent(e)
+	nth: bool := false
+	for each_n: name in namelist$elements(names) do
+	    if nth then g_env$puts(e, ", ") else nth := true end
+	    g_env$puts(e, "\"" || each_n || "\"")
+	    end % for
+	g_env$putl(e, "};")
+	g_env$outdent(e)
+
+	g_env$blankline(e)
+	g_env$putl(e, "struct REQS * " || this_name || "_reqs = " ||
+		      "(struct REQS *)&" || this_name ||
+		      "_reqs_actual;")
+
+	%	       g_env$putl(e, "struct REQS * " || alt_name || "_reqs = " ||
+	%			     "(struct REQS *)&" || this_name ||
+	%			     "_reqs_actual;")
+	end output_reqs
+
+    % called by output and initial_output
+    % emits a typedef for an OPS structure:
+    %	one entry per op in operdecllists gleaned from restrictlists
+
+
+    output_ops_def = proc(e:g_env, this_name: string, ops: operdecllist,
+			  parm_list: decllist)
+	g_env$blankline(e)
+	g_env$putl(e, "typedef struct {")
+	g_env$indent(e)
+	g_env$putl(e, "long count;")
+	g_env$putl(e, "OWNPTR type_owns;")
+	g_env$putl(e, "OWNPTR op_owns;")
+	for each_opd:operdecl in operdecllist$elements(ops) do
+	    for each_op: opspec in opspeclist$elements(each_opd.opers) do
+		g_env$puts(e, "struct OP_ENTRY " || each_op.name || ";")
+		g_env$newline(e)
+		end % for
+	    end % for
+	g_env$outdent(e)
+	g_env$putl(e, "} " || this_name || "_OPS;")
+
+	end output_ops_def
+
+    % called by more and initial_output
+    % handles case of parameters with no restrictions on them
+
+    output_no_ops = proc(e:g_env)
+	for each_decl: decl in decllist$elements(arp) do
+	    for each_idn: idn in idnlist$elements(each_decl.idns) do
+		op_id: string := ""
+		if op_name ~= "" then
+		   op_id := "_op_" || op_name end
+		this_name: string := type_name || op_id || "_of_" || each_idn.str
+	        %alt_name: string := type_name.str || "_of_tf_1"
+		if g_env$add_global(this_name) then
+		   %logit("arp: " || this_name)
+		   found: bool := false
+		   for ith_relt: restrict_elt in arl$elements(ar) do
+		       ith_rl: restrictlist := ith_relt.restricts
+		       for nth_r: restrict in restrictlist$elements(ith_rl) do
+			   if nth_r.idn = each_idn then
+			      found := true
+			      break
+			      end
+			   end % for
+		       if found then break end
+		       end % for
+		   if ~found then
+
+		      % generate typedef for REQS structure
+		
+		      g_env$blankline(e)
+		      g_env$putl(e, "typedef struct {")
+		      g_env$putl(e, "long count;")
+		      g_env$puts(e, "} ")
+		      g_env$putl(e, this_name || "_REQS;")
+		
+		      % initialize REQS structure
+		
+		      g_env$blankline(e)
+		      g_env$putl(e, this_name || "_REQS " || this_name
+				      || "_reqs_actual = " ||
+				    "{0};")
+		
+		      g_env$blankline(e)
+		      g_env$putl(e, "struct REQS * " || this_name || "_reqs = " ||
+				    "(struct REQS *)&" || this_name ||
+				    "_reqs_actual;")
+
+		      g_env$blankline(e)
+		      %		      g_env$putl(e, "struct REQS * " || alt_name || "_reqs = " ||
+		      %				    "(struct REQS *)&" || this_name ||
+		      %				    "_reqs_actual;")
+		
+		      % generate OPS structure
+		
+		      g_env$blankline(e)
+		      g_env$putl(e, "typedef struct {")
+		      g_env$indent(e)
+		      g_env$putl(e, "long count;")
+		      g_env$putl(e, "OWNPTR type_owns;")
+		      g_env$putl(e, "OWNPTR op_owns;")
+		      g_env$putl(e, "} " || this_name || "_OPS;")
+		      g_env$outdent(e)
+		      g_env$blankline(e)
+		
+		      end
+		   end
+		end % for
+	    end % for
+
+	end output_no_ops
+
+    end reqs
+
+el_cont_type_parm = proc(el: exprlist) returns (bool)
+
+    % logit("entering el_cont_type_parm")
+    for each_e: expr in exprlist$elements(el) do
+	tagcase each_e.abs
+	   tag type_(ty:typespec):
+	       if type_cont_type_parm(ty) then return (true) end
+	   tag idn(i:idn):
+	       if parm$member_base(i.str) then return (true) end
+	   tag s_cons (sc: selectcons):
+	       % typespec_print(sc.type_)
+	       for each_f: field in fieldlist$elements(sc.fields) do
+		   new_el: exprlist := exprlist$fill(1, each_f.val)
+		   if el_cont_type_parm(new_el) then return (true) end
+
+		   end
+	   tag up_, down_:
+	       if type_cont_type_parm(each_e.typespec) then return (true) end
+	   tag invoke (inv: invoke):
+		if el_cont_type_parm(inv.args) then return (true) end
+		if el_cont_type_parm(exprlist$fill(1,inv.apply)) then
+			return (true) end
+		return(type_cont_type_parm(each_e.typespec))
+	   tag apply (ct: clutype):
+		return (el_cont_type_parm(ct.parms))
+	   tag op (cop:clusterop):
+		return (el_cont_type_parm(cop.parms))
+	   others:
+	       % logit("expr assumed not parameterized")
+	       % expr_print(each_e, 91)
+	   end % tag
+	% logit("expr fell through as not parameterized")
+	% expr_print(each_e, 92)
+	end % for	
+    % logit("no parmd exprs found")
+    return (false)
+
+    end el_cont_type_parm
+
+type_cont_type_parm = proc(ty: typespec) returns (bool)
+    tagcase ty.abs
+       tag idn (i:idn):
+	   if parm$member_base(i.str) then return (true) end
+       tag type_, cluster_ (ct:clutype):
+	   if el_cont_type_parm(ct.parms) then return (true) end
+       tag select (xt: seltype):
+	   if fl_cont_type_parm(xt.parms) then return (true) end
+       others:
+       end
+    return (false)
+    end type_cont_type_parm
+
+type_cont_op_parm = proc(ty: typespec) returns (bool)
+    tagcase ty.abs
+       tag idn (i:idn):
+	   if parm$member_op(i.str) then return (true) end
+       tag type_, cluster_ (ct:clutype):
+	   if el_cont_op_parm(ct.parms) then return (true) end
+       tag select (xt: seltype):
+	   if fl_cont_op_parm(xt.parms) then return (true) end
+       others:
+       end
+    return (false)
+    end type_cont_op_parm
+
+fl_cont_type_parm = proc(fl: fieldspeclist) returns (bool)
+
+    for each_fs: fieldspec in fieldspeclist$elements(fl) do
+	tagcase each_fs.type_.abs
+	   tag idn (i:idn):
+	       if parm$member_base(i.str) then return (true) end
+	   tag type_, cluster_ (ct:clutype):
+	       if el_cont_type_parm(ct.parms) then return (true) end
+	   tag select (xt: seltype):
+	       if fl_cont_type_parm(xt.parms) then return (true) end
+	   others:
+	   end % tag
+	end % for	
+    return (false)
+
+    end fl_cont_type_parm
+
+el_cont_op_parm = proc(el: exprlist) returns (bool)
+
+    for each_e: expr in exprlist$elements(el) do
+	tagcase each_e.abs
+	   tag type_(ty:typespec):
+	       tagcase ty.abs
+		  tag idn (i:idn):
+		      % logit("idn : " || i.str)
+		      if parm$member_op(i.str) then return (true) end
+	          tag type_ (ct:clutype):
+		      % logit("type_ : " || ct.gen.common)
+		      if el_cont_op_parm(ct.parms) then return (true) end
+	          tag cluster_ (ct:clutype):
+		      % logit("cluster_ : " || ct.gen.common)
+		      if el_cont_op_parm(ct.parms) then return (true) end
+		  tag select (xt: seltype):
+		      % logit("select : " || xt.gen.common)
+		      if fl_cont_op_parm(xt.parms) then return (true) end
+		  others:
+		      % typespec_print(ty)
+		  end
+	   tag idn(i:idn):
+	       if parm$member_op(i.str) then return (true) end
+	   tag invoke (inv: invoke):
+		if el_cont_op_parm(inv.args) then return (true) end
+		if el_cont_op_parm(exprlist$fill(1,inv.apply)) then
+			return (true) end
+		return (type_cont_op_parm(each_e.typespec))
+	   tag apply (ct: clutype):
+		return (el_cont_op_parm(ct.parms))
+	   tag op (cop:clusterop):
+		return (el_cont_op_parm(cop.parms))
+	   others:
+	       % expr_print(each_e, 42)
+	   end % tag
+	end % for	
+    return (false)
+	
+    end el_cont_op_parm
+
+fl_cont_op_parm = proc(fl: fieldspeclist) returns (bool)
+
+    for each_fs: fieldspec in fieldspeclist$elements(fl) do
+	tagcase each_fs.type_.abs
+	   tag idn (i:idn):
+	       if parm$member_op(i.str) then return (true) end
+	   tag type_, cluster_ (ct:clutype):
+	       if el_cont_op_parm(ct.parms) then return (true) end
+	   tag select (xt: seltype):
+	       if fl_cont_op_parm(xt.parms) then return (true) end
+	   others:
+	   end % tag
+	end % for	
+    return (false)
+
+    end fl_cont_op_parm
+

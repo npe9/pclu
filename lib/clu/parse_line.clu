@@ -1,0 +1,23 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+
+% added comma separator: dcurtis 12/18/91
+
+as = array [ string ]
+ac = array [ char ]
+
+parse_line = proc (s: string) returns (as)
+    own accum: ac := ac$new ()
+    parts: as := as$new ()
+    for pos: int in int$from_to (1, string$size (s) + 1) do
+	c: char := s[pos]
+	   except when bounds: c := ' ' end
+	if c = ' ' cor c = '\t' cor c = ','
+	   then if ~ac$empty (accum) then
+		   as$addh (parts, string$ac2s (accum))
+		   ac$trim (accum, 1, 0)
+		   end
+	   else ac$addh (accum, c)
+	   end
+	end
+    return (parts)
+    end parse_line

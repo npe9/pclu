@@ -1,0 +1,88 @@
+% Defined in gcd_tab.clu
+%logit = proc(s:string)
+%    po: stream := stream$error_output()
+%    stream$puts(po, s||"\n")
+%    end logit
+
+start_up = proc()
+
+logit("")
+logit("INTEGER (expected result 5)")
+fn: file_name := file_name$create("/tmp/", "testint", "lib", "")
+j:int := 5
+gc_dump[int](j,fn)
+logit("Result: " || int$unparse(gc_read[int](fn)))
+  except when not_possible(why: string):
+    logit("gc_read signals not_possible: " || why)
+    end
+
+logit("")
+logit("CHAR (expected result '@')")
+fn := file_name$create("/tmp/", "testchar", "lib", "")
+c:char := '@'
+gc_dump[char](c,fn)
+c2:char := gc_read[char](fn)
+logit("Result: '" || string$c2s(c2) || "', " || int$unparse(char$c2i(c2)))
+  except when not_possible(why: string):
+    logit("gc_read signals not_possible: " || why)
+    end
+
+logit("")
+logit("STRING (expected result 'abc')")
+fn := file_name$create("/tmp/", "teststring1", "lib", "")
+s:string := "abc"
+gc_dump[string](s,fn)
+logit("Result: '" || gc_read[string](fn) || "'")
+  except when not_possible(why: string):
+    logit("gc_read signals not_possible: " || why)
+    end
+
+logit("")
+logit("STRING (expected result 'abcdefghij')")
+fn := file_name$create("/tmp/", "teststring2", "lib", "")
+s := "abcdefghij"
+gc_dump[string](s,fn)
+logit("Result: '" || gc_read[string](fn) || "'")
+  except when not_possible(why: string):
+    logit("gc_read signals not_possible: " || why)
+    end
+
+logit("")
+logit("ARRAY[INT] (expected result 0, 1, 2, 3, 5)")
+fn := file_name$create("/tmp/", "testarrayofints", "lib", "")
+ai:array[int]:= array[int]$[]
+array[int]$addh(ai, 0)
+array[int]$addh(ai, 1)
+array[int]$addh(ai, 2)
+array[int]$addh(ai, 3)
+array[int]$addh(ai, 4)
+gc_dump[array[int]](ai,fn)
+aix:array[int] := gc_read[array[int]](fn)
+  except when not_possible(why: string):
+    logit("gc_read signals not_possible: " || why)
+    end
+logit("Result")
+for i1:int in array[int]$elements(aix) do
+	logit(int$unparse(i1))
+	end
+
+logit("")
+logit("ARRAY[STRING] (expecting to get asdf0, asdf1")
+fn := file_name$create("/tmp/", "testarrayofstrings", "lib", "")
+a:array[string]:= array[string]$[]
+array[string]$addh(a, "asdf0")
+array[string]$addh(a, "asdf1")
+%array[string]$addh(a, "asdf2")
+%array[string]$addh(a, "asdf3")
+%array[string]$addh(a, "asdf4")
+gc_dump[array[string]](a,fn)
+ax:array[string] := gc_read[array[string]](fn)
+  except when not_possible(why: string):
+    logit("gc_read signals not_possible: " || why)
+    end
+logit("Result")
+for s1:string in array[string]$elements(ax) do
+	logit(s1)
+	end
+
+end start_up

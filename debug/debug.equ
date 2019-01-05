@@ -1,0 +1,108 @@
+str = string
+
+dexprlist = sequence[dexpr]
+dexpr = oneof[
+	      acons: acs,
+	      apply: op,
+	      assign: assn,
+	      const: con,
+	      field: fspec,
+	      idn: ident,
+	      instance: instance,
+	      none: null,
+	      object: odesc,
+	      scons: scs,
+	      sel: sel,
+	      tgen: tgen,
+	      vcons: vcs
+	      ]
+
+odesc = record[value: _obj, 
+	       ops: anop
+	       ]
+
+tgen = record[name: string,
+		parms: list]
+
+sel = record[name: string,
+		parms: list]
+
+instance = record[ops: anop]
+
+acs = record[typ: string,
+	     parm: list,
+	     start: _obj,
+	     vals: list
+	     ]
+
+scs = record[typ: string,
+	     parms: list,
+	     vals: list
+	     ]
+
+vcs = record[typ: string,
+	     parms: list,
+	     val: _obj,
+	     tg: int
+	     ]
+
+fspec = record[name: string, typ: _obj]
+fspeclist = sequence[fspec]
+
+dvardesc = oneof[const: con, object: ops]
+
+
+rinfo = record[signal_name: string, 
+	       routine_name: string]
+
+list = sequence[_obj]
+ident = string
+con = oneof[int_: int,
+	    bool_: bool,
+	    null_: null,
+	    char_: char,
+	    real_: real,
+	    str: string
+	    ]
+
+assn = record[left: list,
+	      right: list
+	      ]
+
+op = record[op: string,
+	    tparms: list,
+	    oparms: list,
+	    args: list
+	    ]
+l2d = _cvt[list, dexprlist]
+l2f = _cvt[list, fspeclist]
+d2l = _cvt[dexprlist, list]
+d2o = _cvt[dexpr, _obj]
+o2d = _cvt[_obj, dexpr]
+anop = _vec[_obj]
+ops = sequence[anop]
+
+rtn_info = record[a_nm: string,
+		  b_fname: string,
+		  c_is_iter: bool,
+		  d_is_parmd: bool,
+		  e_addr: int,
+		  f_nargs: int,
+		  g_vals: ops,
+		  h_sigds: sigdesclist,
+		  i_locals: ops,
+		  j_owns: ops,
+		  k_ptowns: ops,
+		  l_popowns: ops,
+		  m_type_formals: ss,
+		  n_op_formals: ss
+		  ]
+
+sigdesclist = sequence[sigdesc]
+
+sigdesc = record[a_nm: string,
+		 b_vals: ops]
+
+ss = sequence[string]
+
+ss2l = _cvt[ss, list]

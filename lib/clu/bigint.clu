@@ -1,0 +1,537 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+bigint = cluster is
+
+	  add, sub, mul, minus, abs, max, min, div, mod, power,
+	  lt, le, ge, gt, equal, similar, copy, encode, decode,
+	  i2bi, bi2i, parse, unparse
+
+  b28 = 2**28	% limit of internal digits
+  b27 = 2**27	% limit of first digits, first bit gives sign
+  bigdigit = b28 - 1
+  bigdigit1 = b27 - 1
+  b14 = 2**14
+  b13 = 2**13
+  bighalfdigit = b14-1
+  aint = array[int]
+  rep = aint
+
+  % CONVERSION OPERATORS
+  i2bi = proc(I: int) returns (cvt)
+    if I>=0 then
+      if I<b27 then
+	return(rep$[I])
+      else
+	return(rep$[I//b28, I/b28])
+      end
+    else
+      first: int := I//b28
+      if I>=-b27 then
+	return(rep$[first])
+      else
+	return(rep$[first, (I/b28)//b28])
+      end
+    end
+  end i2bi
+
+  bi2i = proc(A: cvt) returns (int) signals (overflow)
+    if rep$size(A) > 2 then signal overflow end
+    At: int := aint$top(A)
+    if At >= b27 then At := At-b28 end
+    if rep$size(A) = 2 then
+      At := At*b28 + A[1] resignal overflow
+    end
+    return(At)
+  end bi2i
+
+  parse = proc(A: string) returns (bigint) signals (bad_format)
+    % such inefficiency -- all those arrays to be GC'd
+    zero = char$c2i('0')
+    neg: bool
+    i: int
+    if A[1] = '-' then
+      neg := true	i := 2
+      if string$size(A)=1 then signal bad_format end
+    else
+      neg := false	i := 1
+    end except when bounds: signal bad_format end
+    psum: bigint := up(rep$[0])
+    ten: bigint := up(rep$[10])
+    digit: bigint := up(rep$[0])
+    for j: int in int$from_to(i, string$size(A)) do
+      nc: char := A[j]
+      if nc<'0' cor nc>'9' then signal bad_format end
+      down(digit)[1] := char$c2i(nc)-zero
+      psum := psum*ten + digit
+    end
+    if neg then psum := -psum end
+    return(psum)
+  end parse
+
+  unparse = proc(R: cvt) returns (string)
+    achar = array[char]
+    zero = char$c2i('0')
+    neg: bool
+    if aint$top(R)<b27 then
+      neg := false
+    else
+      R := down( - up(R) )
+      neg := true
+    end
+    Rnb: aint := new_base(R)
+    Cbsiz: int := aint$size(Rnb)* 5
+    Cbptr: int := Cbsiz
+    Cbuff: achar := achar$fill(1, Cbsiz, ' ')
+    non_zero: bool := true
+    while non_zero do
+      rem: int
+      non_zero, rem := one_digit_divide(Rnb, 10)
+      Cbuff[Cbptr] := char$i2c(zero + rem)
+      Cbptr := Cbptr-1
+    end
+    if neg then
+      Cbuff[Cbptr] := '-'
+      Cbptr := Cbptr-1
+    end
+    achar$trim(Cbuff, Cbptr+1, Cbsiz)
+    return(string$ac2s(Cbuff))
+  end unparse
+
+  %% internal -- used by unparse and div
+  one_digit_divide = proc(Rnb: aint, d: int) returns (bool, int)
+    non_zero: bool := false
+    rem: int := 0
+    for i: int in int$from_to_by(aint$size(Rnb), 1, -1) do
+      Rv: int := rem*b14 + Rnb[i]
+      nRv: int := Rv / d
+      rem := Rv // d
+      if nRv ~= 0 then non_zero := true end
+      Rnb[i] := nRv
+    end
+    return(non_zero, rem)
+  end one_digit_divide
+
+  % ADDITION OPERATIONS
+  add = proc(A, B: cvt) returns (cvt)
+    return(addsub(A, B, false))
+  end add
+
+  sub = proc(A, B: cvt) returns (cvt)
+    return(addsub(A, B, true))
+  end sub
+
+  minus = proc(A: cvt) returns (cvt)
+    return(addsub(rep$[0], A, true))
+  end minus
+
+  %% internal -- used by add, sub, minus
+  addsub = proc(A, B: aint, neg: bool) returns (aint)
+    SZ: int := max_size(A, B)
+    C: aint := aint$predict(1, SZ)
+    carry: int
+    if neg then carry := 1 else carry := 0 end
+    FA, FB, psum: int
+    for i: int in int$from_to(1, SZ) do
+      FA := fetch_digit(A, i)
+      FB := fetch_digit(B, i)
+      if neg then FB := bigdigit - FB end
+      psum := FA + FB + carry
+      if psum>=b28 then
+        psum := psum - b28
+	carry := 1
+      else
+	carry := 0
+      end
+      aint$addh(C, psum)
+    end
+    % overflow tests
+    if carry=1 then
+      if FA>=b27 cand FB>=b27 cand psum<b27 then
+	% negative overflow -- 2 neg added to form a pos
+	aint$addh(C, bigdigit)
+      end
+    else
+      if FA<b27 cand FB<b27 cand psum>=b27 then
+	% positive overflow -- 2 pos added to form a neg
+	aint$addh(C, 0)
+      end
+    end
+    clear_leads(C)	% of dubious value
+    return(C)
+  end addsub
+
+  % internal -- used in addition and comparison operations
+  max_size = proc(A, B: rep) returns (int)
+    return(int$max(rep$size(A), rep$size(B)))
+  end max_size
+
+  % internal -- used in addition and comparison operations
+  fetch_digit = proc(N: aint, I: int) returns (int)
+    return(N[I])
+    except
+    when bounds:
+      if aint$top(N)>=b27 then
+	return(bigdigit)
+      else
+	return(0)
+      end
+    end
+  end fetch_digit
+
+  % COMPARISON OPERATORS
+  gt = proc(A, B: cvt) returns (bool)
+    return(gtge(A, B, false))
+  end gt
+
+  ge = proc(A, B: cvt) returns (bool)
+    return(gtge(A, B, true))
+  end ge
+
+  lt = proc(A, B: cvt) returns (bool)
+    return(gtge(B, A, false))
+  end lt
+
+  le = proc(A, B: cvt) returns (bool)
+    return(gtge(B, A, true))
+  end le
+
+  equal = proc(A, B: cvt) returns (bool)
+    if aint$size(A) ~= aint$size(B) then return (false) end
+    for i: int in aint$indexes(A) do
+      if A[i]~=B[i] then return(false) end
+    end
+    return (true)
+  end equal
+
+  max = proc(A, B: bigint) returns (bigint)
+    if A>B then return(A) else return(B) end
+  end max
+
+  min = proc(A, B: bigint) returns (bigint)
+    if A>B then return(B) else return(A) end
+  end min
+
+  abs = proc(A: bigint) returns (bigint)
+    if aint$top(down(A))<b27 then return(A) else return(-A) end
+  end abs
+
+  % internal -- used by ge, gt, le, lt
+  gtge = proc(A, B: aint, eq: bool) returns (bool)
+    if rep$top(A)<b27 then
+      if rep$top(B)>=b27 then
+	% A positive, B negative
+	return(true)
+      end
+    else
+      if rep$top(B)<b27 then
+	% A negative, B positive
+	return(false)
+      end
+    end
+    for i: int in int$from_to_by(max_size(A, B), 1, -1) do
+      fA: int := fetch_digit(A,i)
+      fB: int := fetch_digit(B,i)
+      if fA > fB then return(true) end
+      if fA < fB then return(false) end
+    end
+    return(eq)		% returned if they are equal
+  end gtge
+
+  % MISCELLANEOUS OPERTIONS
+  similar = proc(A, B: bigint) returns (bool)
+    return(A=B)
+  end similar
+
+  copy = proc(A: bigint) returns (bigint)
+    return(A)
+  end copy
+
+  encode = proc(V: cvt, I: istream) signals (not_possible(string))
+    rep$encode(V, I) resignal not_possible
+  end encode
+
+  decode = proc(I: istream) returns (cvt)
+			  signals (end_of_file, not_possible(string))
+    return(rep$decode(I)) resignal end_of_file, not_possible
+  end decode
+
+  % MULTIPLICATION
+  mul = proc(A, B: cvt) returns (cvt)
+    C: aint := aint$fill(1, aint$size(A)+aint$size(B), 0)
+    for iA: int in aint$indexes(A) do
+      digAlo: int := A[iA]//b14
+      digAhi: int := A[iA]/b14
+      for iB: int in aint$indexes(B) do
+	digBlo: int := B[iB]//b14
+	digBhi: int := B[iB]/b14
+	splitd: int := digAlo*digBhi + digAhi*digBlo
+	addlo: int := digAlo*digBlo + (splitd//b14)*b14
+	addhi: int := digAhi*digBhi + splitd/b14
+	if addlo >= b28 then
+	  addlo := addlo-b28
+	  addhi := addhi+1
+	end
+	store_at: int := iA+iB-1
+	newd: int := C[store_at] + addlo
+	if newd >= b28 then
+	  newd := newd-b28
+	  addhi := addhi+1
+	end
+	C[store_at] := newd
+	store_at := store_at+1
+	newd := C[store_at] + addhi
+	if newd >= b28 then
+	  newd := newd-b28
+	  add_in: int := store_at+1
+	  while  C[add_in] = bigdigit do
+	    C[add_in] := 0
+	    add_in := add_in+1
+	  end
+	  C[add_in] := C[add_in]+1
+	end
+	C[store_at] := newd
+      end
+    end
+    % correcting problems caused by multipling with negative numbers
+    if aint$top(A)>=b27 then
+      mul_sub_in(C, B, aint$size(A)+1)
+    end
+    if aint$top(B)>=b27 then
+      mul_sub_in(C, A, aint$size(B)+1)
+    end
+    clear_leads(C)
+    return(C)
+  end mul
+
+  % internal used by mul ---- in some ways resembles div_sub
+  mul_sub_in = proc(C, A: aint, p: int)
+    carry: int := 1
+    for aa: int in aint$elements(A) do
+      newC: int := C[p] + (bigdigit-aa) + carry
+      if newC>=b28 then
+	newC := newC - b28
+	carry := 1
+      else
+	carry := 0
+      end
+      C[p] := newC
+      p := p + 1
+    end
+  end mul_sub_in
+
+  % internal -- used by mul, div, add
+  % clear leading zeros or ones
+  clear_leads = proc(R: aint)
+    fd: int := aint$top(R)
+    % Could have a lot of leading zeros or ones.  Clear 'em.
+    if fd=0 cor fd=bigdigit then
+      Rsz: int := aint$size(R)-1
+      begin
+	while R[Rsz]=fd do Rsz:=Rsz-1 end
+	if (fd=0 cand R[Rsz]>=b27) cor (fd=bigdigit cand R[Rsz]<b27) then
+	  Rsz := Rsz+1	% Oops, one leading word is necessary!
+	end
+      end except when bounds: Rsz := 1 end
+      aint$trim(R, 1, Rsz)
+    end
+  end clear_leads
+
+  % EXPONENTIATION
+  power = proc(A: bigint, B: cvt) returns (bigint) signals (negative_exponent)
+    if aint$top(B)>=b27 then signal negative_exponent end
+
+    % Pexp = A^(2^n)
+    % Sexp = A^(B//(2^n))
+    % n = (w-1)*28 + d
+    % x = B[w]/(2^d)
+    Pexp: bigint := A
+    Sexp: bigint := up(rep$[1])
+    for w: int in aint$indexes(B) do
+      x: int := B[w]
+      for d: int in int$from_to(0, 31) do
+	if x//2 = 1 then
+	  Sexp := Sexp * Pexp
+	end
+	x := x/2
+	% this takes forever -- following speeds it up for small exponents
+	if x=0 cand w=aint$size(B) then break end
+	Pexp := Pexp * Pexp
+      end
+    end
+    return(Sexp)
+  end power
+
+  % DIVISION
+  div = proc(A, B: bigint) returns (bigint) signals (zero_divide)
+    Q,R: bigint, negA,negB,mod0: bool := divmodhack(A, B) resignal zero_divide
+    if ~mod0 cand negA then
+      Q := Q + up(rep$[1])
+    end
+    if negA ~= negB then
+      Q := -Q
+    end
+    return(Q)
+  end div
+
+  mod = proc(A, B: bigint) returns (bigint) signals (zero_divide)
+    Q,R: bigint, negA,negB,mod0: bool := divmodhack(A, B) resignal zero_divide
+    if mod0 cor ~negA then
+      return(R)
+    elseif ~negB then
+      return(B-R)
+    else
+      return((-B)-R)
+    end
+  end mod
+
+  divmodhack = proc(A, B: cvt) returns (cvt, cvt, bool, bool, bool)
+				signals (zero_divide)
+    Q, R: aint		negA, negB, mod0: bool
+    if aint$top(A)>=b27 then
+      A := down(-up(A))
+      negA := true
+    else
+      negA := false
+    end
+    if aint$top(B)>=b27 then
+      B := down(-up(B))
+      negB := true
+    else
+      negB := false
+    end
+    Q, R := divmod(A, B) resignal zero_divide
+    Q := old_base(Q)	% you really don't need to do one of these!!
+    R := old_base(R)
+    if aint$size(R) = 1 cand R[1]=0 then
+      mod0 := true
+    else
+      mod0 := false
+    end
+    return(Q, R, negA, negB, mod0)
+  end divmodhack
+
+  divmod = proc(A, B: aint) returns (aint, aint) signals (zero_divide)
+    newbA: aint := new_base(A)
+    newbB: aint := new_base(B)
+    if aint$size(newbB) = 1 then
+      if newbB[1] = 0 then signal zero_divide end
+      forget_it: bool, remainder: int := one_digit_divide(newbA, newbB[1])
+      return(newbA, aint$[remainder])
+    end
+    Rsize: int := aint$size(newbA) - aint$size(newbB) + 1
+    if Rsize<=0 then
+      return(aint$[0], newbA)
+    end
+    aint$addh(newbA, 0)		% hack to avoid bounds problems
+    R: aint := aint$fill(1, Rsize, 0)
+    for e: int in int$from_to_by(Rsize, 1, -1) do
+      R[e] := div_one(newbA, newbB, e)
+    end
+    return(R, newbA)
+  end divmod
+
+  % Divide into IDEN ending at position E, ISOR
+  % Assuming ISOR greater than one byte!
+  div_one= proc(IDEN, ISOR: aint, e: int) returns (int)
+    ssz: int := aint$size(ISOR)
+    d: int := e + aint$size(ISOR) - 1
+    % Digits d thru e of IDEN, same size as ISOR
+
+    % divsofar is number of times IDEN has been divided by ISOR so far!!
+    divsofar: int := 0
+    while ~div_lt(IDEN, ISOR, e) do
+      % guess (lower, please) result
+      quess: int
+      if IDEN[d+1]=0 then
+	quess := (IDEN[d]*b14 + IDEN[d-1]) / (ISOR[ssz]*b14 + ISOR[ssz-1] + 1)
+      else
+	% could use just this clause, other occasionally gives better guess
+	quess := (IDEN[d+1]*b14 + IDEN[d]) / (ISOR[ssz] + 1)
+      end
+      if quess=0 then quess := 1 end
+      div_sub(IDEN, ISOR, e, quess)
+      divsofar := divsofar + quess
+    end
+    return (divsofar)
+  end div_one
+
+  % Is digits of IDEN ending at position E less than ISOR
+  div_lt = proc(IDEN, ISOR: aint, e: int) returns (bool)
+    d: int := e + aint$size(ISOR) - 1
+    if IDEN[d+1]>0 then return(false) end
+    for s: int in int$from_to_by(aint$size(ISOR), 1, -1) do
+      dd: int := IDEN[d]	ss: int := ISOR[s]
+      if dd < ss then return(true) end
+      if dd > ss then return(false) end
+      d := d - 1
+    end
+    return (false)
+  end div_lt
+
+  % Subtract from digits of IDEN ending at position E, ISOR*x
+  div_sub = proc(IDEN, ISOR: aint, e, x: int)
+    borry: int := 0
+    for ss: int in aint$elements(ISOR) do
+      psum: int := borry + ss*x
+      newee: int := IDEN[e] - psum//b14
+      borry := psum/b14
+      if newee<0 then
+	newee := newee + b14
+	borry := borry+1
+      end
+      IDEN[e] := newee
+      e := e+1
+    end
+    if borry>0 then
+      IDEN[e] := IDEN[e] - borry
+    end
+  end div_sub
+
+  % internal -- used by div, unparse
+  %	transforms from base 2^28 digits to base 2^14 digits
+  new_base = proc(A: aint) returns (aint)
+    R: aint := aint$predict(1, 2*aint$size(A))
+    for Adig: int in aint$elements(A) do
+      aint$addh(R, Adig//b14)
+      aint$addh(R, Adig/b14)
+    end
+    topA: int := aint$top(A)
+    if topA<b27 then
+      if topA<b13 then aint$remh(R) end
+    else
+      big = b28 - (b13-1)	%
+      if topA>=big then aint$remh(R) end
+    end
+    return(R)
+  end new_base
+
+  % internal -- used by mul, div
+  % transforms from base 2^14 digits to base 2^28 digits
+  old_base = proc(A: aint) returns (aint)
+    Rsz: int := aint$size(A)/2
+    R: aint := aint$predict(1, Rsz)
+    carry: int := 0
+    for i: int in int$from_to_by(1, aint$size(A), 2) do
+      Ai: int := A[i]
+      Aip1: int := A[i+1]
+      except
+      when bounds:
+	if Ai<b13 then
+	  Aip1 := 0
+	else
+	  Aip1 := bighalfdigit
+	end
+      end
+      nsum: int := (Aip1 // b14) * b14 + Ai + carry
+      carry := Aip1 / b14
+      if nsum >= b28 then
+	nsum := nsum - b28
+	carry := carry+1
+      end
+      aint$addh(R, nsum)
+    end
+    % ignoring final carry
+    clear_leads(R)
+    return(R)
+  end old_base
+
+end bigint

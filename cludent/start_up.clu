@@ -1,0 +1,91 @@
+ss = sequence[string]
+
+start_up = proc ()
+  err: stream := stream$error_output()
+
+  argv: ss := get_argv()
+  if ss$size(argv) = 0 then
+     po: stream := stream$primary_output()
+     b, errors: buf := indent(_chan$primary_input())
+     if ~buf$empty(errors) then 
+        stream$putl(err, "Errors in standard input")
+        output_buffer(errors, po)
+        end
+     output_buffer(b, po)
+       except when not_possible (why: string):
+		   stream$putl(err, "Unable to output to standard out")
+		   end
+     return
+     end
+
+  for s: string in ss$elements(argv) do
+    fn: file_name := file_name$parse(s)
+      except when bad_format: stream$putl(err, "bad file name: " || s) end
+    ci: _chan := _chan$open(fn, "read", 0)
+      except when not_possible (why: string):
+                  stream$putl(err, "cannot read " || s || ": " || why)
+		  continue
+		  end
+    b, errors: buf := indent(ci)
+    _chan$close(ci)
+
+    use_temp_file: bool := false
+    fn_tmp: file_name
+    if fn.suffix = "clu" then
+      fn_tmp := file_name$make_temp(fn.dir, "indenter", "tmpclu")
+      if file_exists(fn_tmp) then
+         signal failure ("tmp file already exists")
+         end
+      use_temp_file := true
+      rename_file(fn, fn_tmp)
+        except when not_possible (why: string):
+                    stream$puts(err, "cannot rename " || file_name$unparse(fn))
+		    stream$puts(err, " to " || file_name$unparse(fn_tmp))
+		    stream$putl(err, ": " || why)
+		    continue
+		    end
+      end
+
+    fn_out: file_name := file_name$create(fn.dir, fn.name, "clu", fn.other)
+    po: stream := stream$open(fn_out, "write")
+      except when not_possible (why: string):
+                  stream$puts(err, "cannot write "|| file_name$unparse(fn_out))
+		  stream$putl(err, ": " || why)
+		  continue
+		  end
+    if ~buf$empty(errors) then 
+      stream$putl(err, "\nErrors in " || s)
+      output_buffer(errors, po)
+      end
+    output_buffer(b, po)
+      except when not_possible (why: string):
+		  stream$puts(err, "Unable to output ")
+		  stream$putl(err, file_name$unparse(fn_out))
+		  end
+    stream$close(po)
+      except when not_possible (why: string):
+                  stream$puts(err, "cannot close "|| file_name$unparse(fn_out))
+		  stream$putl(err, ": " || why)
+		  end
+    if use_temp_file then
+       delete_file(fn_tmp)
+       end
+    end
+  end start_up
+
+
+indent = proc (pi: _chan) returns (buf, buf)
+
+  b: buf, msg: string := buf$read(pi)
+  if msg ~= "Done." then signal failure ("Read Error: " || msg) end
+  errs: buf := spiffy(b)
+  return(b, errs)
+  end indent
+
+output_buffer = proc (b: buf, s: stream) signals (not_possible(string))
+  size: int := buf$size(b)
+  if b[size] = "" then size := size - 1 end
+  for i: int in int$from_to(1, size) do
+    stream$putl(s, b[i]) resignal not_possible
+    end
+  end output_buffer

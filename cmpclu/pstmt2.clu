@@ -1,0 +1,355 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	PSTMT2	CLU
+%
+%	CLU Compiler:  parsing routines for statements
+
+% assn => idnlist := exprlist
+% declinit => decllist := expr
+
+p_decl_or_assn = proc (e: p_env) returns (stmtabs)
+	vars: forvars := p_idns_or_decls(e)
+	tagcase e.peek1
+	   tag assn:
+		p_env$next_token(e)
+		return(p_assn_rhs(e, vars))
+	   tag equal:
+		p_env$err(e, "use of = instead of :=", minor)
+		p_env$next_token(e)
+		return(p_assn_rhs(e, vars))
+	   others:
+	   end
+	tagcase vars
+	   tag old (idns: idnlist):
+		p_env$assume(e, ": type in declaration")
+		return(stmtabs$make_decl(decl${idns:  idns,
+					       type_: e.unknown_type}))
+	   tag new (decls: decllist):
+		if decllist$size(decls) = 1
+		   then return(stmtabs$make_decl(decllist$bottom(decls)))
+		   else	p_env$assume(e, ":= invocation after declarations")
+			return(stmtabs$make_declinit(
+					declinit${decls: decls,
+						  anys:  decllist$new(),
+						  expr:  e.bad_expr}))
+		   end
+	   end
+	end p_decl_or_assn
+
+p_assn_rhs = proc (e: p_env, vars: forvars) returns (stmtabs)
+	exprs: exprlist := p_clist[expr](e, p_expr, "expression")
+	tagcase vars
+	   tag old (idns: idnlist):
+		return(stmtabs$make_assn(assn${left:  idns,
+					       anys:  decllist$new(),
+					       right: exprs}))
+	   tag new (decls: decllist):
+		x: expr
+		if exprlist$size(exprs) = 1
+		   then x := exprlist$bottom(exprs)
+		   else	p_env$err(e,
+			  "only 1 expression allowed after := in a multiple declaration",
+			  minor)
+			x := e.bad_expr
+		   end
+		return(stmtabs$make_declinit(declinit${decls: decls,
+						       anys:  decllist$new(),
+						       expr:  x}))
+	   end
+	end p_assn_rhs
+
+% condition => name | name (exprlist)
+
+p_condition = proc (e: p_env) returns (condition) signals (bad)
+	n: name := p_name(e)
+	   except when none: p_env$assume(e, "exceptional condition")
+			     signal bad
+		  end
+	args: exprlist := p_plist[expr](e, p_expr, _none_ok, _no_empty,
+								"expression")
+	return(condition${name: n,
+			  args: args})
+	end p_condition
+
+% while = WHILE <> expr do
+
+p_while = proc (e: p_env) returns (stmtabs)
+	test: expr := p_expr1(e)
+	bod: body := p_do(e)
+	return(stmtabs$make_while_(whilestmt${test: test,
+					      body: bod}))
+	end p_while
+
+% sugarassn => expr := expr
+
+p_expr_stmt = proc (e: p_env) returns (stmtabs)
+	x: expr := p_expr1(e)
+	tagcase e.peek1
+	   tag assn:
+		p_env$next_token(e)
+		right: expr := p_expr1(e)
+		return(stmtabs$make_sugarassn(sugarassn${left:  x,
+							 right: right}))
+	   others:
+		return(stmtabs$make_invoke(
+				p_make_invoke(e, x, "expression used as statement")))
+	   end
+	end p_expr_stmt
+
+% There are 2 cases where we parse an expr when all we want is an invoke.
+% One is the IN clause of the FOR stmt; the other is when parsing a stmt.
+% This routine forces the expr to an invoke.
+
+p_make_invoke = proc (e: p_env, x: expr, why: str) returns (invoke)
+	tagcase x.abs
+	   tag invoke (abs: invoke):
+		return(abs)
+	   others:
+		p_env$err(e, why, minor)
+		return(invoke${apply:  e.bad_expr,
+			       args:   exprlist$new()})
+	   end
+	end p_make_invoke
+
+% except => sc | sc EXCEPT exceptarms END except | sc RESIGNAL exceptions
+% exceptarms => whenarms | whenarms OTHERS mdecl cbody
+% whenarms => empty | WHEN namelist whendecl cbody whenarms
+
+p_except = proc (e: p_env, st: stmt) returns (stmt)
+	while true do
+		p_semi(e)
+		tagcase e.peek1
+		   tag except_:
+			p_env$next_token(e)
+		   tag resignal_:
+			p_env$next_token(e)
+			l: int := e.line
+			sigs: namelist := p_clist[name](e, p_name, "name")
+			rs: resignalstmt := resignalstmt${stmt:   st,
+							  resigs: sigs}
+			st := stmt$create(stmtabs$make_resignal_(rs), l)
+			continue
+		   others:
+			return(st)
+		   end
+		l: int := e.line
+		arms: handlerlist := p_list[handler](e, p_whenarm, _empty_ok,
+								"WHEN arm")
+		xs: exceptstmt := exceptstmt${stmt:    st,
+					      arms:    arms,
+					      others_: mothersarm$make_none(nil)}
+		st := stmt$create(stmtabs$make_except_(xs), l)
+		tagcase e.peek1
+		   tag others_:
+			p_env$next_token(e)
+			line: int := e.line
+			dec: mdecl := p_mdecl(e)
+			bod: body := p_cbody(e, misc_body, ": in OTHERS...: body")
+			xs.others_ := mothersarm$make_arm(othersarm${decl: dec,
+								     body: bod,
+								     line: line})
+		   others:
+		   end
+		p_end(e, "END of EXCEPT statement")
+		end
+	end p_except
+
+p_whenarm = proc (e: p_env) returns (handler) signals (none, bad)
+	tagcase e.peek1
+	   tag when_: p_env$next_token(e)
+	   others:    signal none
+	   end
+	line: int := e.line
+	names: namelist := p_clist[name](e, p_name, "name")
+	vars: whendecl := p_whendecl(e)
+	bod: body := p_cbody(e, when_body, ": in WHEN...: body")
+	return(handler${names: names,
+			vars:  vars,
+			body:  bod,
+			line:  line})
+	end p_whenarm
+
+% mdecl => empty | (idn : type)
+
+p_mdecl = proc (e: p_env) returns (mdecl)
+	tagcase e.peek1
+	   tag l_paren: p_env$next_token(e)
+	   others:      return(mdecl$make_none(nil))
+	   end
+	dec: decl := p_decl(e)
+	if idnlist$size(dec.idns) > 1
+	   then p_env$err(e, "more than one idn declared", minor)
+		dec.idns := idnlist$[idnlist$bottom(dec.idns)]
+	   end
+	tagcase e.peek1
+	   tag r_paren: p_env$next_token(e)
+	   others:      p_env$assume(e, ") in (idn: type)")
+	   end
+	return(mdecl$make_decl(dec))
+	end p_mdecl
+
+% cbody => : body
+
+p_cbody = proc (e: p_env, kind: bodykind, assume: str) returns (body)
+	tagcase e.peek1
+	   tag colon: p_env$next_token(e)
+	   others:    p_env$assume(e, assume)
+	   end
+	return(p_body(e, kind))
+	end p_cbody
+
+% body => equatelist stmtlist
+
+p_body = proc (e: p_env, kind: bodykind) returns (body)
+	p_env$begin_body(e, kind)
+	equates: equatelist := p_slist[equate](e, p_equate)
+	stmts: stmtlist := p_slist[stmt](e, p_stmt)
+	p_env$end_body(e)
+	return(body${equates: equates,
+		     stmts:   stmts})
+	end p_body
+
+% whendecl => namelist | namelist (*) | namelist (decllist)
+
+p_whendecl = proc (e: p_env) returns (whendecl)
+	tagcase e.peek1
+	   tag l_paren: p_env$next_token(e)
+	   others:      return(whendecl$make_none(nil))
+	   end
+	dec: whendecl
+	tagcase e.peek1
+	   tag op (k: infixop):
+		if "mul" = k.op  cand  ~k.neg
+		   then	p_env$next_token(e)
+			dec := whendecl$make_star(nil)
+		   else dec := whendecl$make_decls(p_clist[decl](e, p_decl,
+							"declaration"))
+		   end
+	   others:
+		dec := whendecl$make_decls(p_clist[decl](e, p_decl,
+							 "declaration"))
+	   end
+	tagcase e.peek1
+	   tag r_paren: p_env$next_token(e)
+	   others:      p_env$assume(e, ") in (declaration_list) or (*)")
+	   end
+	return(dec)
+	end p_whendecl
+
+% force => FORCE idn : idn = expr where
+
+p_forcestmt = proc (e: p_env) returns (stmtabs) signals (bad)
+	p_env$next_token(e)
+	val: idn := p_idn(e)
+	tagcase e.peek1
+	   tag colon: p_env$next_token(e)
+	   others:    p_env$assume(e, ": in FORCE statement")
+	   end
+	type_: idn := p_idn(e)
+	    except when none: p_env$err(e, "parameter in FORCE statement",
+									serious)
+			      signal bad
+		   end
+	tagcase e.peek1
+	   tag equal:
+		p_env$next_token(e)
+	   tag assn:
+		p_env$err(e, "use of := instead of =", minor)
+		p_env$next_token(e)
+	   others:
+		p_env$assume(e, "= in FORCE statement")
+	   end
+	x: expr := p_expr1(e)
+	rest: restrictlist := p_where(e)
+	return(stmtabs$make_force_(forcestmt${val:    val,
+					      type_:  type_,
+					      expr:   x,
+					      where_: rest}))
+	end p_forcestmt
+
+p_ownstmt = proc (e: p_env) returns (stmtabs) signals (bad)
+	p_env$err(e, "illegal use of OWN statement", serious)
+	p_owninit(e)
+	signal bad
+	end p_ownstmt
+
+p_owninit = proc (e: p_env) returns (initform)
+	decls: decllist := p_clist[decl](e, p_decl, "declaration")
+	x: expr
+	tagcase e.peek1
+	   tag assn:
+		p_env$next_token(e)
+		x := p_expr1(e)
+	   tag equal:
+		p_env$err(e, "use of = instead of :=", minor)
+		p_env$next_token(e)
+		x := p_expr1(e)
+	   others:
+		if decllist$size(decls) = 1
+		   then return(initform$make_decl(decllist$bottom(decls))) end
+		p_env$assume(e, "initialization in OWN statement")
+		x := e.bad_expr
+	   end
+	return(initform$make_init(declinit${decls: decls,
+					    anys:  decllist$new(),
+					    expr:  x}))
+	end p_owninit
+
+p_end = proc (e: p_env, assume: str)
+	tagcase e.peek1
+	   tag end_: 
+	   others:   p_env$assume(e, assume)
+		     return
+	   end
+	tagcase p_env$peek(e, 2)
+	   tag idn (k: idn):
+		s: str := k.str
+		if s = e.applystr  cor  s = e.clustr
+		   then	tagcase p_env$peek(e, 3)
+			   tag semi, idn, eof: p_env$assume(e, assume)
+					       return
+			   others:
+			   end
+		   end
+	   others:
+	   end
+	p_env$next_token(e)
+	end p_end
+
+% Flush until we find something that definitely starts or ends a statement,
+% or that definitely ends the kind of body we are in.
+
+p_find_a_stmt = proc (e: p_env) returns (bool)
+	flushed: bool := false
+	found: bool := false
+	while true do
+		tagcase e.peek1
+		   tag else_, elseif_:
+			if p_env$in_body(e, then_body) then break end
+		   tag tag_:
+			if p_env$in_body(e, tag_body) then break end
+		   tag when_:
+			if p_env$in_body(e, when_body) then break end
+		   tag others_:
+			if p_env$in_body(e, tag_body)  cor  p_env$in_body(e, when_body)
+			   then break end
+		   tag end_, defnkey, returns_, yields_, where_, is_, has_, eof:
+			break
+		   tag stmtkey, except_:
+			found := true
+			break
+		   tag semi:
+			p_env$next_token(e)
+			found := true
+			break
+		   others:
+		   end
+		if ~flushed
+		   then	p_env$err(e, "looking for a statement", serious)
+			flushed := true
+		   end
+		p_env$next_token(e)
+		end
+	if flushed
+	   then p_env$err(e, "resuming parse at this point", none) end
+	return(found)
+	end p_find_a_stmt

@@ -1,0 +1,66 @@
+%	BIN EQUATE
+% Copyright Massachusetts Institute of Technology 1981, 1989
+%	CLU Compiler Version 3: template definitions
+
+_plain		= 0
+_cparm		= 1
+_rparm		= 2
+
+_temp_cluster	= 1
+_temp_routine	= 2
+
+_use_const	= 1
+_use_cown	= 2
+_use_rown	= 3
+_use_exception	= 4
+_use_signal	= 5
+_use_wvec	= 6
+_use_global	= 7
+_use_rdesc	= 8
+
+_const_null	= 1
+_const_bool	= 2
+_const_int	= 3
+_const_real	= 4
+_const_char	= 5
+_const_string	= 6
+_const_cparm	= 7
+_const_rparm	= 8
+_const_oneof	= 9
+_const_struct	= 10
+_const_seq	= 11
+_const_type	= 12
+_const_word	= 13
+_const_rel	= 14
+_const_routine	= 15
+_const_selector	= 16
+_const_rvec	= 17
+_const_nvec	= 18
+_const_xstring	= 19
+_const_argops	= 20
+_const_valops	= 21
+_const_sigops	= 22
+_const_signames	= 23
+
+_sel_tag	= 0			% selector as tag
+_sel_index	= 1			% selector as offset
+_sel_int	= 2			% selector as int
+_sel_head	= 3			% selector _tagcell header
+
+_tdesc_none	= 1
+_tdesc_cluster	= 2
+_tdesc_select	= 3
+_tdesc_mselect	= 4
+_tdesc_routine	= 5
+_tdesc_cparm	= 6
+_tdesc_rparm	= 7
+_tdesc_return	= 8
+_tdesc_selparm	= 9
+
+_idn_rparm	= 1			% routine parameter
+_idn_cparm	= 2			% cluster parameter
+_idn_rown	= 3			% routine own
+_idn_cown	= 4			% cluster own
+_idn_prown	= 5			% routine own of parameterized routine
+_idn_pcown	= 6			% cluster own of parameterized cluster
+_idn_var	= 7			% variable

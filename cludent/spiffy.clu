@@ -1,0 +1,829 @@
+_begin_body	= 1
+_bracket	= 2
+_close_bracket	= 3
+_cluster_body	= 4
+_do		= 5
+_elseif		= 6
+_end		= 7
+_except		= 8
+_for_body	= 9
+_head		= 10
+_is		= 11
+_op		= 12
+_routine_body	= 13
+_tag		= 14
+_tag_body	= 15
+_then		= 16
+_then_body	= 17
+_thenx_body	= 18
+_when		= 19
+_when_body	= 20
+_where		= 21
+_while_body	= 22
+_coenter_body	= 23
+_coenter_key	= 24
+_coenterx_body	= 25
+_enter_body	= 26
+_enter_key	= 27
+_enterx_body	= 28
+_foreach	= 29
+_seize_body	= 30
+_argus		= 31
+
+itype = proctype (ienv)
+
+spiffy = proc (b: buf) returns (buf)
+	line, pos: int := buf$get_cursor(b)
+	z: int := string$size(b[line])
+	mline, mpos: int := buf$get_mark(b)
+	mz: int := string$size(b[mline])
+	ie: ienv := ienv$create(b, false)
+	while i_module(ie, true, false) do end
+	    except when overflow: end
+	if pos > 1
+	   then buf$set_cursor(b, line, pos + string$size(b[line]) - z) end
+	if mpos > 1
+	   then buf$set_mark(b, mline, mpos + string$size(b[mline]) - mz) end
+	errs: buf := ie.errs
+	errs.changed := false
+	return(errs)
+	end spiffy
+
+% indent a cluster, routine, equate or statement
+
+i_module = proc (e: ienv, outer, quick: bool) returns (bool)
+	tagcase e.peek
+	   tag random:
+		tagcase ienv$peek(e, 2)
+		   tag clust_key (op: itype):
+			if ~outer
+			   then return(false)
+			elseif ienv$speek(e, 1) = "="
+			   then ienv$move(e)
+				ienv$move(e)
+				op(e)
+				return(true)
+			end
+		   tag oper_key (op: itype):
+			if ienv$speek(e, 1) = "="
+			   then ienv$move(e)
+				ienv$move(e)
+				op(e)
+				return(true)
+			   end
+		   others:
+		   end
+	   tag clust_key (op: itype):
+		if ~outer
+		   then return(false) end
+		ienv$missing(e, "cluster name")
+		op(e)
+		return(true)
+	   tag oper_key (op: itype):
+		ienv$missing(e, "routine name")
+		op(e)
+		return(true)
+	   tag eob:
+		ienv$move(e)
+		return(false)
+	   others:
+	   end
+	if i_stmt(e)
+	   then return(true)
+	elseif ~outer
+	   then tagcase e.peek
+		   tag end_key:
+			return(false)
+		   others:
+		   end
+	end
+	ienv$missing(e, "legal module/statement starter")
+	ienv$move(e)
+	return(~quick)
+	end i_module
+
+% indent a cluster
+
+i_cluster = proc (e: ienv)
+	mod: string := e.speek
+	ienv$move(e)
+	tagcase e.peek
+	   tag bracket:
+	       i_expr(e, 0)
+	   others:
+	   end
+	if mod ~= "equates"
+	   then old: int := ienv$cindent(e)
+		tagcase e.peek
+		   tag is_key:
+		       bold: int := e.indent
+		       e.indent := old
+		       ienv$move(e)
+		       ienv$mindent(e, _is)
+		       i_aexpr(e)
+		       e.indent := bold
+		   others:
+		       ienv$missing(e, "IS")
+		   end
+		if mod = "guardian"
+		   then tagcase e.peek
+			   tag handles_key:
+			       ienv$move(e)
+			       e.indent := old
+			       ienv$mindent(e, _is)
+			       i_aexpr(e)
+			   others:
+			   end
+		   end
+		e.indent := old
+	   end
+	old: int := ienv$indent(e, _cluster_body)
+	while i_module(e, false, false) do end
+	i_end(e, old)
+	end i_cluster
+
+% indent a routine
+
+i_routine = proc (e: ienv)
+	old: int := ienv$cindent(e)
+	ienv$move(e)
+	i_prim(e)
+	while true do
+		tagcase e.peek
+		   tag binop (prec: int):
+			if prec < 7
+			   then break end
+			ienv$imove(e, _head)
+			i_prim(e)
+			continue
+		   others:
+			break
+		   end
+		end
+	e.indent := old
+	old := ienv$indent(e, _routine_body)
+	while i_stmt(e) do end
+	i_end(e, old)
+	end i_routine
+
+% indent an equate or statement
+
+i_stmt = proc (e: ienv) returns (bool)
+	old: int := ienv$cindent(e)
+	ok: bool := false
+	tagcase e.peek
+	   tag stmt_key (op: itype):
+		op(e)
+		ok := true
+	   tag random:
+		tagcase ienv$peek(e, 2)
+		   tag clust_key, oper_key:
+			if ienv$speek(e, 1) = "="
+			   then e.indent := old
+				return(false)
+			   end
+		   others:
+		   end
+	   tag semi:
+		ienv$move(e)
+		ok := true
+	   tag do_key:
+		ienv$move(e)
+	   tag qualify_key:
+		tagcase ienv$peek(e, 1)
+		   tag resignal_key:
+		   others:
+			ienv$move(e)
+			ok := true
+		   end
+	   others:
+	   end
+	if ~ok
+	   then ok := i_dexpr(e)
+		if ok
+		   then tagcase e.peek
+			   tag assn:
+				bold, xold: int := ienv$bmove(e, true)
+				if ~i_aexpr(e)
+				   then ienv$missing(e, "expression") end
+				e.indent := bold
+			   others:
+			   end
+		   else tagcase e.peek
+			   tag binop, bracket, comma, colon, assn:
+				ienv$missing(e, "legal statement starter")
+				ienv$move(e)
+				ok := true
+			   others:
+			   end
+		   end
+	   end
+	e.indent := old
+	while true do
+		tagcase e.peek
+		   tag except_key:
+			i_except(e, ok)
+		   tag resignal_key:
+			i_resignal(e, ok, false)
+		   tag qualify_key:
+			tagcase ienv$peek(e, 1)
+			   tag resignal_key:
+				i_resignal(e, ok, true)
+			   others:
+				break
+			   end
+		   tag semi:
+			ienv$move(e)
+		   others:
+			break
+		   end
+		if ok
+		   then continue end
+		ok := true
+		tagcase e.peek
+		   tag semi:
+			ienv$move(e)
+		   others:
+		   end
+		break
+		end
+	return(ok)
+	end i_stmt
+
+% indent an END and reset to old indent
+
+i_end = proc (e: ienv, old: int)
+	ind: int := ienv$get(_end)
+	if ind ~= 0
+	   then e.indent := old end
+	tagcase e.peek
+	   tag end_key:
+		ienv$move(e)
+	   others:
+		ienv$missing(e, "END")
+	   end
+	if ind = 0
+	   then e.indent := old end
+	end i_end
+
+% indent OWN statement
+
+i_own = proc (e: ienv)
+	ienv$move(e)
+	i_stmt(e)
+	end i_own
+
+% indent BEGIN-END statement
+
+i_begin = proc (e: ienv)
+	ienv$move(e)
+	old: int := ienv$indent(e, _begin_body)
+	while i_stmt(e) do end
+	i_end(e, old)
+	end i_begin
+
+% indent EXCEPT clause
+
+i_except = proc (e: ienv, prev: bool)
+	old: int
+	if prev
+	   then old := ienv$mindent(e, _except)
+	   else old := ienv$cindent(e)
+	   end
+	ienv$move(e)
+	eold: int := ienv$mindent(e, _when)
+	while true do
+		tagcase e.peek
+		   tag when_key, others_key:
+			ienv$move(e)
+			i_aexpr(e)
+			tagcase e.peek
+			   tag colon:
+				ienv$move(e)
+			   others:
+			   end
+			bold: int := ienv$mindent(e, _when_body)
+			while i_stmt(e) do end
+			ienv$comment(e, bold)
+			continue
+		   others:
+			break
+		   end
+		end
+	i_end(e, eold)
+	e.indent := old
+	end i_except
+
+% indent EXIT statement
+
+i_exit = proc (e: ienv)
+	ienv$move(e)
+	i_expr(e, 0)
+	end i_exit
+
+% indent FOR statement
+
+i_for = proc (e: ienv)
+	ienv$move(e)
+	i_dexpr(e)
+	tagcase e.peek
+	   tag do_key:
+		ienv$imove(e, _do)
+	   others:
+		ienv$missing(e, "DO")
+	   end
+	old: int := ienv$mindent(e, _for_body)
+	while i_stmt(e) do end
+	i_end(e, old)
+	end i_for
+
+% indent FORK statement
+
+i_fork = proc (e: ienv)
+	ienv$move(e)
+	i_expr(e, 0)
+	end i_fork
+
+% indent IF statement
+
+i_if = proc (e: ienv)
+	ienv$move(e)
+	i_expr(e, 0)
+	mult: bool := false
+	first: bool := true
+	funny: bool := false
+	while true do
+		tagcase e.peek
+		   tag then_key:
+			old: int := e.indent
+			bold: int := ienv$imove(e, _then)
+			e.indent := bold
+			if old = bold
+			   then if first
+				   then funny := true end
+				ienv$mindent(e, _thenx_body)
+			   else ienv$mindent(e, _then_body)
+			   end
+			first := false
+			while i_stmt(e) do end
+			ienv$comment(e, old)
+			continue
+		   tag elseif_key:
+			ienv$imove(e, _elseif)
+			mult := true
+			i_expr(e, 0)
+			continue
+		   tag else_key:
+			first := false
+			funny := false
+			old: int := e.indent
+			bold: int
+			if mult
+			   then bold := ienv$imove(e, _elseif)
+			   else bold := ienv$imove(e, _then)
+			   end
+			e.indent := bold
+			if old = bold
+			   then ienv$mindent(e, _thenx_body)
+			   else ienv$mindent(e, _then_body)
+			   end
+			while i_stmt(e) do end
+			ienv$comment(e, old)
+			continue
+		   others:
+			if i_stmt(e)
+			   then continue
+			   else break
+			   end
+		   end
+		end
+	old: int
+	if mult
+	   then old := ienv$mindent(e, _elseif)
+	elseif funny
+	   then old := ienv$mindent(e, _thenx_body)
+	else old := ienv$mindent(e, _then) end
+	i_end(e, old)
+	end i_if
+
+% indent RESIGNAL clause
+
+i_resignal = proc (e: ienv, prev, qual: bool)
+	if prev
+	   then ienv$imove(e, _except)
+	   else ienv$move(e)
+	   end
+	if qual
+	   then ienv$move(e) end
+	i_aexpr(e)
+	end i_resignal
+
+% indent SIGNAL statement
+
+i_signal = proc (e: ienv)
+	ienv$move(e)
+	i_expr(e, 0)
+	end i_signal
+
+% indent TAGCASE statement
+
+i_tagcase = proc (e: ienv)
+	ienv$move(e)
+	i_expr(e, 0)
+	old: int := ienv$indent(e, _tag)
+	while true do
+		tagcase e.peek
+		   tag tag_key:
+			ienv$move(e)
+		   tag others_key:
+			ienv$move(e)
+		   others:
+			if i_stmt(e)
+			   then continue
+			   else break
+			   end
+		   end
+		i_aexpr(e)
+		tagcase e.peek
+		   tag colon:
+			ienv$move(e)
+		   others:
+		   end
+		bold: int := ienv$mindent(e, _tag_body)
+		while i_stmt(e) do end
+		ienv$comment(e, bold)
+		end
+	i_end(e, old)
+	end i_tagcase
+
+% indent WHERE clause
+
+i_where = proc (e: ienv)
+	old: int := e.indent
+	e.indent := ienv$imove(e, _where)
+	ienv$cindent(e)
+	while i_dexpr(e) do
+		tagcase e.peek
+		   tag comma:
+			ienv$imove(e, _op)
+			continue
+		   others:
+			break
+		   end
+		end
+	e.indent := old
+	end i_where
+
+% indent WHILE statement
+
+i_while = proc (e: ienv)
+	ienv$move(e)
+	i_expr(e, 0)
+	tagcase e.peek
+	   tag do_key:
+		ienv$imove(e, _do)
+	   others:
+		ienv$missing(e, "DO")
+	   end
+	old: int := ienv$mindent(e, _while_body)
+	while i_stmt(e) do end
+	i_end(e, old)
+	end i_while
+
+% indent equate, expression list, declaration list, HAS or IN clause
+
+i_dexpr = proc (e: ienv) returns (bool)
+	old: int := ienv$cindent(e)
+	ok: bool := i_cexpr(e)
+	tagcase e.peek
+	   tag has_key:
+		ienv$imove(e, _op)
+		xold: int := ienv$cindent(e)
+		while true do
+			if e.speek = "transmit"  cand  ienv$get(_argus) ~= 0
+			   then ienv$move(e)
+			elseif ~i_bexpr(e)
+			   then break end
+			tagcase e.peek
+			   tag comma:
+				tagcase ienv$peek(e, 2)
+				   tag has_key, in_key:
+					break
+				   others:
+				   end
+				ienv$imove(e, _op)
+				continue
+			   others:
+				break
+			   end
+			end
+		e.indent := xold
+	   tag in_key:
+		ienv$imove(e, _op)
+		i_expr(e, 0)
+	   others:
+	   end
+	e.indent := old
+	return(ok)
+	end i_dexpr
+
+% indent equate, expression list, declaration list
+
+i_cexpr = proc (e: ienv) returns (bool)
+	ok: bool := false
+	old: int := ienv$cindent(e)
+	while i_bexpr(e) do
+		ok := true
+		tagcase e.peek
+		   tag comma:
+			tagcase ienv$peek(e, 2)
+			   tag has_key, in_key:
+				break
+			   others:
+			   end
+			ienv$imove(e, _op)
+			continue
+		   others:
+			break
+		   end
+		end
+	e.indent := old
+	return(ok)
+	end i_cexpr
+
+% indent equate, expression list, declaration
+
+i_bexpr = proc (e: ienv) returns (bool)
+	old: int := ienv$cindent(e)
+	ok: bool := i_aexpr(e)
+	if ok
+	   then tagcase e.peek
+		   tag colon:
+			ienv$imove(e, _op)
+			i_expr(e, 0)
+		   others:
+		   end
+	   end
+	e.indent := old
+	return(ok)
+	end i_bexpr
+
+% indent equate, expression list
+
+i_aexpr = proc (e: ienv) returns (bool)
+	ok: bool := false
+	old: int := ienv$cindent(e)
+	while i_expr(e, 0) do
+		ok := true
+		tagcase e.peek
+		   tag comma:
+			ienv$imove(e, _op)
+			continue
+		   others:
+			break
+		   end
+		end
+	e.indent := old
+	return(ok)
+	end i_aexpr
+
+% indent equate, expression
+
+i_expr = proc (e: ienv, prec: int) returns (bool)
+	old: int := ienv$cindent(e)
+	ok: bool := i_prim(e)
+	if ok
+	   then while true do
+			tagcase e.peek
+			   tag binop (nprec: int):
+				if nprec > prec  cor  nprec = 8
+				   then ienv$imove(e, _op)
+					if ~i_expr(e, nprec)
+					   then ienv$missing(e, "expression")
+					   end
+					continue
+				   else break
+				   end
+			   others:
+				break
+			   end
+			end
+	   end
+	e.indent := old
+	return(ok)
+	end i_expr
+
+% indent primary
+
+i_prim = proc (e: ienv) returns (bool)
+	old: int := ienv$cindent(e)
+	ok: bool
+	tagcase e.peek
+	   tag unop:
+		ok := true
+	   tag binop:
+		s: string := e.speek
+		if s = "*"
+		   then ienv$move(e)
+			return(true)
+		elseif s ~= "-"
+		   then return(false)
+		else ok := true end
+	   others:
+		ok := false
+	   end
+	if ok
+	   then ienv$move(e)
+		if ~i_prim(e)
+		   then ienv$missing(e, "expression") end
+	   else tagcase e.peek
+		   tag random:
+			ienv$move(e)
+			ok := true
+		   tag is_key:
+			if ienv$get(_argus) ~= 0  cand  ienv$speek(e, 1) = "["
+			   then ienv$move(e)
+				ok := true
+			   end
+		   others:
+		   end
+	   end
+	while true do
+		tagcase e.peek
+		   tag bracket (c: char):
+			if ~i_bracket(e, c, false, ok)
+			   then break end
+			ok := true
+		   tag dot:
+			ok := true
+			ienv$imove(e, _op)
+			tagcase e.peek
+			   tag random:
+				ienv$imove(e, _op)
+			   others:
+			   end
+		   tag dollar:
+			ok := true
+			ienv$imove(e, _op)
+			tagcase e.peek
+			   tag random:
+				ienv$imove(e, _op)
+			   tag bracket (c: char):
+				if ~i_bracket(e, c, true, true)
+				   then ienv$missing(e, "name or constructor")
+				   end
+			   others:
+				ienv$missing(e, "name or constructor")
+			   end
+		   tag at:
+			ok := true
+			ienv$imove(e, _op)
+			i_expr(e, 0)
+		   others:
+			break
+		   end
+		end
+	e.indent := old
+	return(ok)
+	end i_prim
+
+% indent bracketed stuff
+
+i_bracket = proc (e: ienv, c: char, cons, addon: bool) returns (bool)
+	old, bold: int
+	if c = '('
+	   then c := ')'
+		old, bold := ienv$bmove(e, addon)
+		i_cexpr(e)
+	elseif c = '['
+	   then c := ']'
+		old, bold := ienv$bmove(e, addon)
+		if cons
+		   then i_aexpr(e)
+			tagcase e.peek
+			   tag colon:
+				ienv$imove(e, _op)
+				gold: int := ienv$cindent(e)
+				i_aexpr(e)
+				e.indent := gold
+			   others:
+			   end
+		   else i_cexpr(e)
+		   end
+	elseif c = '{'
+	   then c := '}'
+		old, bold := ienv$bmove(e, addon)
+		if cons
+		   then i_cexpr(e)
+		   else while i_dexpr(e) do
+				tagcase e.peek
+				   tag semi:
+					ienv$move(e)
+				   others:
+				   end
+				end
+		   end
+	else return(false) end
+	tagcase e.peek
+	   tag bracket (cc: char):
+		if cc = c
+		   then e.indent := bold
+			ienv$imove(e, _close_bracket)
+		   else ienv$missing(e, c2s(c))
+		   end
+	   others:
+		ienv$missing(e, c2s(c))
+	   end
+	e.indent := old
+	return(true)
+	end i_bracket
+
+i_section = proc (e: ienv)
+	ienv$move(e)
+	old: int := ienv$indent(e, _routine_body)
+	while i_stmt(e) do end
+	i_end(e, old)
+	end i_section
+
+i_coenter = proc (e: ienv)
+	aind: int := e.line
+	ienv$move(e)
+	cnt: int := 0
+	old, bind: int
+	if e.line = aind
+	   then old := ienv$cindent(e)
+		bind := _coenterx_body
+	   else old := ienv$indent(e, _coenter_key)
+		bind := _coenter_body
+	   end
+	aind := e.indent
+	while true do
+		tagcase e.peek
+		   tag arm_key:
+			cnt := cnt + 1
+			e.indent := aind
+			ienv$move(e)
+			if bind = _coenterx_body
+			   then e.indent := old end
+			tagcase e.peek
+			   tag foreach_key:
+				bold: int := e.indent
+				e.indent := ienv$imove(e, _foreach)
+				i_dexpr(e)
+				e.indent := bold
+			   others:
+			   end
+			bold: int := ienv$mindent(e, bind)
+			while i_stmt(e) do end
+			ienv$comment(e, bold)
+			continue
+		   others:
+			if i_stmt(e)
+			   then continue
+			   else break
+			   end
+		   end
+		end
+	if bind = _coenterx_body
+	   then if cnt = 1
+		   then ienv$mindent(e, bind)
+		   else e.indent := aind
+		   end
+	   end
+	i_end(e, old)
+	end i_coenter
+
+i_enter = proc (e: ienv)
+	bold: int := e.line
+	old: int := e.indent
+	ienv$move(e)
+	bind: int := _enterx_body
+	tagcase e.peek
+	   tag arm_key:
+		if e.line ~= bold
+		   then bind := _enter_body
+			ienv$indent(e, _enter_key)
+		   end
+		ienv$move(e)
+	   others:
+	   end
+	bold := ienv$mindent(e, bind)
+	while i_stmt(e) do end
+	if bind = _enter_body
+	   then e.indent := bold end
+	i_end(e, old)
+	end i_enter
+
+i_seize = proc (e: ienv)
+	ienv$move(e)
+	i_expr(e, 0)
+	tagcase e.peek
+	   tag do_key:
+		ienv$imove(e, _do)
+	   others:
+		ienv$missing(e, "DO")
+	   end
+	old: int := ienv$mindent(e, _seize_body)
+	while i_stmt(e) do end
+	i_end(e, old)
+	end i_seize

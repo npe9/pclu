@@ -1,0 +1,452 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	CE CLU
+%
+%	CLU Compiler Version 3: compilation environment
+
+CE = cluster is		create,			% -> CE
+			reset_entries,		% CE, bool ->
+			flush_entries,		% CE ->
+			reset_types,		% CE, typestack ->
+			reset,			% CE ->
+			reset1,			% CE ->
+			keep,			% CE ->
+			lookup,			% CE, str, int -> idnkind
+						%	       => local
+			local,			% CE, str -> int
+			add_entry,		% CE, idn => exists
+			get_unknown_type,	% CE -> typespec
+			get_null_type,		% CE -> typespec
+			get_bool_type,		% CE -> typespec
+			get_int_type,		% CE -> typespec
+			get_real_type,		% CE -> typespec
+			get_char_type,		% CE -> typespec
+			get_str_type,		% CE -> typespec
+			get_type_type,		% CE -> typespec
+			get_cvt_type,		% CE -> typespec
+			get_any_type,		% CE -> typespec
+			get_array_,		% CE -> DU
+			get_record_,		% CE -> DU
+			get_oneof_,		% CE -> DU
+			get_seq_,		% CE -> DU
+			get_struct_,		% CE -> DU
+			get_variant_,		% CE -> DU
+			get_proc_,		% CE -> DU
+			get_iter_,		% CE -> DU
+			get_type,		% CE, typeabs -> typespec, bool
+			add_du,			% CE, DU -> DU
+			all_dus			% CE --> DU
+
+typestack	= array[typespec]
+
+entry		= record[kind: idnkind,
+			 code: int]
+
+% codes
+no_refs_	= -4		% unreferenced permanent equate
+refs_		= -3		% referenced permanent equate
+lasting_	= -2		% local file equate
+hidden_		= -1		% obscured by local definition
+local_		= 0		% local definition
+%		> 0		% unknown external used on line #
+
+mspecs		= oneof[specs: DUspecs,
+			none:  null]
+
+tabsize		= 300
+
+idtab		= table[str, entry]
+typetab		= table[typeabs, typespec]
+DUtab		= table[DU, bool]
+
+rep		= record[ids:		idtab,
+			 lent:		entry,
+			 xent:		entry,
+			 types:		typetab,
+			 type_seed:	int,
+			 type_keep:	int,
+			 dus:		DUtab,
+			 array_,
+			 record_,
+			 oneof_,
+			 seq,
+			 struct_,
+			 variant_,
+			 proctype_,
+			 itertype_:	DU,
+			 unknown,
+			 null_,
+			 bool_,
+			 int_,
+			 real_,
+			 char_,
+			 str,
+			 any_,
+			 type_,
+			 cvt_:		typespec]
+
+create = proc () returns (CE)
+	parms: exprlist := exprlist$new()
+	nullt: clutype := clutype${gen:   XLIB$lookup("null"),
+				   parms: parms}
+	boolt: clutype := clutype${gen:   XLIB$lookup("bool"),
+				   parms: parms}
+	intt:  clutype := clutype${gen:   XLIB$lookup("int"),
+				   parms: parms}
+	realt: clutype := clutype${gen:   XLIB$lookup("real"),
+				   parms: parms}
+	chart: clutype := clutype${gen:   XLIB$lookup("char"),
+				   parms: parms}
+	strt:  clutype := clutype${gen:   XLIB$lookup("string"),
+				   parms: parms}
+	typet: clutype := clutype${gen:   XLIB$lookup("type"),
+				   parms: parms}
+	e: rep := rep${ids:       idtab$create(tabsize, hash, str$equal),
+		       lent:	  entry${kind: idnkind$make_unknown(nil),
+					 code: local_},
+		       xent:	  entry${kind: idnkind$make_unknown(nil),
+					 code: 1},
+		       types:     typetab$create(tabsize, hash_typeabs, typeabs$similar),
+		       type_seed: 1,
+		       type_keep: 0,
+		       dus:       DUtab$create(tabsize, hash_du, DU$similar),
+		       array_:    XLIB$lookup("array"),
+		       record_:   XLIB$lookup("record"),
+		       oneof_:    XLIB$lookup("oneof"),
+		       seq:	  XLIB$lookup("sequence"),
+		       struct_:   XLIB$lookup("struct"),
+		       variant_:  XLIB$lookup("variant"),
+		       proctype_: XLIB$lookup("proctype"),
+		       itertype_: XLIB$lookup("itertype"),
+		       unknown:   typespec$create(typeabs$make_unknown(nil), 0),
+		       null_:     typespec$create(typeabs$make_cluster_(nullt), 0),
+		       bool_:     typespec$create(typeabs$make_cluster_(boolt), 0),
+		       int_:      typespec$create(typeabs$make_cluster_(intt), 0),
+		       real_:     typespec$create(typeabs$make_cluster_(realt), 0),
+		       char_:     typespec$create(typeabs$make_cluster_(chart), 0),
+		       str:       typespec$create(typeabs$make_cluster_(strt), 0),
+		       type_:     typespec$create(typeabs$make_type_(typet), 0),
+		       cvt_:      typespec$create(typeabs$make_cvt_(nil), 0),
+		       any_:      typespec$create(typeabs$make_any_(nil), 0)}
+	fixup(e, e.unknown)
+	fixup(e, e.null_)
+	fixup(e, e.bool_)
+	fixup(e, e.int_)
+	fixup(e, e.real_)
+	fixup(e, e.char_)
+	fixup(e, e.str)
+	fixup(e, e.type_)
+	fixup(e, e.cvt_)
+	fixup(e, e.any_)
+	ne: CE := up(e)
+	add_du(ne, e.array_)
+	add_du(ne, e.record_)
+	add_du(ne, e.oneof_)
+	add_du(ne, e.seq)
+	add_du(ne, e.struct_)
+	add_du(ne, e.variant_)
+	add_du(ne, e.proctype_)
+	add_du(ne, e.itertype_)
+	keep(ne)
+	return(ne)
+	end create
+
+reset_entries = proc (e: cvt, lasting: bool)
+	idtab$pcond_flush[bool](e.ids, pflush_id, lasting)
+	end reset_entries
+
+flush_entries = proc (e: cvt)
+	idtab$flush(e.ids)
+	end flush_entries
+
+pflush_id = proc (ent: entry, lasting: bool) returns (bool)
+	code: int := ent.code
+	if code = refs_  cand  lasting
+	   then ent.code := lasting_
+	elseif code >= local_
+	   then	return(true)
+	elseif code ~= lasting_
+	   then ent.code := no_refs_ end
+	return(false)
+	end pflush_id
+
+reset_types = proc (e: cvt, types: typestack)
+	for t: typespec in typestack$elements(types) do
+		if t.id > e.type_keep
+		   then t.id := 0
+			typetab$delete(e.types, t.abs)
+		   end
+		end
+	end reset_types
+
+reset = proc (e: cvt)
+	idtab$cond_flush(e.ids, flush_id)
+	typetab$pcond_flush[int](e.types, pflush_type, e.type_keep)
+	ms: mspecs := mspecs$make_none(nil)
+	for d: DU, flush: bool in DUtab$elements(e.dus) do
+		d.mspecs := ms
+		end
+	DUtab$cond_flush(e.dus, bool$copy)
+	e.type_seed := e.type_keep + 1
+	end reset
+
+reset1 = proc (e: cvt)
+	idtab$cond_flush(e.ids, flush_id)
+	typetab$pcond_flush[int](e.types, pflush_type, e.type_keep)
+	ms: mspecs := mspecs$make_none(nil)
+	for d: DU, flush: bool in DUtab$elements(e.dus) do
+		d.mspecs := ms
+		end
+	e.type_seed := e.type_keep + 1
+	end reset1
+
+flush_id = proc (ent: entry) returns (bool)
+	if ent.code >= local_
+	   then return(true)
+	   else ent.code := no_refs_
+		return(false)
+	   end
+	end flush_id
+
+pflush_type = proc (t: typespec, max: int) returns (bool)
+	if t.id > max
+	   then t.id := 0
+		return(true)
+	   else return(false)
+	   end
+	end pflush_type
+
+keep = proc (e: cvt)
+	tab: DUtab := e.dus
+	for d: DU, flush: bool in DUtab$elements(tab) do
+		if flush
+		   then DUtab$alter(tab, d, false) end
+		end
+	e.type_keep := e.type_seed - 1
+	end keep
+
+lookup = proc (e: cvt, s: str, line: int) returns (idnkind) signals (local)
+	xent: entry := e.xent
+	ent: entry := idtab$mbind(e.ids, s, xent)
+	if ent = xent
+	   then e.xent := entry$copy1(xent)
+		if line > 0
+		   then xent.code := line end
+	   else code: int := ent.code
+		if code = hidden_  cor  code = local_
+		   then signal local
+		elseif code = no_refs_
+		   then ent.code := refs_ end
+	   end
+	return(ent.kind)
+	end lookup
+
+local = proc (e: cvt, s: str) returns (int)
+	ent: entry := idtab$mbind(e.ids, s, e.lent)
+	code: int := ent.code
+	if code > local_
+	   then return(code)
+	elseif code < hidden_
+	   then ent.code := hidden_ end
+	return(0)
+	end local
+
+add_entry = proc (e: cvt, i: idn) signals (exists)
+	idtab$bind(e.ids, i.str, entry${kind: i.kind,
+					code: no_refs_})
+	   resignal exists
+	end add_entry
+
+get_unknown_type = proc (e: cvt) returns (typespec)
+	return(e.unknown)
+	end get_unknown_type
+
+get_null_type = proc (e: cvt) returns (typespec)
+	return(e.null_)
+	end get_null_type
+
+get_bool_type = proc (e: cvt) returns (typespec)
+	return(e.bool_)
+	end get_bool_type
+
+get_int_type = proc (e: cvt) returns (typespec)
+	return(e.int_)
+	end get_int_type
+
+get_real_type = proc (e: cvt) returns (typespec)
+	return(e.real_)
+	end get_real_type
+
+get_char_type = proc (e: cvt) returns (typespec)
+	return(e.char_)
+	end get_char_type
+
+get_str_type = proc (e: cvt) returns (typespec)
+	return(e.str)
+	end get_str_type
+
+get_type_type = proc (e: cvt) returns (typespec)
+	return(e.type_)
+	end get_type_type
+
+get_cvt_type = proc (e: cvt) returns (typespec)
+	return(e.cvt_)
+	end get_cvt_type
+
+get_any_type = proc (e: cvt) returns (typespec)
+	return(e.any_)
+	end get_any_type
+
+get_array_ = proc (e: cvt) returns (DU)
+	return(e.array_)
+	end get_array_
+
+get_record_ = proc (e: cvt) returns (DU)
+	return(e.record_)
+	end get_record_
+
+get_oneof_ = proc (e: cvt) returns (DU)
+	return(e.oneof_)
+	end get_oneof_
+
+get_seq_ = proc (e: cvt) returns (DU)
+	return(e.seq)
+	end get_seq_
+
+get_struct_ = proc (e: cvt) returns (DU)
+	return(e.struct_)
+	end get_struct_
+
+get_variant_ = proc (e: cvt) returns (DU)
+	return(e.variant_)
+	end get_variant_
+
+get_proc_ = proc (e: cvt) returns (DU)
+	return(e.proctype_)
+	end get_proc_
+
+get_iter_ = proc (e: cvt) returns (DU)
+	return(e.itertype_)
+	end get_iter_
+
+% Returns true if the type already was in the table
+
+get_type = proc (e: cvt, ta: typeabs) returns (typespec, bool)
+	begin
+	nta: typeabs, t: typespec := typetab$get_pair(e.types, ta)
+	return(t, true)
+	end except when not_found: end
+	t: typespec := typespec$create(ta, 0)
+	fixup(e, t)
+	return(t, false)
+	end get_type
+
+fixup = proc (e: rep, t: typespec)
+	t.id := e.type_seed
+	typetab$bind(e.types, t.abs, t)
+	e.type_seed := e.type_seed + 1
+	tagcase t.abs
+	   tag cluster_, type_ (clut: clutype):
+		clut.gen := add_du(up(e), clut.gen)
+	   tag select (selt: seltype):
+		selt.gen := add_du(up(e), selt.gen)
+	   tag apply (apt: applytype):
+		apt.gen := add_du(up(e), apt.gen)
+	   tag other (ot: othertype):
+		tagcase ot
+		   tag du (clut: clutype):
+			clut.gen := add_du(up(e), clut.gen)
+		   others:
+		   end
+	   others:
+	   end
+	end fixup
+
+add_du = proc (e: cvt, mod: DU) returns (DU)
+	begin
+	d: DU, flush: bool := DUtab$get_pair(e.dus, mod)
+	return(d)
+	end
+	except when not_found:
+			d: DU := XLIB$get_DU(mod.unique)
+			DUtab$bind(e.dus, d, true)
+			return(d)
+	       end
+	end add_du
+
+all_dus = iter (e: cvt) yields (DU)
+	for d: DU, flush: bool in DUtab$elements(e.dus) do
+		yield(d)
+		end
+	end all_dus
+
+end CE
+
+hash_exprs = proc (exprs: exprlist, z: int) returns (int)
+	index: int := 0
+	for x: expr in exprlist$elements(exprs) do
+		add: int
+		tagcase x.abs
+		   tag type_ (xa: typespec):
+			add := xa.id
+		   tag int_ (xa: int):
+			add := xa
+		   tag str (xa: str):
+			add := hash(xa, z)
+		   others:
+			continue
+		   end
+		index := (index + add) // z
+		end
+	return(index)
+	end hash_exprs
+
+hash_typeabs = proc (ta: typeabs, z: int) returns (int)
+	tagcase ta
+	   tag cluster_ (x: clutype):
+		return((hash_exprs(x.parms, z) + hash(x.gen.unique, z)) // z)
+	   tag select (x: seltype):
+		index: int := hash(x.gen.unique, z)
+		for fs: fieldspec in fieldspeclist$elements(x.parms) do
+			index := (index + name$size(fs.sel) * fs.type_.id) // z
+			end
+		return(index)
+	   tag apply (x: applytype):
+		index: int := hash(x.gen.unique, z)
+		args: typelist := x.args
+		vals: typelist := x.vals
+		for i: int in typelist$indexes(args) do
+			index := (index + (i + 1) * args[i].id) // z
+			end
+		for i: int in typelist$indexes(vals) do
+			index := (index + (i + 4) * vals[i].id) // z
+			end
+		return(index)
+	   tag idn (x: idn):
+		return(hash(x.str, z))
+	   tag other (x: othertype):
+		index: int
+		tagcase x
+		   tag du (xx: clutype):
+			index := 1 + hash(xx.gen.unique, z) + hash_exprs(xx.parms, z)
+		   tag op (xx: clusterop):
+			index := xx.type_.id + hash(xx.name, z)
+		   tag return_ (xx: typespec):
+			index := 1 + xx.id
+		   end
+		return(index // z)
+	   tag unknown:
+		return(0)
+	   tag type_:
+		return(1)
+	   tag cvt_:
+		return(2)
+	   tag any_:
+		return(3)
+	   others:
+		signal failure("illegal_typespec")
+	   end
+	end hash_typeabs
+
+hash_du = proc (d: DU, size: int) returns (int)
+	return(hash(d.unique, size))
+	end hash_du

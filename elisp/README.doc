@@ -1,0 +1,110 @@
+
+		*** 	CLU-DOC	   version 1.1   ***
+
+  The emacs-lisp  directory contains the files needed to put the
+CLU manual online as part of the Emacs help facility.
+  (Basically the Emacs help facility is extended with operations to support 
+Clu help in a manner similar to Emacs help).
+
+--------------------------------------------------------------------------
+
+TO LOAD:
+
+  To use, put in your .emacs:
+
+  (load "...../clu-doc" 'no-error)
+
+You can also load it while inside Emacs:
+
+  M-x load-file  <RETURN>
+  Load file: ...../clu-doc.elc
+
+---------------------------------------------------------------------------
+
+TO USE:
+
+Once loaded, just call help ( normaly by hitting Control-h ) followed by
+one of the keys:
+
+1. 'd' -- for help on Clu symbols (types or operations. Examples: int$mul, 
+	  array, ARRAY$FILL, FILE_NAME, stream$primary_output, string$s2ac)
+2. 'g' -- for general Clu documentation topics (Examples: TERMINAL_I/O, FILE,
+	  own_variables, CLUSTERS, syntactic_sugar).
+3. '/' -- for Clu apropos (give partial name, like FILE, and get a list of all
+	  the Clu symbols and topics that include that name).
+
+EXAMPLE:
+  You type  		 C-h d
+  Emacs prompts with	 Describe CLU symbol: 
+  You type		 oneof$make_  <RETURN>
+  Emacs splits your screen and gives help about the operation ONEOF$MAKE_
+
+Note that:
+- case is unimportant. 
+- The help text is taken from the Clu manual (Appendix A in the 6.170 book).
+- Symbol completion works (hit the TAB key); for example, if you type  ARRAY$
+  followed by TAB, you'll get a list of possible completions (all the 
+  operations of ARRAY in this case).
+- If the cursor is placed on a Clu symbol when you call C-h d, emacs would 
+  propose that symbol as default; for example, if your cursor is placed 
+  someplace on "ARRAY[foo]$FILL" in your file, and you type C-h d , emacs 
+  would prompt:   "Describe CLU symbol (default ARRAY$FILL): ", typing RETURN
+  would select this default.
+
+---------------------------------------------------------------------------
+
+HELP ON USE:  ( a short version of this file )
+
+ After loading, type  M-x (i.e. META x) clu-doc-help
+
+---------------------------------------------------------------------------
+
+ADDING USER DEFINED  ABSTRACTIONS TO THE MANUAL:
+
+  You can add you CLU files to the current session of the CLU on-line manual
+by calling  M-x (i.e. META x) clu-doc-add-file and giving it a name of one
+of your clu files.
+  Using  clu-doc-add-directory  instead takes a directory and adds all the
+CLU files in that directory to the current session of the CLU manual. Emacs
+"knows" which files are CLU files by matching the files' suffixes with the
+content of the Emacs variable  clu-doc-file-suffix (normally ".clu").  You
+can change this variable (M-x set-variable) if you want (e.g., when adding
+".spc" files).
+  Once added, you can not change the specification you added, but they will
+disappear once you exit Emacs.
+
+DUMPING AND LOADING:
+
+   You can also dump the specifications of your CLU files into dump files
+and then load these dump files (same effect as adding these CLU files to the
+current session of the CLU on-line manual).
+   Use  M-x clu-doc-dump-file  to dump a CLU file into a dump file. This
+operation actually appends to the dump file, so you can dump several CLU files
+into to the same dump file. (This call also asks you about adding
+the dumped spec to the current session of the CLU manual).
+   Use  M-x clu-doc-load-file  to load a dump file. You can have
+several dump files loaded automatically when you start  clu-doc  by
+setting the variable clu-doc-dumped-files-to-load to the list of
+the dump files you need.
+
+EXAMPLE:
+
+I make my dump files
+
+  M-x clu-doc-dump-file  /mit/boaz/project/graph.clu  /mit/boaz/project/DUMP
+  M-x clu-doc-dump-file  /mit/boaz/project/table.clu  /mit/boaz/project/DUMP
+  ................................
+  M-x clu-doc-dump-file  /mit/boaz/6.170/ps.clu  /mit/boaz/6.170/DUMP
+  ................................
+
+in my .emacs:
+  (setq clu-doc-dumped-files-to-load '("~/project/DUMP" "~/6.170/DUMP"))
+
+and after starting, I hit  C-h d  and can get to my types (clusters),
+procedures, iterators etc., as well as the CLU built in definitions.
+
+---------------------------------------------------------------------------
+
+Please send comments, complaints, bug reports etc. to Boaz Ben-Zvi at
+ boaz@athena.mit.edu (or boaz@lcs.mit.edu)
+

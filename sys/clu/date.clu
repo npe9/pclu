@@ -1,0 +1,173 @@
+% Copyright Massachusetts Institute of Technology 1980, 1989
+
+date = cluster is create,	% creates a date from 6 integers
+		  get_day,	% gets the day component
+		  get_month,	% gets the month component
+		  get_year,	% gets the year component
+		  get_hour,	% gets the hour component
+		  get_minute,	% gets the minute component
+		  get_second,	% gets the second component
+		  get_all,	% gets all components
+		  unparse,	% turns full date into string
+		  unparse_date,	% turns date without time into string
+		  unparse_time,	% turns time without day into string
+		  equal,	% compares two dates for equality
+		  similar,	% same
+		  copy,		% null copy
+		  lt,		% date1 < date2
+		  le,		% date1 <= date2
+		  gt,		% date1 > date2
+		  ge,		% date1 >= date2
+		  print,
+		  encode,
+		  decode,
+		  _gcd
+
+rep = struct[day, month, year, hour, minute, second: int]
+
+create = proc (day, month, year, hour, minute, second: int) returns (cvt)
+							signals (bad_format)
+	if day < 1  cor  day > 31  cor
+	   month < 1  cor  month > 12  cor
+	   year < 1  cor
+	   hour < 0  cor  hour > 23  cor
+	   minute < 0  cor  minute > 59  cor
+	   second < 0  cor  second > 59
+	   then signal bad_format end
+	return(rep${day: day, month: month, year: year,
+		    hour: hour, minute: minute, second: second})
+	end create
+
+get_day = proc (d: cvt) returns (int)
+	return(d.day)
+	end get_day
+
+get_month = proc (d: cvt) returns (int)
+	return(d.month)
+	end get_month
+
+get_year = proc (d: cvt) returns (int)
+	return(d.year)
+	end get_year
+
+get_hour = proc (d: cvt) returns (int)
+	return(d.hour)
+	end get_hour
+
+get_minute = proc (d: cvt) returns (int)
+	return(d.minute)
+	end get_minute
+
+get_second = proc (d: cvt) returns (int)
+	return(d.second)
+	end get_second
+
+get_all = proc (d: cvt) returns (int, int, int, int, int, int)
+	return(d.day, d.month, d.year, d.hour, d.minute, d.second)
+	end get_all
+
+unparse = proc (d: date) returns (string)
+	return(unparse_date(d) || " " || unparse_time(d))
+	end unparse
+
+unparse_date = proc (d: cvt) returns (string)
+	months = sequence[string]$[
+			"January", "February", "March", "April",
+			"May", "June", "July", "August",
+			"September", "October", "November", "December"]
+	return(int$unparse(d.day) || " " ||
+	       months[d.month] || " " ||
+	       int$unparse(d.year))
+	end unparse_date
+
+unparse_time = proc (d: cvt) returns (string)
+	hour: string := int$unparse(d.hour)
+	minute: string := int$unparse(d.minute)
+	second: string := int$unparse(d.second)
+	if d.hour < 10 then
+	   hour := "0" || hour end
+	if d.minute < 10
+	   then minute := "0" || minute end
+	if d.second < 10
+	   then second := "0" || second end
+	return(hour || ":" || minute || ":" || second)
+	end unparse_time
+
+equal = proc (date1, date2: cvt) returns (bool)
+	begin
+	return(date1 = date2)
+	end
+	end equal
+
+similar = proc (date1, date2: cvt) returns (bool)
+	return(date1 = date2)
+	end similar
+
+copy = proc (d: date) returns (date)
+	return(d)
+	end copy
+
+lt = proc (d1, d2: cvt) returns (bool)
+	if d1.year ~= d2.year
+	   then return(d1.year < d2.year) end
+	if d1.month ~= d2.month
+	   then return(d1.month < d2.month) end
+	if d1.day ~= d2.day
+	   then return(d1.day < d2.day) end
+	if d1.hour ~= d2.hour
+	   then return(d1.hour < d2.hour) end
+	if d1.minute ~= d2.minute
+	   then return(d1.minute < d2.minute) end
+	return(d1.second < d2.second)
+	end lt
+
+le = proc (d1, d2: cvt) returns (bool)
+	if d1.year ~= d2.year
+	   then return(d1.year < d2.year) end
+	if d1.month ~= d2.month
+	   then return(d1.month < d2.month) end
+	if d1.day ~= d2.day
+	   then return(d1.day < d2.day) end
+	if d1.hour ~= d2.hour
+	   then return(d1.hour < d2.hour) end
+	if d1.minute ~= d2.minute
+	   then return(d1.minute < d2.minute) end
+	return(d1.second <= d2.second)
+	end le
+
+gt = proc (d1, d2: date) returns (bool)
+	return(d2 < d1)
+	end gt
+
+ge = proc (d1, d2: date) returns (bool)
+	return(d2 <= d1)
+	end ge
+
+print = proc (d: date, ps: pstream)
+	pstream$text(ps, unparse(d))
+	end print
+
+encode = proc (d: cvt, ist: istream) signals (not_possible(string))
+	begin
+	int$encode(d.day, ist)
+	int$encode(d.month, ist)
+	int$encode(d.year, ist)
+	int$encode(d.hour, ist)
+	int$encode(d.minute, ist)
+	int$encode(d.second, ist)
+	end resignal not_possible
+	end encode
+
+decode = proc (ist: istream) returns (date)
+			     signals (end_of_file, not_possible(string))
+	return(create(int$decode(ist), int$decode(ist), int$decode(ist),
+		      int$decode(ist), int$decode(ist), int$decode(ist)))
+	   resignal end_of_file, not_possible
+	   except when bad_format: signal not_possible("bad format") end
+	end decode
+
+_gcd = proc (d: cvt, tab: gcd_tab) returns (int)
+	return(rep$_gcd(d, tab))
+	end _gcd
+
+end date

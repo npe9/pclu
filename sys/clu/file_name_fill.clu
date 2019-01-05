@@ -1,0 +1,32 @@
+% Copyright Massachusetts Institute of Technology 1981, 1989
+
+file_name_fill = proc (fn: fname, dsuffix: string) returns (fname)
+	fname = file_name
+	dir: string := fn.dir
+	suffix: string := fn.suffix
+	change: bool := false
+	if string$empty(dir)
+	   then dir := working_dir()
+		change := ~string$empty(dir)
+	elseif dir[1] = '~'
+	   then z: int := string$indexc('/', dir)
+		if z = 0
+		   then z := string$size(dir) + 1 end
+		dir := _home_dir(string$substr(dir, 2, z - 2)) ||
+		       string$rest(dir, z)
+		   except when not_found: end
+		change := dir ~= fn.dir
+	elseif dir[1] ~= '/'
+	   then dir := working_dir() || dir
+		change := dir ~= fn.dir
+	end
+	if string$empty(suffix)  cand  ~string$empty(dsuffix)
+	   then suffix := dsuffix
+		change := true
+	   end
+	if change
+	   then fn := fname$create(dir, fn.name, suffix, fn.other)
+		   except when bad_format: end
+	   end
+	return(fn)
+	end file_name_fill

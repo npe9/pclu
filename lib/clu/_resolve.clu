@@ -1,0 +1,271 @@
+% Copyright Massachusetts Institute of Technology 1985, 1989
+
+#extend
+
+_resolve = cluster is n2a
+
+    CONFFILES = sequence[string]$["/usr/local/lib/resolv.conf",
+				  "/etc/nameserver/resolv.conf",
+				  "/usr/lib/resolv.conf",
+				  "/usr/local/ns/resolv.conf",
+				  "/etc/resolv.conf",
+				  "/etc/athena/nameserver/resolv.conf"]
+
+    PACKETSZ = 512          % maximum packet size
+    MAXLABEL = 63           % maximum length of domain label
+
+    QFIXEDSZ = 4    % Number of bytes of fixed size data in query structure
+
+    NAMESERVER_PORT = 53
+    LOCALADDR = 1 * 2**24 + 127
+
+    QUERY = 0               % standard query
+    IQUERY =  1             % inverse query
+
+    NOERROR = 0             % no error
+
+    T_A = 1                 % host address
+
+    C_IN = 1                % the arpa internet
+    C_ANY = 255             % wildcard match
+
+    INDIR_MASK = 0300
+
+    BUFSIZ = 1024
+
+    AF_INET = 2
+    SOCK_DGRAM = 2
+
+    bstore = _wordvec$bstore
+    wstore = _wordvec$wstore
+    lstore = _wordvec$lstore
+    bfetch = _wordvec$bfetch
+    wfetch = _wordvec$wfetch
+
+    rep = null
+
+    own pkid: int
+    own buf: _wordvec
+    own ans: _wordvec
+    own nsaddr: _wordvec
+    own fromaddr: _wordvec
+    own retries: int
+    own timeout: int
+    own defaultdomain: string := init()
+
+    init = proc () returns (string)
+	w2b = _cvt[_wordvec, _bytevec]
+	w2s = _cvt[_wordvec, string]
+	c: _chan
+	pkid := -1
+	for cf: string in sequence[string]$elements(CONFFILES) do
+	    c := _chan$open(file_name$parse(cf), "read", 0)
+	       except when not_possible (*): continue end
+	    pkid := 0
+	    break
+	    end
+	if pkid < 0
+	   then return("") end
+	buf := _wordvec$create(BUFSIZ / 4)
+	ans := _wordvec$create(PACKETSZ / 4)
+	nsaddr := _wordvec$create(16 / 4)
+	fromaddr := _wordvec$create(16 / 4)
+	retries := 2
+	timeout := 15 * 1000
+	wstore(nsaddr, 1, AF_INET)
+	wstore(nsaddr, 3, (NAMESERVER_PORT / 2**8) + (NAMESERVER_PORT * 2**8))
+	lstore(nsaddr, 5, LOCALADDR)
+	len: int := _chan$getw(c, buf)
+	_chan$close(c)
+	line: string
+	beg: int := 1
+        i: int
+	while (true) do
+	    i := _bytevec$indexc('\n', w2b(buf), beg)
+	    if i > len
+	       then return("") end
+	    line := string$substr(w2s(buf), beg, i-beg)
+	    % added comment skipping (ultrix 2/7/91)
+	    if line[1] = ';' 
+	       then 
+		    beg := i + 1
+		    continue
+	       else 
+		    break
+	       end
+	    end
+	% more ultrix compatibility:
+	% in bsd the 1st line is the domain
+	% in ultrix the 1st (non-comment) line is the string domain then the value
+	k: int := 1
+	if string$indexs("domain", line) ~= 0
+	   then
+		k := string_lindexs(" ", line)
+	        if k > string$size(line) then 
+		   k := string_lindexs("\t", line) end
+		k := k + 1
+	   end
+	defaultdomain := "." || string$substr(line, k, string$size(line)-k+1)
+	i := i + 1
+	j: int
+	while true do
+	    j := _bytevec$indexc('\n', w2b(buf), i)
+	    if w2b(buf)[i] = ';' then i := j + 1 continue
+	       else break end
+	    end
+	if j > 0
+	   then 
+		line := string$substr(w2s(buf), i, j - i)
+		k := 1
+		if string$indexs("nameserver", line) > 0 then
+		   k := string_lindexs(" ", line)
+		   if k > string$size(line) then 
+		      k := string_lindexs("\t", line) end
+		   k := k + 1
+		   end
+		l, r: int := inet_address(
+				 string$substr(line, k, string$size(line)-k+1))
+		wstore(buf, 5, r)
+		wstore(buf, 7, l)
+	   end except others: end
+	return(defaultdomain)
+	end init
+
+    n2a = proc (name: string) returns (int, int)
+	    signals (not_found, no_server, timeout)
+	if pkid < 0
+	   then signal no_server end
+	l, r: int := qry(name, defaultdomain)
+	   resignal timeout
+	   except when not_found:
+		       if string$indexc('.', name) > 0  cor
+			  defaultdomain = ".ARPA"
+			  then signal not_found end
+		       l, r := qry(name, ".ARPA")
+			  resignal not_found, timeout
+		  end
+	return(l, r)
+	end n2a
+
+    qry = proc (name, domain: string) returns (int, int)
+	    signals (not_found, timeout)
+	pkid := pkid + 1
+	bstore(buf, 1, pkid / 2**8)
+	bstore(buf, 2, pkid)
+	bstore(buf, 3, QUERY * 8 + 1)
+	bstore(buf, 4, NOERROR)
+	wstore(buf, 5, 0)
+	bstore(buf, 6, 1)
+	wstore(buf, 7, 0)
+	wstore(buf, 9, 0)
+	wstore(buf, 11, 0)
+	if ~string$empty(name)  cand  ~string$empty(domain)  cand
+	   string$indexc('.', name) = 0
+	   then name := name || domain end
+	idx: int := nstore(name, 13, BUFSIZ - 12 - QFIXEDSZ)
+	   except when bounds: signal not_found end
+	bstore(buf, idx, T_A / 2**8)
+	bstore(buf, idx + 1, T_A)
+	bstore(buf, idx + 2, C_ANY / 2**8)
+	bstore(buf, idx + 3, C_ANY)
+	send(idx + 3)
+	   resignal timeout
+	% this test omitted as it seemed to fail for no reason (concerto 2/7/91 dwc)
+	%    if bfetch(ans, 4) // 16 ~= NOERROR
+	%       then signal not_found end
+	idx := 13
+	if wfetch(ans, 5) ~= 0
+	   then idx := nskip(idx) + QFIXEDSZ end
+	for ancount: int in int$from_to_by(bfetch(ans, 7) * 2**8 + bfetch(ans, 8),
+					   1,
+					   -1) do
+	    idx := nskip(idx)
+	    tp: int := bfetch(ans, idx) * 2**8 + bfetch(ans, idx + 1)
+	    idx := idx + 2
+	    cl: int := bfetch(ans, idx) * 2**8 + bfetch(ans, idx + 1)
+	    idx := idx + 6
+	    n: int := bfetch(ans, idx) * 2**8 + bfetch(ans, idx + 1)
+	    idx := idx + 2
+	    if tp ~= T_A  cor  cl ~= C_IN  cor  n ~= 4
+	       then idx := idx + n
+		    continue
+	       end
+	    return(bfetch(ans, idx + 3) * 2**8 + bfetch(ans, idx + 2),
+		   bfetch(ans, idx + 1) * 2**8 + bfetch(ans, idx))
+	    end
+	signal not_found
+	end qry
+
+    nstore = proc (dname: string, idx, max: int) returns (int) signals (bounds)
+	z: int := string$size(dname)
+	i: int := 1
+	max := idx + max
+	while true do
+	    zidx: int := idx
+	    while i <= z do
+		c: char := dname[i]
+		i := i + 1
+		if c = '.'
+		   then break
+		 elseif c = '\\'
+		   then i := i + 1
+			if i > z
+			   then break end
+			c := dname[i]
+		 end
+		idx := idx + 1
+		if idx >= max
+		   then signal bounds end
+		bstore(buf, idx, char$c2i(c))
+		end
+	    if idx = zidx  cand  i > z
+	       then break end
+	    tot: int := idx - zidx
+	    if tot > MAXLABEL
+	       then signal bounds end
+	    bstore(buf, zidx, tot)
+	    idx := idx + 1
+	    end
+	if idx >= max
+	   then signal bounds end
+	bstore(buf, idx, 0)
+	return(idx + 1)
+	end nstore
+
+    nskip = proc (idx: int) returns (int)
+	while true do
+	    n: int := bfetch(ans, idx)
+	    idx := idx + 1
+	    if n = 0
+	       then break end
+	    if n < INDIR_MASK
+	       then idx := idx + n
+		    continue
+	       end
+	    idx := idx + 1
+	    break
+	    end
+	return(idx)
+	end nskip
+
+    send = proc (len: int) returns (int) signals (timeout)
+	c: _chan := _chan$socket(AF_INET, SOCK_DGRAM, 0)
+	for i: int in int$from_to_by(retries, 1, -1) do
+	    begin
+		_chan$sendto(c, buf, len, 0, nsaddr, 16)
+		if ~_chan$read_wait(c, timeout)
+		   then continue end
+		anslen, frmlen: int := _chan$recvfrom(c, ans, 0, fromaddr)
+		if wfetch(ans, 1) ~= wfetch(buf, 1)
+		   then continue end
+		_chan$close(c)
+		if bfetch(ans, 3) // 4 >= 2
+		   then signal timeout end
+		return(anslen)
+		end except when not_possible (*): end
+	    end
+	_chan$close(c)
+	signal timeout
+	end send
+
+    end _resolve

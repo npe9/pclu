@@ -1,0 +1,6 @@
+% Copyright Massachusetts Institute of Technology 1981, 1989
+
+set_working_dir = proc (s: string) signals (bad_format)
+	_working_dir(s, true)
+	    resignal bad_format
+	end set_working_dir

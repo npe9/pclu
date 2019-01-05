@@ -1,0 +1,579 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	TOP2 CLU
+%
+%	CLU compiler: top level
+
+
+compile = proc (mode: int, args: as, outst: stream) returns (bool)
+    e: stuff, suffix: str := setup_stuff(mode, outst)
+    allok: bool := true
+    for fn: fname in all_input_names(args, suffix, outst) do
+	allok1: bool := compile1(e, fn)
+	if ~allok1 then allok := false end
+	   % stream$putc(outst, '\n')
+	   except when not_possible (*): end
+	end
+    undefs: xref := e.undefs
+    new_exts: as := as$new()
+    names: as := e.names
+    for id: str in xref$keys(undefs) do
+	for oid: str in as$elements(names) do
+	    if oid = id
+	       then as$addh(new_exts, id)
+		    break
+	       end
+	    end
+	end
+    exts: xref := e.exts
+    for id: str in as$elements(new_exts) do
+	xref$add_refs(exts, id, xref$rem_refs(undefs, id))
+	end
+    begin
+	% stream$puts(outst, "\n\n")
+	xref$output(undefs, "Undefined", "Referencing Modules", outst)
+	if cmpvar$externals()
+	   then % stream$puts(outst, "\n\n")
+		xref$output(exts, "External", "Referencing Modules", outst)
+	   end
+	end except when not_possible (*): end
+    return (allok)
+    end compile
+
+setup_stuff = proc (mode: int, outst: stream) returns (stuff, str)
+    e: stuff := cmpvar$stuffs()
+    if mode = ce_
+       then CE$flush_entries(e.ce)
+	    CE$reset(e.ce)
+     elseif ~e.ce_reset
+       then CE$reset(e.ce) end
+    e.ce_reset := false
+    e.mode := mode
+    e.outst := outst
+    as$trim(e.names, 1, 0)
+    xref$flush(e.exts)
+    xref$flush(e.undefs)
+    if mode = specs_
+       then return(e, "spc")
+     elseif mode = ce_  cor  mode = xce_
+       then return(e, "equ")
+     else return(e, "clu") end
+    end setup_stuff
+
+compile1 = proc (e: stuff, fn: fname) returns (bool)
+    time1: time := run_time()
+    reset_stuff(e, fn)
+       except when open_failed: return(false) end
+    allok: bool
+    mode: int := e.mode
+    outst: stream := e.outst
+    if mode = parse_
+       then allok := do_parse(e)
+     elseif mode = check_
+       then allok := do_check(e)
+     elseif mode = specs_
+       then allok := do_specs(e)
+     elseif mode = ce_  cor  mode = xce_
+       then allok := do_ce(e)
+     else allok := do_compile(e) end
+       except when failure (s: string):
+		   allok := false
+		   begin
+		       stream$puts(outst, "failure: ")
+		       stream$putl(outst, s)
+		       end except when not_possible (*): end
+	      end
+    fn := e.inst.name
+    stream$close(e.inst)
+    dez: int := _dir_ent_size()
+    if allok  cand  mode = binary_
+       then
+	    %    dname: str := cmpvar$dir()
+	    %    if str$empty(dname)
+	    %       then dname := fn.dir end
+	    %    bfn: fname := fname$create(dname,
+	    %			       str$substr(fn.name, 1, dez - 4),
+	    %			       "_b_",
+	    %			       "")
+	    %    suf: str := cmpvar$suffix()
+	    %    if suf = "*"
+	    %       then rename_file(bfn, fname$create(dname, fn.name, "", ""))
+	    %     elseif suf ~= "_b_"
+	    %       then rename_file(bfn,
+	    %			fname$create(dname,
+	    %				     str$substr(fn.name, 1,
+	    %						dez - 1 - str$size(suf)),
+	    %				     suf,
+	    %				     ""))
+	    %     end except when not_possible (why: str):
+	    %		     begin
+	    %			 stream$puts(outst, "output failure: ")
+	    %			 stream$putl(outst, why)
+	    %			 end except when not_possible (*): end
+	    %		end
+     elseif mode = binary_
+       then dname: str := cmpvar$dir()
+	    if str$empty(dname)
+	       then dname := fn.dir end
+	    delete_file(fname$create(dname,
+				     str$substr(fn.name, 1, dez - 4),
+				     "_b_",
+				     ""))
+	       except when not_possible (*): end
+     end
+    elapsed: str := time$format(run_time() - time1, 3)
+    begin
+	% stream$puts(outst, "\ntime = ")
+	stream$puts(outst, "time = ")
+	stream$putl(outst, elapsed)
+	end except when not_possible (*): end
+    return (allok)
+    end compile1
+
+reset_stuff = proc (e: stuff, fn: fname) signals (open_failed)
+    outst: stream := e.outst
+    mode: int := e.mode
+    inst: stream := open_stream(fn, "read", outst)
+       except when open_failed: signal open_failed end
+    fn := inst.name
+    begin
+	% stream$putc(outst, '\n')
+	if mode = parse_
+	   then stream$puts(outst, "Parsing")
+	 elseif mode = check_
+	   then stream$puts(outst, "Checking")
+	 elseif mode = binary_
+	   then ge: g_env := maybe_g_env$value_one(e.genv)
+		if ge.space  cor  ge.time
+		   then stream$puts(outst, "Optimizing")
+		   else stream$puts(outst, "Compiling")
+		   end
+	 elseif mode = specs_
+	   then stream$puts(outst, "Creating DU specs from")
+	 else stream$puts(outst, "Adding to CE from") end
+	stream$putc(outst, ' ')
+	stream$putl(outst, fname$unparse(fn))
+	% stream$putc(outst, '\n')
+	end except when not_possible (*): end
+    srcfn: file_name := fn
+    if mode = binary_
+       then dname: str := cmpvar$dir()
+	    if str$empty(dname)
+	       then dname := fn.dir end
+	    fn := fname$create(dname,
+			       str$substr(fn.name, 1, _dir_ent_size() - 4),
+			       "_b_",
+			       "")
+       else fn := fname$parse(nul_dev())
+       end
+    comp: CE := e.ce
+    p_env$reset(e.penv, comp, inst, outst)
+    c_env$reset(e.cenv, comp, outst)
+    tagcase e.genv
+       tag one (ge: g_env):
+	   g_env$reset(ge, comp, outst, fn)
+	   g_env$set_file_name(ge, srcfn)
+       others:
+       end
+    e.inst := inst
+    end reset_stuff
+
+do_parse = proc (e: stuff) returns (bool)
+    allok: bool := true
+    while true do
+	def: definition, ok: int := parse_one(e)
+	   except when eof: return(allok) end
+	if ok > no_errs_
+	   then allok := false end
+	end
+    end do_parse
+
+do_check = proc (e: stuff) returns (bool)
+    allok: bool := true
+    while true do
+	def: definition, ok: int := parse_one(e)
+	   except when eof: return(allok) end
+	if ~(ok < bad_errs_  cand  check_one(e, def, ok = no_errs_))
+	   then allok := false end
+	end
+    end do_check
+
+do_compile = proc (e: stuff) returns (bool)
+    lst: str := cmpvar$modules()
+    allok: bool := true
+    onedef_found: bool := false
+    allow: bool := cmpvar$allow()
+    while true do
+	def: definition, ok: int := parse_one(e)
+	onedef_found := true
+	mod: str := ""
+	tagcase def
+	   tag apply (apd: applydefn):
+	       mod := apd.idn.str
+	   tag cluster_ (td: typedefn):
+	       mod := td.idn.str
+	   others:
+	   end
+	if ~str$empty(mod)  cand  ~str$empty(lst)  cand
+	   str$indexs("\n" || mod || "\n", lst) > 0
+	   then stream$puts(e.outst, mod)
+		stream$putl(e.outst, " already defined\n")
+	   end except when not_possible (*): end
+	if ok < bad_errs_  cand
+	   (check_one(e, def, ok = no_errs_)  cor  allow)
+	   then allok := allok  cand
+			 generate_one(e, def)  cand
+			 ok = no_errs_
+	   else allok := false
+	   end
+	end except when eof:
+			if ~onedef_found then allok := false end
+		   end
+    ge: g_env := maybe_g_env$value_one(e.genv)
+    g_env$end_all(ge)
+    allok := allok  cand  ge.err = 0
+    if allok then cc_one(ge) end
+    g_env$reset_err(ge)
+    return(allok)
+    end do_compile
+
+do_specs = proc (e: stuff) returns (bool)
+    allok1: bool := true
+    allok2: bool := true
+    mdefs: mdeflist := mdeflist$create(1)
+    def: definition
+    ok: int
+    md: mdef
+    exts: xref := e.exts
+    xtemp: xref := xref$create()
+    e.exts := xtemp
+    while true do
+	def, ok := parse_one(e)
+	tagcase def
+	   tag apply (d: applydefn):
+	       d.init := initlist$new()
+	       d.body := stmtlist$new()
+	   tag cluster_, selector_, atype (d: typedefn):
+	       d.init := initlist$new()
+	       for dd: applydefn in applydefnlist$elements(d.body) do
+		   dd.init := initlist$new()
+		   dd.body := stmtlist$new()
+		   end
+	   others:
+	   end
+	if ok = no_errs_
+	   then ok, md := specs_one(e, def)
+		if ok = bad_
+		   then allok1 := false
+		 elseif ok = wait_
+		   then mdeflist$addh(mdefs, md)
+			xref$flush(xtemp)
+		 elseif ok = install_
+		   then install_specs(md) end
+	   else allok1 := false
+		if ok = minor_errs_
+		   then check_one(e, def, false) end
+	   end
+	xref$merge(exts, xtemp)
+	xref$flush(xtemp)
+	end except when eof: end
+    e.exts := exts
+    if mdeflist$size(mdefs) = 0
+       then return(allok1) end
+    setup_specs_pass2(e, mdefs)
+    for md in mdeflist$elements(mdefs) do
+	def := md.def
+	if md.hack
+	   then p_env$hack(e.penv)
+	   else p_env$unhack(e.penv)
+	   end
+	ok, md := specs_one(e, def)
+	if ok = bad_
+	   then allok2 := false
+	   else install_specs(md)
+	   end
+	end
+    return(allok1 & allok2)
+    end do_specs
+
+setup_specs_pass2 = proc (e: stuff, mdefs: mdeflist)
+    CE$reset1(e.ce)
+    uk: idnkind := idnkind$make_unknown(nil)
+    for md: mdef in mdeflist$elements(mdefs) do
+	tagcase md.def
+	   tag equates (eqs: equatelist):
+	       for eq: equate in equatelist$elements(eqs) do
+		   eq.idn.kind := uk
+		   end
+	   others:
+	       tagcase md.mspecs
+		  tag specs (ms: DUspecs):
+		      f_DUspecs(e.cenv, ms, false)
+		  others:
+		  end
+	       md.gen.mspecs := md.mspecs
+	   end
+	end
+    end setup_specs_pass2
+
+install_specs = proc (md: mdef)
+    gen: DU := md.gen
+    specs: mspecs := md.mspecs
+    gen.mspecs := specs
+    tagcase specs
+       tag specs (ds: DUspecs):
+	   DU$add_specs(gen, ds)
+       others:
+       end
+    end install_specs
+
+specs_one = proc (e: stuff, def: definition) returns (int, mdef)
+    undefs: DUlist, ok: bool := check_one1(e, def)
+    res: int := install_
+    gen: DU
+    tagcase def
+       tag equates:
+	   gen := e.cenv.proc_
+	   res := equates_
+       tag apply (d: applydefn):
+	   gen := c_module_idn(d.idn)
+	   d.idn.kind := idnkind$make_unknown(nil)
+       tag cluster_, selector_, atype (d: typedefn):
+	   gen := c_module_idn(d.idn)
+	   d.idn.kind := idnkind$make_unknown(nil)
+       end
+    specs: mspecs := gen.mspecs
+    if res = install_
+       then gen.mspecs := mspecs$make_none(nil) end
+    hack: bool := c_env$is_hacked(e.cenv)
+    md: mdef := mdef${def:    def,
+		      hack:   hack,
+		      gen:    gen,
+		      mspecs: specs}
+    if ~ok
+       then res := bad_
+	    % Eventually check if specs already exist
+     elseif DUlist$size(undefs) > 0
+       then res := wait_ end
+    return(res, md)
+    end specs_one
+
+do_ce = proc (e: stuff) returns (bool)
+    allok: bool := true
+    while true do
+	def: definition, ok: int := parse_one(e)
+	tagcase def
+	   tag equates (eqs: equatelist):
+	       if ok < bad_errs_
+		  then if check_one(e, def, ok = no_errs_)
+			  then allok := allok & add_ce_entries(e, eqs)
+			  else allok := false
+			  end
+		  else allok := false
+		  end
+	   others:
+	       stream$putl(e.outst, "file has more than just equates!")
+		  except when not_possible (*): end
+	       allok := false
+	   end
+	end
+       except when eof: return(allok) end
+    end do_ce
+
+add_ce_entries = proc (e: stuff, equates: equatelist) returns (bool)
+    comp: CE := e.ce
+    e.ce_empty := false
+    outst: stream := e.outst
+    CE$reset_entries(comp, true)
+    ok: bool := true
+    for eq: equate in equatelist$elements(equates) do
+	i: idn := eq.idn
+	CE$add_entry(comp, i)
+	   except when exists:
+		       ok := false
+		       begin
+			   stream$puts(outst, "value for '")
+			   stream$puts(outst, i.str)
+			   stream$putl(outst, "' already exists")
+			   end except when not_possible (*): end
+		  end
+	end
+    CE$keep(comp)
+    return(ok)
+    end add_ce_entries
+
+parse_one = proc (e: stuff) returns (definition, int) signals (eof)
+    ep: p_env := e.penv
+    def: definition := p_definition(ep)
+       except when eof: signal eof end
+    err: int := ep.err
+    p_env$reset_err(ep)
+    return(def, err)
+    end parse_one
+
+check_one = proc (e: stuff, def: definition, go: bool) returns (bool)
+    undefs: DUlist, ok: bool := check_one1(e, def)
+    mod: idn
+    exp: bool := cmpvar$expunge()
+    tagcase def
+       tag equates:
+	   return(ok  cand  go)
+       tag apply (d: applydefn):
+	   mod := d.idn
+       tag cluster_, selector_, atype (d: typedefn):
+	   mod := d.idn
+	   exp := false
+       end
+    gen: DU := c_module_idn(mod)
+    mod.kind := idnkind$make_unknown(nil)
+    if ~(ok  cand  go)
+       then return(false) end
+    if exp
+       then return(ok) end
+    specs: mspecs := gen.mspecs
+    tagcase specs
+       tag specs (ds: DUspecs):
+	   DU$add_specs(gen, ds)
+	      except when specs_exist: end
+       others:
+       end
+    return(ok)
+    end check_one
+
+check_one1 = proc (e: stuff, def: definition) returns (DUlist, bool)
+    ec: c_env := e.cenv
+    if p_env$is_hacked(e.penv)
+       then c_env$hack(ec)
+       else c_env$unhack(ec)
+       end
+    outst: stream := e.outst
+    c_definition(ec, def)
+    err: int := ec.err
+    c_env$end_reset(ec, definition$is_equates(def))
+    user: str := get_user(e, def)
+    as$addh(e.names, user)
+    exts: idnrow := c_env$pop_externals(ec)
+    undefs: DUlist := c_env$pop_undefined(ec)
+    tab: xref := e.exts
+    for i: idn in idnrow$elements(exts) do
+	xref$add_ref(tab, i.str, user)
+	end
+    tab := e.undefs
+    for d: DU in DUlist$elements(undefs) do
+	if is_internal(d.common, exts)
+	   then xref$add_ref(tab, d.unique, user)
+		d.mspecs := mspecs$make_none(nil)
+	   end
+	end
+    remove_externals(def, exts)
+    return(undefs, err < 2)
+    end check_one1
+
+get_user =  proc (e: stuff, def: definition) returns (str)
+    tagcase def
+       tag equates:
+	   return("equates(" || fname$unparse(e.inst.name) || ")")
+       tag apply (d: applydefn):
+	   return(d.idn.str)
+       tag cluster_, selector_, atype (d: typedefn):
+	   return(d.idn.str)
+       end
+    end get_user
+
+is_internal = proc (n: name, exts: idnrow) returns (bool)
+    for i: idn in idnrow$elements(exts) do
+	if n = i.str then return (false) end
+	end
+    return(true)
+    end is_internal
+
+remove_externals = proc (def: definition, exts: idnrow)
+    uk: idnkind := idnkind$make_unknown(nil)
+    k: idnkind
+    tagcase def
+       tag apply (d: applydefn):
+	   k := d.idn.kind
+       tag cluster_, selector_, atype (d: typedefn):
+	   k := d.idn.kind
+       others:
+       end
+    for i: idn in idnrow$elements(exts) do
+	i.kind := uk
+	end
+    tagcase def
+       tag apply (d: applydefn):
+	   d.idn.kind := k
+       tag cluster_, selector_, atype (d: typedefn):
+	   d.idn.kind := k
+       others:
+       end
+    end remove_externals
+
+generate_one = proc (e: stuff, def: definition) returns (bool)
+    eg: g_env := maybe_g_env$value_one(e.genv)
+    g_definition(eg, def)
+    err: int := eg.err
+    g_env$reset_err(eg)
+    return(err = 0)
+    end generate_one
+
+cc_one = proc(e: g_env)
+
+    % get source file name
+    fn: file_name := e.file_name
+
+    % compute fname for output from generate_one and rename per binsuffix
+    dname: str := cmpvar$dir()
+    exists_dname: bool := true
+    if str$empty(dname)
+       then dname := fn.dir exists_dname := false end
+    bfn: file_name := fname$create(dname,
+		       str$substr(fn.name, 1, _dir_ent_size() - 4),
+		       "_b_", "")
+
+    cfn: file_name := new_suffix(bfn, cmpvar$suffix())
+    rename_file(bfn, cfn)
+
+    % get cc command if any
+    cmd: string
+    if e.time cor e.space then cmd := cmpvar$cc_opt_cmd()
+       else cmd := cmpvar$cc_dbg_cmd()
+       end
+    if string$size(cmd) < 4 then return end
+
+
+    % see if cc needs to put its result someplace special
+    ofile: string := ""
+    if exists_dname then
+	ofn: file_name := new_suffix(cfn, "o")
+	ofile := " -o " || file_name$unparse(ofn)
+	end
+    
+
+    % invoke the c compiler
+    cmd := cmd || ofile || " " || file_name$unparse(cfn)
+    unix_cmd(cmd)
+    if ~cmpvar$save_c() then delete_file(cfn) end
+
+    % update cross reference table
+    g_xref$flush()
+    end cc_one
+
+% replace existing suffix with new suffix
+
+new_suffix = proc(fn: file_name, suf: string) returns (file_name)
+	       signals(not_possible(string))
+    begin
+	dez: int := _dir_ent_size()
+	dname: str := cmpvar$dir()
+	if str$empty(dname)
+	   then dname := fn.dir end
+	if suf = "*" then suf := "" end
+	nfn: fname := fname$create(dname,
+				   str$substr(fn.name, 1,
+					      dez - 1 - str$size(suf)),
+				   suf,
+				   "")
+	return(nfn)
+	end
+       resignal not_possible
+    end new_suffix

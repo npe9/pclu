@@ -1,0 +1,31 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+inet_address = proc (spec: string) returns (int, int) signals (bad_format)
+    begin
+	bv: _bytevec := _cvt[string, _bytevec](spec)
+	a, b, c, d: int
+	t: int := _bytevec$indexc('.', bv, 1)
+	if t = 0
+	   then exit bad_format end
+	a := int$parse(string$substr(spec, 1, t - 1))
+	s: int := t + 1
+	t := _bytevec$indexc('.', bv, s)
+	if t = 0
+	   then d := int$parse(string$rest(spec, s))
+		c := (d / 2**8) // 2**8
+		b := (d / 2**16) // 2**8
+		d := d // 2**8
+	   else b := int$parse(string$substr(spec, s, t - s))
+		s := t + 1
+		t := _bytevec$indexc('.', bv, s)
+		if t = 0
+		   then d := int$parse(string$rest(spec, s))
+			c := (d / 2**8) // 2**8
+			d := d // 2**8
+		   else c := int$parse(string$substr(spec, s, t - s))
+			d := int$parse(string$rest(spec, t + 1))
+		   end
+	   end
+	return(c + d * 2**8, a + b * 2**8)
+	end except when overflow, bad_format: end
+    signal bad_format
+    end inet_address

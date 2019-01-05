@@ -1,0 +1,321 @@
+% Copyright Massachusetts Institute of Technology 1982, 1989
+
+pstream = cluster is primary_output, create, start, stop, pause,
+		     text, textc, putleft, putright, putspace,
+		     get_indent, set_indent,
+		     get_depth, get_hpos,
+		     get_max_depth, set_max_depth,
+		     get_max_width, set_max_width,
+		     get_flat, set_flat, get_wrap, set_wrap,
+		     get_line_length, get_page_length,
+		     equal, reset, print
+
+ai = array[int]
+
+rep = record[stream:	stream,		% output stream
+	     flat:	bool,		% false -> newline at every pause
+	     wrap:	bool,		% true -> wrap at edge of screen
+	     abort:	bool,		% abort flag -> no printing
+	     max_depth:	int,		% max print depth
+	     max_width:	int,		% max print width
+	     depth:	int,		% current print depth
+	     hpos:	int,		% current horizontal print position
+	     rhpos:	int,		% current real hpos
+	     llen:	int,		% line length
+	     awidth:	ai,		% current width at each level
+	     aindent:	ai]		% current indentation at each level
+
+max_llen = 2**29 + (2**29 - 1)
+
+primary_output = proc () returns (pstream)
+	own po: pstream := create(stream$primary_output(), 4, 4)
+	return(po)
+	end primary_output
+
+create = proc (st: stream, max_depth: int, max_width: int)
+				returns (cvt) signals (illegal_stream)
+	if ~stream$can_write(st)
+	   then signal illegal_stream end
+	ps: rep := rep${stream:		st,
+			flat:		false,
+			wrap:		true,
+			abort:		false,
+			max_depth:	max_depth,
+			max_width:	max_width,
+			depth:		0,
+			hpos:		0,
+			rhpos:		0,
+			llen:		max_llen,
+			awidth:		ai$new(),
+			aindent:	ai$new()}
+	ps.llen := st.line_length
+	   except when no_limit: ps.wrap := false end
+	return(ps)
+	end create
+
+get_depth = proc (x: cvt) returns (int)
+	return(x.depth)
+	end get_depth
+
+get_hpos = proc (x: cvt) returns (int)
+	return(x.hpos)
+	end get_hpos
+
+% pstream$start is used to  start a new  print level, with  an
+% initial width  of 0  items, and  an indentation  set by  the
+% current hpos and the  string given as  the start string.  If
+% the pstream  is in  abort state,  no printing  is done,  the
+% pstream stays in abort state,  but the depth is  maintained.
+% If the  level has  become too  deep, then  "..." is  printed
+% after the start string.
+
+start = proc (ps: cvt, s: string) returns (bool)
+	depth: int := ps.depth + 1
+	ps.depth := depth
+	if ps.abort
+	   then return(false) end
+	puts(ps, s)
+	ai$addh(ps.awidth, 0)
+	ai$addh(ps.aindent, ps.hpos)
+	if depth > ps.max_depth
+	   then puts(ps, "...")
+		ps.abort := true
+		return(false)
+	   end
+	return(true)
+	end start
+
+stop = proc (ps: cvt, s: string) returns (bool)
+	depth: int := ps.depth - 1
+	ps.depth := depth
+	if depth >= ai$size(ps.aindent)
+	   then return(false) end
+	ai$remh(ps.aindent)
+	ai$remh(ps.awidth)
+	ps.abort := false
+	puts(ps, s)
+	return(true)
+	end stop
+
+pause = proc (ps: cvt, s: string) returns (bool)
+	if ps.abort
+	   then return(false) end
+	depth: int := ps.depth
+	puts(ps, s)
+	if depth = 0
+	   then stream$putc(ps.stream, '\n')
+		ps.hpos := 0
+		ps.rhpos := 0
+		return(true)
+	   end
+	if ps.flat
+	   then puts(ps, " ")
+	   else stream$putc(ps.stream, '\n')
+		ps.hpos := 0
+		ps.rhpos := 0
+		putsp(ps, ai$top(ps.aindent))
+	   end
+	width: int := ai$top(ps.awidth) + 1
+	ps.awidth[depth] := width
+	if width >= ps.max_width
+	   then puts(ps, "...")
+		ps.abort := true
+		return(false)
+	   end
+	return(true)
+	end pause
+
+text = proc (ps: cvt, s: string) returns (bool)
+	if ps.abort
+	   then return(false) end
+	puts(ps, s)
+	return(true)
+	end text
+
+textc = proc (ps: cvt, c: char) returns (bool)
+	if ps.abort
+	   then return(false) end
+	if c = '\n'
+	   then stream$putc(ps.stream, c)
+		ps.hpos := 0
+		ps.rhpos := 0
+	   else ps.hpos := ps.hpos + 1
+		if ps.wrap  cor  ps.rhpos < ps.llen
+		   then if ps.rhpos >= ps.llen
+			   then stream$putc(ps.stream, '\n')
+				ps.rhpos := 0
+			   end
+			ps.rhpos := ps.rhpos + 1
+			stream$putc(ps.stream, c)
+		   end
+	   end
+	return(true)
+	end textc
+
+putleft = proc (ps: pstream, s: string, size: int) returns (bool)
+						signals (negative_field_width)
+	if size < 0
+	   then signal negative_field_width end
+	diff: int := size - string$size(s)
+	b: bool := text(ps, s)
+	if diff > 0
+	   then putspace(ps, diff) end
+	return(b)
+	end putleft
+
+putright = proc (ps: pstream, s: string, size: int) returns (bool)
+						signals (negative_field_width)
+	if size < 0
+	   then signal negative_field_width end
+	diff: int := size - string$size(s)
+	if diff > 0
+	   then putspace(ps, diff) end
+	return(text(ps, s))
+	end putright
+
+putspace = proc (ps: cvt, len: int) returns (bool)
+				    signals (negative_field_width)
+	if len < 0
+	   then signal negative_field_width end
+	if ps.abort
+	   then return(false) end
+	putsp(ps, len)
+	return(true)
+	end putspace
+
+puts = proc (ps: rep, s: string)
+	len: int := string$size(s)
+	if len = 0
+	   then return end
+	ps.hpos := ps.hpos + len
+	if ~ps.wrap  cand
+	   ps.rhpos >= ps.llen  cand
+	   string$indexc('\n', s) = 0
+	   then return end
+	ps.rhpos := ps.rhpos + len
+	if ps.rhpos <= ps.llen  cand  string$indexc('\n', s) = 0
+	   then stream$puts(ps.stream, s)
+		return
+	   end
+	ps.hpos := ps.hpos - len
+	ps.rhpos := ps.rhpos - len
+	for c: char in string$chars(s) do
+		if c = '\n'
+		   then stream$putc(ps.stream, c)
+			ps.hpos := 0
+			ps.rhpos := 0
+		   else if ps.wrap  cand  ps.rhpos >= ps.llen
+			   then stream$putc(ps.stream, '\n')
+				ps.rhpos := 0
+			   end
+			if ps.rhpos < ps.llen
+			   then stream$putc(ps.stream, c)
+				ps.rhpos := ps.rhpos + 1
+			   end
+			ps.hpos := ps.hpos + 1
+		   end
+		end
+	end puts
+
+putsp = proc (ps: rep, len: int)
+	if len = 0
+	   then return end
+	ps.hpos := ps.hpos + len
+	if ~ps.wrap  cand  ps.rhpos >= ps.llen
+	   then return end
+	ps.rhpos := ps.rhpos + len
+	if ps.rhpos <= ps.llen
+	   then stream$putspace(ps.stream, len)
+		return
+	   end
+	while ps.rhpos > ps.llen do
+		stream$putc(ps.stream, '\n')
+		ps.rhpos := ps.rhpos - ps.llen
+		end
+	stream$putspace(ps.stream, ps.rhpos)
+	end putsp
+
+get_indent = proc (ps: cvt) returns (int)
+	return(ai$top(ps.aindent))
+	    except when bounds: return(0) end
+	end get_indent
+
+set_indent = proc (ps: cvt, indent: int)
+	ps.aindent[ps.depth] := indent
+	    except when bounds: end
+	end set_indent
+
+get_max_depth = proc (ps: cvt) returns (int)
+	return(ps.max_depth)
+	end get_max_depth
+
+set_max_depth = proc (ps: cvt, depth: int)
+	ps.max_depth := depth
+	end set_max_depth
+
+get_max_width = proc (ps: cvt) returns (int)
+	return(ps.max_width)
+	end get_max_width
+
+set_max_width = proc (ps: cvt, width: int)
+	ps.max_width := width
+	end set_max_width
+
+get_flat = proc (ps: cvt) returns (bool)
+	return(ps.flat)
+	end get_flat
+
+set_flat = proc (ps: cvt, flat: bool)
+	ps.flat := flat
+	end set_flat
+
+get_wrap = proc (ps: cvt) returns (bool)
+	return(ps.wrap)
+	end get_wrap
+
+set_wrap = proc (ps: cvt, wrap: bool)
+	ps.wrap := wrap
+	end set_wrap
+
+get_line_length = proc (ps: cvt) returns (int) signals (no_limit)
+	return(ps.stream.line_length)
+	   resignal no_limit
+	end get_line_length
+
+get_page_length = proc (ps: cvt) returns (int) signals (no_limit)
+	return(ps.stream.page_length)
+	   resignal no_limit
+	end get_page_length
+
+equal = proc (x, y: cvt) returns (bool)
+	return(x = y)
+	end equal
+
+reset = proc (ps: cvt)
+	ps.hpos := 0
+	ps.rhpos := 0
+	ps.abort := false
+	ps.depth := 0
+	ai$trim(ps.aindent, 1, 0)
+	ai$trim(ps.awidth, 1, 0)
+	end reset
+
+print = proc (ps1: cvt, ps2: pstream)
+	text(ps2, "pstream[")
+	int$print(ps1.max_depth, ps2)
+	text(ps2, "d ")
+	int$print(ps1.max_width, ps2)
+	if ps1.flat
+	   then text(ps2, "w f ")
+	   else text(ps2, "w i ")
+	   end
+	if ps1.wrap
+	   then text(ps2, "m ")
+	   else text(ps2, "s ")
+	   end
+	file_name$print(ps1.stream.name, ps2)
+	    except when not_possible (*): text(ps2, "(internal)") end
+	textc(ps2, ']')
+	end print
+
+end pstream

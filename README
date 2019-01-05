@@ -1,0 +1,73 @@
+			   Portable CLU, Release 3.7
+   		           -------------------------
+
+			       November 30, 2016
+
+0 Quick Start
+
+   ~CLU is used to represent the CLU root directory.  Initially ~CLU is the
+directory containing this release. 
+
+   Installation: Set the CLUHOME shell variable to the name of the directory
+containing this release.  Type "make" to build the compiler and its runtime
+support.  Type "make install" to install the compiler.  See (2) below for more
+details.
+
+   Usage: See ~CLU/doc.
+
+1 Notes
+
+   CLU is no longer actively maintained.  This release updates Release 3.6
+(March 17, 1992) to work under Linux on 64-bit machines.  It has been tested
+under Debian 8.6.
+
+   CLU is not licensed.  See ~CLU/COPYRIGHT for distribution information.
+
+   If you have problems installing this release, or if you find bugs, please
+send email to Dorothy Curtis at dcurtis.csail.mit.edu.
+
+   The CLU Reference Manual is published by Springer-Verlag as a monograph, ISBN
+0-387-91253-3 or ISBN 3-540-91253-3. Formerly it was in their Lecture Notes in
+Computer Science series, Number 114.  The manual is also included as an appendix
+to the book Abstraction and Specification in Program Development by Barbara
+Liskov and John Guttag, published in 1986 by The MIT Press (ISBN 0-262-12112-3)
+and McGraw-Hill (ISBN 0-07-037996-3).
+
+   See http://en.wikipedia.org/wiki/CLU_(programming_language) for an
+overview of CLU and links to websites containing distributions and further
+documentation for CLU.
+
+2 Installation
+
+   There is some flexibility in where the CLU root directory can be
+installed.  The possibilities (in the order searched) are
+
+   1. the directory specified by the environment variable CLUHOME
+   2. the home directory, as listed in /etc/passwd, of user name CLU
+   3. /usr/local/lib/clu
+   4. /usr/lib/clu
+   5. /usr/clu
+
+   Any such directory can, of course, be a symbolic link to the real directory.
+In the file/directory names in this and other CLU documents, ~CLU is used to
+represent the CLU root directory.  (In fact, this can be used within any CLU
+program to refer to the root.)
+
+   See ~CLU/Makefile for more  information.
+
+   If you want the executables in ~CLU/exe to live elsewhere, move them or
+edit ~CLU/Makefile, create the appropriate directory, and use "make install".
+
+   The file howto.install contains some details of the make process which may be
+interesting for ports to other platforms.
+
+3 Acknowledgements
+
+     Thanks go to Barbara Liskov and the designers of CLU, to Digital Equipment
+Corporation and James Horning for support for this project, to Sharon Perl for
+developing a clu-to-clu translator, to Mark Vandevoorde for using early verions
+of the compiler and improving the garbage collector, to Hans Boehm and Mark
+Weiser for their conservative garbage collector, to John Guttag for
+encouragement, to Howard Wilkinson for the Sony News port, and to Steve Garland
+for the Makefiles and much testing.
+

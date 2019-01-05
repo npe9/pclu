@@ -1,0 +1,16 @@
+% Copyright Massachusetts Institute of Technology 1981, 1989
+
+_qindexc = proc (c: char, s: str) returns (int)
+	str = string
+	z: int := str$size(s)
+	i: int := 1
+	while i <= z do
+		cc: char := s[i]
+		if cc = c
+		   then return(i)
+		elseif cc = '\\'
+		   then i := i + 2
+		else i := i + 1 end
+		end
+	return(0)
+	end _qindexc

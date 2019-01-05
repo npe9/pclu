@@ -1,0 +1,331 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	CCONST CLU
+%
+%	CLU Compiler Version 3: equate, const, and typespec checker
+
+c_parm_type = proc (e: c_env, i: idn, t: typespec) returns (typespec, idnkind)
+	t := c_type(e, t)
+	xa: exprabs
+	if t = e.type_type
+	   then ni: idn := idn$create(i.str, idnkind$make_tparm(opspeclist$new()))
+		nt: typespec := c_env$get_type(e, typeabs$make_idn(ni))
+		xa := exprabs$make_type_(nt)
+	   else	if ~(t = e.null_type  cor  t = e.bool_type  cor  t = e.int_type  cor
+		     t = e.real_type  cor  t = e.char_type  cor  t = e.str_type)
+		   then c_env$err(e, qs$["parameter '", i.str,
+						"' declared with illegal type"])
+		   end
+		ni: idn := idn$create(i.str, idnkind$make_vparm(t))
+		xa := exprabs$make_idn(ni)
+	   end
+	return(t, idnkind$make_expr(expr$create(xa, t)))
+	end c_parm_type
+
+c_equateval = proc (e: c_env, val: equateval) returns (idnkind)
+	tagcase val
+	   tag expr (x: expr):
+		return(c_equate_expr(e, x))
+	   tag typeset (set: xtypeset):
+		return(idnkind$make_typeset(c_xtypeset(e, set)))
+	   tag du (d: pathname):
+		return(c_pathname(e, d))
+	   end
+	end c_equateval
+
+c_equate_expr = proc (e: c_env, x: expr) returns (idnkind)
+	tagcase x.abs
+	   tag idn (xa: idn):
+		tagcase xa.kind
+		   tag typeset (k: typeset):
+			return(idnkind$make_typeset(k))
+		   others:
+		   end
+	   others:
+	   end
+	c_expr(e, x)
+	nx: expr := e_expr(e, x)
+	x.abs := nx.abs
+	x.typespec := nx.typespec
+	return(idnkind$make_expr(x))
+	end c_equate_expr
+
+c_xtypeset = proc (e: c_env, set: xtypeset) returns (typeset)
+	i: idn := set.idn
+	eqs: equatelist := set.equates
+	ops: operdecllist := set.ops
+	if ~c_env$checking_specs(e)
+	   then c_env$begin_specs(e)
+		i := idn$create(i.str, idnkind$make_tconst(opspeclist$new()))
+		c_env$scopify(e, i)
+		nt: typespec := c_env$get_type(e, typeabs$make_idn(i))
+		x: expr := expr$create(exprabs$make_type_(nt), e.type_type)
+		c_env$declare(e, set.idn, idnkind$make_expr(x))
+		set.idn := i
+		c_env$equates(e, eqs)
+		c_operdecllist(e, ops)
+		c_env$end_specs(e)
+	   end
+	if ~c_env$building_specs(e)
+	   then c_env$begin_scope(e)
+		c_env$begin_recheck(e, true)
+		c_env$declare(e, i, idnkind$make_tparm(opspeclist$new()))
+		c_add_opspecs(e, i, ops)
+		c_operdecllist(e, ops)
+		c_env$end_recheck(e, true)
+		c_env$end_scope(e)
+	   end
+	nops: opspeclist := opspeclist$new()
+	for od: operdecl in operdecllist$elements(ops) do
+		for op: opspec in opspeclist$elements(od.opers) do
+			nops := opspeclist$addh(nops, op)
+			end
+		end
+	return(typeset${parm:  i,
+			opers: nops})
+	end c_xtypeset
+
+c_pathname = proc (e: c_env, path: pathname) returns (idnkind)
+	gen: DU := c_env$get_du(e, XLIB$lookup(path))
+	   except when not_found:
+			gen := c_env$get_du(e, XLIB$get_DU(path))
+			return(c_get_idnkind(e, gen, want_val))
+		  end
+	return(c_get_idnkind(e, gen, want_gen))
+	end c_pathname
+
+c_get_idnkind = proc (e: c_env, gen: DU, want: int) returns (idnkind)
+	k: idnkind := idnkind$make_gen(gen)
+	clut: clutype := clutype${gen:   gen,
+				  parms: exprlist$new()}
+	xa: exprabs
+	t: typespec
+	specs: DUspecs := c_get_DUspecs(e, gen)
+	tagcase specs
+	   tag apply (inf: applyinfo):
+		if ~idnlist$empty(inf.parms)
+		   then return(k) end
+		xa := exprabs$make_apply(clut)
+		t := inf.type_
+	   tag cluster_ (inf: typeinfo):
+		if ~idnlist$empty(inf.parms)
+		   then return(k) end
+		xa := exprabs$make_type_(c_env$get_type(e, typeabs$make_cluster_(clut)))
+		t := e.type_type
+	   tag select, atype:
+		return(k)
+	   others:
+		if want = want_gen
+		   then return(k)
+		elseif want = want_val
+		   then	xa := exprabs$make_apply(clut)
+			ot: othertype := othertype$make_du(clut)
+			t := c_env$get_type(e, typeabs$make_other(ot))
+		else ta: typeabs := typeabs$make_cluster_(clut)
+		     xa := exprabs$make_type_(c_env$get_type(e, ta))
+		     t := e.type_type
+		end
+	   end
+	return(idnkind$make_expr(expr$create(xa, t)))
+	end c_get_idnkind
+
+c_constlist = proc (e: c_env, exprs: exprlist) returns (exprlist)
+	c_env$begin_type_scope(e)
+	for i: int in exprlist$indexes(exprs) do
+		ox: expr := exprs[i]
+		nx: expr := c_const(e, ox)
+		if nx ~= ox
+		   then exprs := exprlist$replace(exprs, i, nx) end
+		end
+	c_env$end_type_scope(e)
+	return(exprs)
+	end c_constlist
+
+c_const = proc (e: c_env, x: expr) returns (expr)
+	c_expr(e, x)
+	tagcase x.abs
+	   tag apply (xa: clutype):
+		if typeabs$is_other(x.typespec.abs)
+		   then ta: typeabs := typeabs$make_cluster_(xa)
+			x.abs := exprabs$make_type_(c_env$get_type(e, ta))
+			x.typespec := e.type_type
+		   end
+	   others:
+	   end
+	return(e_expr(e, x))
+	end c_const
+
+c_type = proc (e: c_env, t: typespec) returns (typespec)
+	if t.id ~= 0
+	   then if ~c_env$checking_specs(e)
+		   then	tagcase t.abs
+			   tag cvt_:
+				c_env$err1(e, "illegal use of 'cvt'")
+			   tag type_:
+				if c_env$types_illegal(e)
+				   then c_env$err1(e, "illegal use of type 'type'")
+				   end
+			   others:    
+			   end
+		elseif c_env$rechecking_types(e)
+		   then c_type1(e, t) end
+		return(t)
+	   end
+	abs: typeabs := t.abs
+	tagcase abs
+	   tag cluster_ (ta: clutype):
+		ta.parms := c_constlist(e, ta.parms)
+	   tag select (ta: seltype):
+		for spec: fieldspec in fieldspeclist$elements(ta.parms) do
+			spec.type_ := c_type(e, spec.type_)
+			end
+	   tag apply (ta: applytype):
+		ta.args := c_typelist(e, ta.args)
+		ta.vals := c_typelist(e, ta.vals)
+		c_exceptionlist(e, ta.sigs)
+	   tag idn (i: idn):
+		abs := c_idn_type(e, i)
+	   tag xclu (ta: xclutype):
+		if ~exprlist$empty(ta.parms)
+		   then	ta.parms := c_constlist(e, ta.parms)
+			abs := c_idn_gen(e, ta)
+		   else abs := c_idn_type(e, ta.idn)
+		   end
+	   tag xsel (ta: xseltype):
+		for spec: fieldspec in fieldspeclist$elements(ta.parms) do
+			spec.type_ := c_type(e, spec.type_)
+			end
+		abs := c_xsel_type(e, ta)
+	   others:
+	   end
+	old: bool
+	t, old := c_env$fix_type(e, abs)
+	if ~old  cor  c_env$rechecking_types(e)
+	   then tagcase t.abs
+		   tag cluster_ (ta: clutype):
+			c_gen_parms(e, ta)
+		   others:
+		   end
+	   end
+	return(t)
+	end c_type
+
+c_type1 = proc (e: c_env, t: typespec)
+	tagcase t.abs
+	   tag cluster_ (ta: clutype):
+		if ~exprlist$empty(ta.parms)
+		   then for x: expr in exprlist$elements(ta.parms) do
+				tagcase x.abs
+				   tag type_ (xa: typespec):
+					c_type1(e, xa)
+				   others:
+				   end
+				end
+			c_gen_parms(e, ta)
+		   end
+	   tag select (ta: seltype):
+		for spec: fieldspec in fieldspeclist$elements(ta.parms) do
+			c_type1(e, spec.type_)
+			end
+	   tag apply (ta: applytype):
+		for tt: typespec in typelist$elements(ta.args) do
+			c_type1(e, tt)
+			end
+		for tt: typespec in typelist$elements(ta.vals) do
+			c_type1(e, tt)
+			end
+		for sig: exception in exceptionlist$elements(ta.sigs) do
+			for tt: typespec in typelist$elements(sig.types) do
+				c_type1(e, tt)
+				end
+			end
+	   others:
+	   end
+	end c_type1
+
+c_typelist = proc (e: c_env, types: typelist) returns (typelist)
+	ntypes: typelist := typelist$new()
+	for t: typespec in typelist$elements(types) do
+		ntypes := typelist$addh(ntypes, c_type(e, t))
+		end
+	return(ntypes)
+	end c_typelist
+
+c_exceptionlist = proc (e: c_env, sigs: exceptionlist)
+	for sig: exception in exceptionlist$elements(sigs) do
+		sig.types := c_typelist(e, sig.types)
+		if sig.name = "failure"
+		   then c_env$err1(e, "'failure' listed in signals clause") end
+		end
+	end c_exceptionlist
+
+c_idn_gen = proc (e: c_env, xt: xclutype) returns (typeabs)
+	i: idn := xt.idn
+	parms: exprlist := xt.parms
+	tagcase i.kind
+	   tag gen (k: DU):
+		dut: clutype := clutype${gen:   k,
+					 parms: parms}
+		t: typespec := c_gen_parms(e, dut)
+		tagcase t.abs
+		   tag type_, other:
+			return(typeabs$make_cluster_(dut))
+		   others:
+			return(t.abs)
+		   end
+	   tag unknown:
+		c_env$lookup(e, i, want_gen)
+		return(c_idn_gen(e, xt))
+	   others:
+	   end
+	c_env$err(e, qs$["'", i.str, "' does not name a type generator"])
+	return(typeabs$make_unknown(nil))
+	end c_idn_gen
+
+c_idn_type = proc (e: c_env, i: idn) returns (typeabs)
+	tagcase i.kind
+	   tag tparm, tconst:
+		return(typeabs$make_idn(i))
+	   tag expr (k: expr):
+		tagcase k.abs
+		   tag type_ (xa: typespec):
+			return(xa.abs)
+		   tag bad:
+			return(typeabs$make_unknown(nil))
+		   tag apply (xa: clutype):
+			if typeabs$is_other(k.typespec.abs)
+			   then return(typeabs$make_cluster_(xa)) end
+		   others:
+		   end
+		c_env$err(e, qs$["'", i.str, "' does not name a type"])
+	   tag var, ownvar (k: typespec):
+		c_env$err(e, qs$["use of variable '", i.str, "' as a type constant"])
+	   tag gen:
+		c_env$err(e, qs$["use of generator '", i.str, "' as a type"])
+	   tag unknown:
+		c_env$lookup(e, i, want_type)
+		return(c_idn_type(e, i))
+	   others:
+		c_env$err(e, qs$["'", i.str, "' does not name a type"])
+	   end
+	return(typeabs$make_unknown(nil))
+	end c_idn_type
+
+c_xsel_type = proc (e: c_env, xsel: xseltype) returns (typeabs)
+	i: idn := xsel.idn
+	tagcase i.kind
+	   tag gen (k: DU):
+		specs: DUspecs := c_get_DUspecs(e, k)
+		tagcase specs
+		   tag select, none:
+			return(typeabs$make_select(seltype${gen:   k,
+							    parms: xsel.parms}))
+		   others:
+		   end
+	   tag unknown:
+		c_env$lookup(e, i, want_gen)
+		return(c_xsel_type(e, xsel))
+	   others:
+	   end
+	c_env$err(e, qs$["'", i.str, "' does not name a selector type generator"])
+	return(typeabs$make_unknown(nil))
+	end c_xsel_type

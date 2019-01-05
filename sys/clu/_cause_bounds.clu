@@ -1,0 +1,5 @@
+% Copyright Massachusetts Institute of Technology 1981, 1989
+
+_cause_bounds = proc () signals (bounds)
+	signal	bounds
+	end _cause_bounds

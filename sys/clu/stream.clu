@@ -1,0 +1,1673 @@
+% Copyright    Barbara Liskov    1982
+
+# extend
+
+stream = cluster is open, primary_input, primary_output, error_output,
+		    add_script, rem_script, unscript, scripts, can_read,
+		    can_write, getc, peekc, pending, empty, putc, putc_image,
+		    getc_image, get_lineno, set_lineno, reset, flush,
+		    get_line_length, get_page_length, get_date, set_date,
+		    get_name, close, abort, is_closed, is_terminal, getl, putl,
+		    gets, gets_image, puts, puts_image, putzero, putleft,
+		    putright, putspace, create_input, create_output,
+		    get_contents, getbuf, display, modify_display,
+		    get_prompt, set_prompt, get_rescan, set_rescan,
+		    get_input_buffered, set_input_buffered,
+		    get_output_buffered, set_output_buffered,
+		    get_eof_flag, set_eof_flag, equal, similar,
+		    copy, print, _open_streams, _close_all % , fork_process
+
+rep	= record[name:      fname,		% file name
+		 scripts:   qst,		% script files
+		 scripting: bool,		% true => script files
+		 buf:       buf]		% everything else
+
+fname	= file_name
+ast	= array[stream]
+qst	= sequence[stream]
+
+buf	= oneof[read:	rbuf,			% read file
+		write:	wbuf,			% write/append file
+		tty:	tbuf,			% terminal
+		nul:	null,			% /dev/null
+		istr:	sbuf,			% string input stream
+		ostr:	ac,			% string output stream
+		closed: null]			% closed stream
+
+rbuf	= record[bvec:	_bytevec,		% input buffer
+		 index:	int,			% index of next char to read
+		 max:   int,			% index of last char to read
+		 line:  int,			% line number
+		 chan:	_chan]			% input _chan
+
+wbuf	= record[bvec:	_bytevec,		% output buffer
+		 index:	int,			% index of last char written
+		 obf:	bool,			% output buffered flag
+		 chan:	_chan]			% output _chan
+
+tbuf	= record[bvec:	 _bytevec,		% output buffer
+		 disp:   int,			% index of next char to display
+		 index:	 int,			% index of last char written
+		 ibf:	 bool,			% input buffered flag
+		 obf:	 bool,			% output buffered flag
+		 image:  bool,			% true => image buffer
+		 chan:	 _chan,			% input/output _chan
+		 echo:   bool,			% echo next rescan char
+		 rescan: ac,			% prefix input
+		 eof:    bool,			% forced eof
+		 eofok:  bool,			% can force eof
+		 line:   int,			% line number
+		 prompt: string,		% prompt
+		 edit:   bool,			% can edit
+		 llen:   int,			% line length
+		 plen:   int,			% page length
+	         back:   string,		% ^PB string
+		 kill:   string,		% ^PL string
+		 clear:  string]		% ^PC string
+
+sbuf	= record[chars:	string,			% chars
+		 index: int,			% index of next char to read
+		 line:  int,			% line number
+		 newln: char]			% '\n' => need newline at end
+
+ac	= array[char]
+
+_bvec_size	 = 8 * 512			% normal I/O buffer size
+_small_bvec_size = 4 * 512
+_tiny_bvec_size  = 2 * 512
+
+dels = "\^PB\^PB\^PB\^PB\^PB\^PB\^PB\^PB"
+
+own free: bool := false
+own freebuf: _bytevec				% unused buffer
+
+open = proc (fn: fname, mode: string) returns (stream)
+				      signals (not_possible(string))
+	_can_read: bool := mode = "read"
+	_can_write: bool := mode = "write"  cor  mode = "append"
+	if ~(_can_read  cor  _can_write)
+	   then signal not_possible("bad access mode") end
+	if fn.dir = "/dev"  cand
+	   string$empty(fn.suffix)  cand  string$empty(fn.other)
+	   then if fn.name = "p"
+		   then if _can_read
+			   then return(primary_input())
+			   else return(primary_output())
+			   end
+		elseif fn.name = "e"
+		   then if _can_write
+			   then return(error_output()) end
+			signal not_possible("cannot read from this stream")
+		elseif fn.name = "null"
+		   then st: stream := up(rep${name:      fn,
+					      scripts:   qst$new(),
+					      scripting: false,
+					      buf:       buf$make_nul(nil)})
+			ast$addh(open_streams(), st)
+			return(st)
+		elseif fn.name = "tty"
+		   then mode := "modify" end
+	   end
+	ch: _chan := _chan$open(fn, mode, 0)
+	   resignal not_possible
+	bvec: _bytevec
+	if free
+	   then bvec := freebuf
+		free := false
+	   else bvec := _bytevec$create(_bvec_size)
+	   end
+	b: buf
+	istty: bool := _chan$is_tty(ch)
+	if istty  cand  mode ~= "modify"
+	   then nch: _chan := _chan$open(fn, "modify", 0)
+		_chan$close(ch)
+		ch := nch
+	   end except when not_possible (*): istty := false end
+	if istty
+	   then tb: tbuf := tbuf${bvec:   bvec,
+				  disp:   1,
+				  index:  0,
+				  ibf:    true,
+				  obf:    true,
+				  image:  false,
+				  chan:   ch,
+				  rescan: ac$new(),
+				  echo:   false,
+				  eof:    false,
+				  eofok:  true,
+				  line:   1,
+				  prompt: "",
+				  edit:   false,
+				  llen:   0,
+				  plen:   0,
+				  back:   "",
+				  kill:   "",
+				  clear:  ""}
+		b := buf$make_tty(tb)
+		if mode = "modify"
+		   then termcap(tb, "") end
+	elseif _can_read
+	   then b := buf$make_read(rbuf${bvec:  bvec,
+					 index: 1,
+					 max:   0,
+					 line:  1,
+					 chan:  ch})
+	else b := buf$make_write(wbuf${bvec:  bvec,
+				       index: 0,
+				       obf:   true,
+				       chan:  ch})
+	end
+	st: stream := up(rep${name:      ch.name,
+			      scripts:   qst$new(),
+			      scripting: false,
+			      buf:       b})
+	ast$addh(open_streams(), st)
+	return(st)
+	end open
+
+open_streams = proc () returns (ast)
+	own list: ast := ast$new()
+	return(list)
+	end open_streams
+
+primary_input = proc () returns (stream)
+	own pri, pro: stream := get_prims()
+	return(pri)
+	end primary_input
+
+primary_output = proc () returns (stream)
+	own pri, pro: stream := get_prims()
+	return(pro)
+	end primary_output
+
+error_output = proc () returns (stream)
+	own init: bool := false
+	own ero: stream
+	if ~init
+	   then ch: _chan := _chan$error_output()
+		b: buf := buf$make_write
+			      (wbuf${bvec:  _bytevec$create(_small_bvec_size),
+				     index: 0,
+				     obf:   false,
+				     chan:  ch})
+		ero := up(rep${name:      ch.name,
+			       scripts:   qst$new(),
+			       scripting: false,
+			       buf:       b})
+		ast$addh(open_streams(), ero)
+		init := true
+	   end
+	return(ero)
+	end error_output
+
+get_prims = proc () returns (stream, stream)
+	own init: bool := false
+	own pri, pro: stream
+	if init
+	   then return(pri, pro) end
+	chi: _chan := _chan$primary_input()
+	cho: _chan := _chan$primary_output()
+	opens: ast := open_streams()
+	if chi = cho
+	   then tb: tbuf := tbuf${bvec:   _bytevec$create(_tiny_bvec_size),
+				  disp:   1,
+				  index:  0,
+				  ibf:    true,
+				  obf:    true,
+				  image:  false,
+				  chan:   chi,
+				  rescan: ac$new(),
+				  echo:   false,
+				  eof:    false,
+				  eofok:  true,
+				  line:   1,
+				  prompt: "",
+				  edit:   false,
+				  llen:   0,
+				  plen:   0,
+				  back:   "",
+				  kill:   "",
+				  clear:  ""}
+		pro := up(rep${name:      chi.name,
+			       scripts:   qst$new(),
+			       scripting: false,
+			       buf:       buf$make_tty(tb)})
+		pri := pro
+		ast$addh(opens, pro)
+		init := true
+		termcap(tb, "")
+		return(pri, pro)
+	   end
+	b: buf := buf$make_read(rbuf${bvec:  _bytevec$create(_small_bvec_size),
+				      index: 1,
+				      max:   0,
+				      line:  1,
+				      chan:  chi})
+	pri := up(rep${name:      chi.name,
+		       scripts:   qst$new(),
+		       scripting: false,
+		       buf:       b})
+	b := buf$make_write(wbuf${bvec:  _bytevec$create(_small_bvec_size),
+				  index: 0,
+				  obf:   true,
+				  chan:  cho})
+	pro := up(rep${name:      cho.name,
+		       scripts:   qst$new(),
+		       scripting: false,
+		       buf:       b})
+	ast$addh(opens, pri)
+	ast$addh(opens, pro)
+	init := true
+	return(pri, pro)
+	end get_prims
+
+termcap = proc (b: tbuf, term: string)
+	if string$empty(term)
+	   then term := _get_termcap()
+		   except when not_found: return end
+	   end
+	b.llen := int$parse(_termcap(term, ":co#", 0, 0))
+	    except when not_found, bad_format, overflow: b.llen := 0 end
+	b.plen := int$parse(_termcap(term, ":li#", 0, 0))
+	    except when not_found, bad_format, overflow: b.llen := 0 end
+	if string$indexs(":hc:", term) > 0
+	   then return end
+	ibaud, obaud: int := _chan$get_speeds(b.chan)
+	   except when not_possible (*): obaud := 9600 end
+	if string$indexs(":bs:", term) > 0
+	   then b.back := "\^H"
+	   else b.back := _termcap(term, ":bc=", 0, 0)
+	   end except when not_found:
+		b.back := _termcap(term, ":kb=", 0, 0)
+	   	end except when not_found: end
+	b.kill := _termcap(term, ":ce=", 1, obaud)
+	   except when not_found:
+			if ~string$empty(b.back)  cand
+			   (string$indexs(":os:", term) = 0  cor
+			    string$indexs(":eo:", term) > 0)
+			   then b.back := string$append(b.back, ' ') || b.back
+			   end
+		  end
+	b.clear := _termcap(term, ":cl=", b.plen, obaud)
+	   except when not_found: end
+	if string$empty(b.back)  cand
+	   string$empty(b.kill)  cand
+	   string$empty(b.clear)
+	   then b.kill := "\n"
+		b.clear := "\n"
+	   else b.edit := true
+	   end
+	end termcap
+
+add_script = proc (st1, st2: cvt) signals (script_failed)
+	tagcase st2.buf
+	   tag read, istr, closed:
+		signal script_failed
+	   others:
+		for scr: rep in all_scripts(st2) do
+			if st1 = scr
+			   then signal script_failed end
+			end
+		for scr: rep in all_scripts(st1) do
+			if st2 = scr
+			   then signal script_failed end
+			end
+		st1.scripts := qst$addh(st1.scripts, up(st2))
+		st1.scripting := true
+	   end
+	end add_script
+
+all_scripts = iter (st: rep) yields (rep)
+	yield(st)
+	for scr1: stream in qst$elements(st.scripts) do
+		for scr2: rep in all_scripts(down(scr1)) do
+			yield(scr2)
+			end
+		end
+	end all_scripts
+
+scripts = iter (st: cvt) yields ( stream )
+	for scr: stream in qst$elements(st.scripts) do
+	    yield(scr)
+	    end
+	end scripts
+
+rem_script = proc (st1: cvt, st2: stream)
+	scrs: qst := st1.scripts
+	for i: int in qst$indexes(scrs) do
+		if scrs[i] = st2
+		   then st1.scripts := qst$subseq(scrs, 1, i - 1) ||
+				       qst$subseq(scrs, i + 1, qst$size(scrs))
+			st1.scripting := ~qst$empty(st1.scripts)
+			return
+		   end
+		end
+	end rem_script
+
+unscript = proc (st: cvt)
+	st.scripts := qst$new()
+	st.scripting := false
+	end unscript
+
+can_read = proc (st: cvt) returns (bool)
+	tagcase st.buf
+	   tag write, ostr, closed:
+		return(false)
+	   others:
+		return(true)
+	   end
+	end can_read
+
+can_write = proc (st: cvt) returns (bool)
+	tagcase st.buf
+	   tag read, istr, closed:
+		return(false)
+	   others:
+		return(true)
+	   end
+	end can_write
+
+getc = proc (st: cvt) returns (char)
+		      signals (end_of_file, not_possible(string))
+	c: char
+	tagcase st.buf
+	   tag read (rb: rbuf):
+		index: int := rb.index
+		if index > rb.max
+		   then rb.max := _chan$getb(rb.chan, rb.bvec)
+			index := 1
+		   end
+		c := rb.bvec[index]
+		if c = '\n'
+		   then rb.line := rb.line + 1 end
+		rb.index := index + 1
+	   tag tty (tb: tbuf):
+		flush(up(st))
+		c := tty_get1(tb, false)
+		tty_put1(tb, c)
+	   tag istr (sb: sbuf):
+		c := sb.chars[sb.index]
+		    except when bounds:
+				 c := sb.newln
+				 if c = ' '
+				    then signal end_of_file end
+				 sb.newln := ' '
+			   end
+		sb.index := sb.index + 1
+		if c = '\n'
+		   then sb.line := sb.line + 1 end
+	   tag nul:
+		signal end_of_file
+	   tag write, ostr, closed:
+		signal not_possible("cannot read from this stream")
+	   end resignal end_of_file, not_possible
+	if st.scripting
+	   then script(st, string$c2s(c), false) end
+	return(c)
+	end getc
+
+getc_image = proc (st: cvt) returns (char)
+			       signals (end_of_file, not_possible(string))
+	c: char
+	tagcase st.buf
+	   tag read (rb: rbuf):
+		index: int := rb.index
+		if index > rb.max
+		   then rb.max := _chan$getb(rb.chan, rb.bvec)
+			index := 1
+		   end
+		c := rb.bvec[index]
+		if c = '\n'
+		   then rb.line := rb.line + 1 end
+		rb.index := index + 1
+	   tag tty (tb: tbuf):
+		flush(up(st))
+		c := tty_get1(tb, true)
+	   tag istr (sb: sbuf):
+		c := sb.chars[sb.index]
+		    except when bounds:
+				 c := sb.newln
+				 if c = ' '
+				    then signal end_of_file end
+				 sb.newln := ' '
+			   end
+		sb.index := sb.index + 1
+		if c = '\n'
+		   then sb.line := sb.line + 1 end
+	   tag nul:
+		signal end_of_file
+	   tag write, ostr, closed:
+		signal not_possible("cannot read from this stream")
+	   end resignal end_of_file, not_possible
+	if st.scripting
+	   then script(st, string$c2s(c), true) end
+	return(c)
+	end getc_image
+
+peekc = proc (st: cvt) returns (char)
+		       signals (end_of_file, not_possible(string))
+	tagcase st.buf
+	   tag read (rb: rbuf):
+		index: int := rb.index
+		if index > rb.max
+		   then rb.max := _chan$getb(rb.chan, rb.bvec)
+			rb.index := 1
+			index := 1
+		   end
+		return(rb.bvec[index])
+	   tag tty (tb: tbuf):
+		flush(up(st))
+		if tb.eof  cand  tb.eofok
+		   then signal end_of_file end
+		if ac$empty(tb.rescan)
+		   then c: char := _chan$getc(tb.chan, true)
+			if c = '\^D'  cand  tb.eofok
+			   then tb.eof := true
+				signal end_of_file
+			   end
+			ac$addh(tb.rescan, c)
+			tb.echo := true
+		   end
+		return(ac$bottom(tb.rescan))
+	   tag istr (sb: sbuf):
+		return(sb.chars[sb.index])
+		    except when bounds:
+				 if sb.newln = ' '
+				    then signal end_of_file end
+				 return('\n')
+			   end
+	   tag nul:
+		signal end_of_file
+	   tag write, ostr, closed:
+		signal not_possible("cannot read from this stream")
+	   end resignal end_of_file, not_possible
+	end peekc
+
+pending = proc (st: cvt) returns (bool) signals (not_possible(string))
+	tagcase st.buf
+	   tag tty (tb: tbuf):
+		return(~(tb.eof  cand  tb.eofok)  cand
+		       (~ac$empty(tb.rescan)  cor
+			_chan$pending(tb.chan, false)))
+	   others:
+		return(~empty(up(st)))
+	   end resignal not_possible
+	end pending
+
+empty = proc (st: cvt) returns (bool) signals (not_possible(string))
+	tagcase st.buf
+	   tag read (rb: rbuf):
+		if rb.index > rb.max
+		   then rb.max := _chan$getb(rb.chan, rb.bvec)
+			rb.index := 1
+		   end
+		return(false)
+	   tag tty (tb: tbuf):
+		if ~tb.eofok
+		   then return(false) end
+		peekc(up(st))
+		return(false)
+	   tag istr (sb: sbuf):
+		return(sb.index > string$size(sb.chars)  cand  sb.newln = ' ')
+	   tag nul:
+		return(true)
+	   tag write, ostr, closed:
+		signal not_possible("cannot read from this stream")
+	   end resignal not_possible
+	       except when end_of_file: return(true) end
+	end empty
+
+putc = proc (st: cvt, c: char) signals (not_possible(string))
+	tagcase st.buf
+	   tag write (wb: wbuf):
+		if wb.obf
+		   then low, index: int := _chan$put(wb.chan, wb.bvec,
+						     1, wb.index,
+						     string$c2s(c), false)
+			wb.index := index
+		   else _chan$putc(wb.chan, c, false)
+		   end
+	   tag tty (tb: tbuf):
+		tty_put(tb, string$c2s(c), false)
+	   tag ostr (chars: ac):
+		ac$addh(chars, c)
+	   tag nul:
+	   tag read, istr, closed:
+		signal not_possible("cannot write to this stream")
+	   end resignal not_possible
+	if st.scripting
+	   then script(st, string$c2s(c), false) end
+	end putc
+
+putc_image = proc (st: cvt, c: char) signals (not_possible(string))
+	tagcase st.buf
+	   tag write (wb: wbuf):
+		if wb.obf
+		   then low, index: int := _chan$put(wb.chan, wb.bvec,
+						     1, wb.index,
+						     string$c2s(c), true)
+			wb.index := index
+		   else _chan$putc(wb.chan, c, true)
+		   end
+	   tag tty (tb: tbuf):
+		tty_put(tb, string$c2s(c), true)
+	   tag ostr (chars: ac):
+		ac$addh(chars, c)
+	   tag nul:
+	   tag read, istr, closed:
+		signal not_possible("cannot write to this stream")
+	   end resignal not_possible
+	if st.scripting
+	   then script(st, string$c2s(c), true) end
+	end putc_image
+
+get_lineno = proc (st: cvt) returns (int) signals (not_possible(string))
+	tagcase st.buf
+	   tag read (rb: rbuf):
+		return(rb.line)
+	   tag tty (tb: tbuf):
+		return(tb.line)
+	   tag istr (sb: sbuf):
+		return(sb.line)
+	   others:
+		signal not_possible("no line numbers")
+	   end
+	end get_lineno
+
+set_lineno = proc (st: cvt, ln: int) signals (not_possible(string))
+	end set_lineno
+
+reset = proc (st: cvt) signals (not_possible(string))
+	tagcase st.buf
+	   tag read (rb: rbuf):
+		_chan$reset(rb.chan)
+		rb.line := 1
+		rb.index := rb.max + 1
+	   tag write (wb: wbuf):
+		_chan$reset(wb.chan)
+		wb.index := 0
+	   tag tty (tb: tbuf):
+		_chan$reset(tb.chan)
+		if tb.disp > 1  cor  tb.eof
+		   then _chan$putc(tb.chan, '\n', false)
+			    except when not_possible (*): end
+		   end
+		tb.disp := 1
+		tb.index := 0
+		tb.rescan.low := 1
+		ac$trim(tb.rescan, 1, 0)
+		tb.echo := false
+		tb.eof := false
+		tb.line := 1
+	   tag istr (sb: sbuf):
+		sb.index := 1
+		sb.line := 1
+		sb.newln := ' '
+		if sb.chars[string$size(sb.chars)] ~= '\n'
+		   then sb.newln := '\n'
+		   end except when bounds: end
+	   tag ostr (chars: ac):
+		ac$trim(chars, 1, 0)
+	   tag nul, closed:
+	   end resignal not_possible
+	end reset
+
+flush = proc (st: cvt) signals (not_possible(string))
+	tagcase st.buf
+	   tag write (wb: wbuf):
+		_chan$putb(wb.chan, wb.bvec, 1, wb.index, false)
+		wb.index := 0
+	   tag tty (tb: tbuf):
+		_chan$putb(tb.chan, tb.bvec, tb.disp, tb.index, tb.image)
+		tb.disp := tb.index + 1
+		tb.image := false
+	   tag read, istr, ostr, nul:
+	   tag closed:
+		return
+	   end resignal not_possible
+	if st.scripting
+	   then for scr: stream in qst$elements(st.scripts) do
+			flush(scr)
+			end resignal not_possible
+	   end
+	end flush
+
+get_line_length = proc (st: cvt) returns (int) signals (no_limit)
+	tagcase st.buf
+	   tag tty (tb: tbuf):
+		if tb.llen > 0
+		   then return(tb.llen) end
+	   others:
+	   end
+	signal no_limit
+	end get_line_length
+
+get_page_length = proc (st: cvt) returns (int) signals (no_limit)
+	tagcase st.buf
+	   tag tty (tb: tbuf):
+		if tb.plen > 0
+		   then return(tb.plen) end
+	   others:
+	   end
+	signal no_limit
+	end get_page_length
+
+get_date = proc (st: cvt) returns (date) signals (not_possible(string))
+	tagcase st.buf
+	   tag read (rb: rbuf):
+		return(rb.chan.date)
+	   tag write (wb: wbuf):
+		return(wb.chan.date)
+	   others:
+		signal not_possible("cannot get date")
+	   end resignal not_possible
+	end get_date
+
+set_date = proc (st: cvt, ndate: date) signals (not_possible(string))
+	signal not_possible("cannot set date")
+	end set_date
+
+get_name = proc (st: cvt) returns (fname) signals (not_possible(string))
+	tagcase st.buf
+	   tag istr, ostr:
+		signal not_possible("no name for string stream")
+	   others:
+		return(st.name)
+	   end
+	end get_name
+
+close = proc (st: cvt) signals (not_possible(string))
+	flush(up(st))
+	    resignal not_possible
+	tagcase st.buf
+	   tag read (rb: rbuf):
+		_chan$close(rb.chan)
+		freebuf := rb.bvec
+		free := true
+	   tag write (wb: wbuf):
+		_chan$close(wb.chan)
+		freebuf := wb.bvec
+		free := true
+	   tag tty (tb: tbuf):
+		_chan$close(tb.chan)
+		freebuf := tb.bvec
+		free := true
+	   tag nul, istr, ostr:
+	   tag closed:
+		return
+	   end resignal not_possible
+	       except when permanent: return end
+	st.buf := buf$make_closed(nil)
+	st.scripts := qst$new()
+	st.scripting := false
+	opens: ast := open_streams()
+	for i: int in ast$indexes(opens) do
+		if st = down(opens[i])
+		   then opens[i] := ast$remh(opens)
+			    except when bounds: end
+			return
+		   end
+		end
+	end close
+
+abort = proc (st: cvt)
+	tagcase st.buf
+	   tag read (rb: rbuf):
+		_chan$abort(rb.chan)
+		freebuf := rb.bvec
+		free := true
+	   tag write (wb: wbuf):
+		_chan$abort(wb.chan)
+		freebuf := wb.bvec
+		free := true
+	   tag tty (tb: tbuf):
+		_chan$abort(tb.chan)
+		freebuf := tb.bvec
+		free := true
+	   tag nul, istr, ostr:
+	   tag closed:
+		return
+	   end except when permanent, not_possible (*): return end
+	st.buf := buf$make_closed(nil)
+	st.scripts := qst$new()
+	st.scripting := false
+	opens: ast := open_streams()
+	for i: int in ast$indexes(opens) do
+		if st = down(opens[i])
+		   then opens[i] := ast$remh(opens)
+			    except when bounds: end
+			return
+		   end
+		end
+	end abort
+
+is_closed = proc (st: cvt) returns (bool)
+	return(buf$is_closed(st.buf))
+	end is_closed
+
+is_terminal = proc (st: cvt) returns (bool)
+	return(buf$is_tty(st.buf))
+	end is_terminal
+
+getl = proc (st: cvt) returns (string)
+		      signals (end_of_file, not_possible(string))
+	line: string := gets(up(st), "\n")
+	   resignal end_of_file, not_possible
+	tagcase st.buf
+	   tag read (rb: rbuf):
+		index: int := rb.index
+		if index > rb.max
+		   then return(line) end
+		rb.line := rb.line + 1
+		rb.index := index + 1
+	   tag tty (tb: tbuf):
+		ac$reml(tb.rescan)
+		    except when bounds: return(line) end
+		if tb.echo
+		   then tb.echo := false
+			_chan$putc(tb.chan, '\n', false)
+		   end except when not_possible (*): end
+		tb.index := 0
+		tb.disp := 1
+	   tag istr (sb: sbuf):
+		index: int := sb.index
+		if index > string$size(sb.chars)
+		   then sb.newln := ' '
+			return(line)
+		   end
+		sb.index := index + 1
+		sb.line := sb.line + 1
+	   others:
+	   end
+	if st.scripting
+	   then script(st, "\n", false) end
+	return(line)
+	end getl
+
+putl = proc (st: stream, line: string) signals (not_possible(string))
+	begin
+	puts(st, line)
+	putc(st, '\n')
+	end resignal not_possible
+	end putl
+
+gets = proc (st: cvt, term: string) returns (string)
+				    signals (end_of_file, not_possible(string))
+	s: string
+	tagcase st.buf
+	   tag read (rb: rbuf):
+		index, max: int
+		s, index, max := _chan$get(rb.chan, rb.bvec,
+					   rb.index, rb.max, term, false)
+		rb.index := index
+		rb.max := max
+		if string$indexc('\n', term) = 0
+		   then i: int := string$indexc('\n', s)
+			if i > 0
+			   then rb.line := rb.line + lines(s, i) end
+		   end
+	   tag tty (tb: tbuf):
+		flush(up(st))
+		if tb.ibf
+		   then if st.scripting  cand  (tb.index = 0  cor  tb.image)
+			   then script(st, tb.prompt, false) end
+			s := edit(tb, term)
+		   else s := tty_get(tb, term, false)
+		   end
+	   tag istr (sb: sbuf):
+		s := str_get(sb, term)
+	   tag nul:
+		signal end_of_file
+	   tag write, ostr, closed:
+		signal not_possible("cannot read from this stream")
+	   end resignal end_of_file, not_possible
+	if st.scripting
+	   then script(st, s, false) end
+	return(s)
+	end gets
+
+gets_image = proc (st: cvt, term: string) returns (string)
+				    signals (end_of_file, not_possible(string))
+	s: string
+	tagcase st.buf
+	   tag read (rb: rbuf):
+		index, max: int
+		s, index, max := _chan$get(rb.chan, rb.bvec,
+					   rb.index, rb.max, term, true)
+		rb.index := index
+		rb.max := max
+		if string$indexc('\n', term) = 0
+		   then i: int := string$indexc('\n', s)
+			if i > 0
+			   then rb.line := rb.line + lines(s, i) end
+		   end
+	   tag tty (tb: tbuf):
+		flush(up(st))
+		s := tty_get(tb, term, true)
+	   tag istr (sb: sbuf):
+		s := str_get(sb, term)
+	   tag nul:
+		signal end_of_file
+	   tag write, ostr, closed:
+		signal not_possible("cannot read from this stream")
+	   end resignal end_of_file, not_possible
+	if st.scripting
+	   then script(st, s, true) end
+	return(s)
+	end gets_image 
+
+tty_get1 = proc (tb: tbuf, image: bool) returns (char)
+				signals (end_of_file, not_possible(string))
+	if tb.eof  cand  tb.eofok
+	   then signal end_of_file end
+	c: char
+	if ~ac$empty(tb.rescan)
+	   then c := ac$reml(tb.rescan)
+		if tb.echo  cand  ~image
+		   then echo(tb.chan, c) end
+		tb.echo := false
+	   else c := _chan$getc(tb.chan, image)
+	   end
+	   resignal not_possible
+	   except when end_of_file:
+		       tb.eof := true
+		       signal end_of_file
+		  end
+	if c = '\n'
+	   then tb.line := tb.line + 1
+		return(c)
+	elseif ~(c = '\^D'  cand  tb.eofok)
+	   then return(c) end
+	tb.eof := true
+	signal end_of_file
+	end tty_get1
+
+tty_get = proc (tb: tbuf, term: string, image: bool) returns (string)
+			      signals (end_of_file, not_possible(string))
+	own tmp: ac := ac$new()
+	own inuse: bool := false
+	temp: ac := tmp
+	used: bool := inuse
+	inuse := true
+	if used
+	   then temp := ac$new()
+	   else ac$trim(temp, 1, 0)
+	   end
+	while true do
+		c: char := tty_get1(tb, image)
+		if string$indexc(c, term) > 0
+		   then ac$addl(tb.rescan, c)
+			break
+		   end
+		if ~image
+		   then tty_put1(tb, c) end
+		ac$addh(temp, c)
+		end
+	    resignal not_possible
+	    except when end_of_file: if ac$empty(temp)
+					then inuse := used
+					     signal end_of_file
+					end
+		   end
+	s: string := string$ac2s(temp)
+	ac$trim(temp, 1, 0)
+	inuse := used
+	return(s)
+	end tty_get
+
+str_get = proc (sb: sbuf, term: string) returns (string) signals (end_of_file)
+	first: int := sb.index
+	chars: string := sb.chars
+	last: int := first
+	while true do
+		if string$indexc(chars[last], term) > 0
+		   then sb.index := last
+			return(string$substr(chars, first, last - first))
+		elseif chars[last] = '\n'
+		   then sb.line := sb.line + 1 end
+		last := last + 1
+		end
+	    except when bounds: end
+	if first = last
+	   then if sb.newln = ' '
+		   then signal end_of_file end
+		if string$indexc('\n', term) > 0
+		   then return("") end
+		sb.newln := ' '
+		sb.line := sb.line + 1
+		return("\n")
+	   end
+	sb.index := last
+	s: string := string$rest(chars, first)
+	if string$indexc('\n', term) = 0
+	   then sb.newln := ' '
+		sb.line := sb.line + 1
+		s := string$append(s, '\n')
+	   end
+	return(s)
+	end str_get
+
+puts = proc (st: cvt, s: string) signals (not_possible(string))
+	tagcase st.buf
+	   tag write (wb: wbuf):
+		low, index: int := _chan$put(wb.chan, wb.bvec, 1, wb.index,
+					     s, false)
+		if ~wb.obf
+		   then _chan$putb(wb.chan, wb.bvec, 1, index, false)
+			index := 0
+		   end
+		wb.index := index
+	   tag tty (tb: tbuf):
+		tty_put(tb, s, false)
+	   tag ostr (chars: ac):
+		for c: char in string$chars(s) do
+			ac$addh(chars, c)
+			end
+	   tag nul:
+	   tag read, istr, closed:
+		signal not_possible("cannot write to this stream")
+	   end resignal not_possible
+	if st.scripting
+	   then script(st, s, false) end
+	end puts
+
+puts_image = proc (st: cvt, s: string) signals (not_possible(string))
+	tagcase st.buf
+	   tag write (wb: wbuf):
+		if wb.obf
+		   then low, index: int := _chan$put(wb.chan, wb.bvec,
+						     1, wb.index, s, true)
+			wb.index := index
+		   else _chan$puts(wb.chan, s, true)
+		   end
+	   tag tty (tb: tbuf):
+		tty_put(tb, s, true)
+	   tag ostr (chars: ac):
+		for c: char in string$chars(s) do
+			ac$addh(chars, c)
+			end
+	   tag nul:
+	   tag read, istr, closed:
+		signal not_possible("cannot write to this stream")
+	   end resignal not_possible
+	if st.scripting
+	   then script(st, s, true) end
+	end puts_image
+
+tty_put1 = proc (tb: tbuf, c: char)
+	if c = '\n'
+	   then tb.index := 0
+		tb.disp := 1
+	   else tb.index := tb.index + 1
+		tb.bvec[tb.index] := c
+		tb.disp := tb.index + 1
+	   end except when bounds: tb.index := tb.index - 1 end
+	end tty_put1
+
+tty_put = proc (tb: tbuf, s: string, image: bool)
+					signals (not_possible(string))
+	if image ~= tb.image
+	   then _chan$putb(tb.chan, tb.bvec, tb.disp, tb.index, tb.image)
+		tb.disp := tb.index + 1
+		tb.image := image
+	   end
+	disp, index: int := _chan$put(tb.chan, tb.bvec, tb.disp, tb.index,
+				      s, image)
+	    resignal not_possible
+	tb.index := index
+	if ~tb.obf
+	   then _chan$putb(tb.chan, tb.bvec, disp, index, image)
+		disp := index + 1
+	   end
+	tb.disp := disp
+	end tty_put
+
+putzero = proc (st: stream, s: string, size: int)
+			signals (negative_field_width, not_possible(string))
+	if size < 0
+	   then signal negative_field_width end
+	not_inserted: bool := true
+	diff: int := size - string$size(s)
+	for c: char in string$chars(s) do
+		if not_inserted  cand
+		   (c = '.'  cor  (c >= '0'  cand  c <= '9'))
+		   then not_inserted := false
+			while diff > 0 do
+				putc(st, '0')
+				diff := diff - 1
+				end
+		   end
+		putc(st, c)
+		end
+	   resignal not_possible
+	if not_inserted
+	   then while diff > 0 do
+			putc(st, '0')
+			diff := diff - 1
+			end
+		    resignal not_possible
+	   end
+	end putzero
+
+putleft = proc (st: stream, s: string, size: int)
+			signals (negative_field_width, not_possible(string))
+	if size < 0
+	   then signal negative_field_width end
+	diff: int := size - string$size(s)
+	begin
+	puts(st, s)
+	if diff > 0
+	   then putspace(st, diff) end
+	end resignal not_possible
+	end putleft
+
+putright = proc (st: stream, s: string, size: int)
+			signals (negative_field_width, not_possible(string))
+	if size < 0
+	   then signal negative_field_width end
+	diff: int := size - string$size(s)
+	begin
+	if diff > 0
+	   then putspace(st, diff) end
+	puts(st, s)
+	end resignal not_possible
+	end putright
+
+putspace = proc (st: stream, len: int)
+			signals (negative_field_width, not_possible(string))
+	if len < 0
+	   then signal negative_field_width end
+	while len > 0 do
+		putc(st, ' ')
+		len := len - 1
+		end
+	   resignal not_possible
+	end putspace
+
+create_input = proc (s: string) returns (cvt)
+	newln: char := ' '
+	if s[string$size(s)] ~= '\n'
+	   then newln := '\n'
+	   end except when bounds: end
+	return(rep${name:      fname$parse(""),
+		    scripts:   qst$new(),
+		    scripting: false,
+		    buf:       buf$make_istr(sbuf${chars: s,
+						   index: 1,
+						   line:  1,
+						   newln: newln})})
+	end create_input
+
+create_output = proc () returns (cvt)
+	return(rep${name:      fname$parse(""),
+		    scripts:   qst$new(),
+		    scripting: false,
+		    buf:       buf$make_ostr(ac$new())})
+	end create_output
+
+get_contents = proc (st: cvt) returns (string) signals (not_possible(string))
+	tagcase st.buf
+	   tag ostr (chars: ac):
+		return(string$ac2s(chars))
+	   others:
+		signal not_possible("not a string output stream")
+	   end
+	end get_contents
+
+getbuf = proc (st: cvt, term: string) returns (string)
+				signals (end_of_file, not_possible(string))
+	s: string
+	tagcase st.buf
+	   tag read (rb: rbuf):
+		index, max: int
+		s, index, max := _chan$get(rb.chan, rb.bvec,
+					   rb.index, rb.max, term, false)
+		rb.index := index
+		rb.max := max
+		if string$indexc('\n', term) = 0
+		   then i: int := string$indexc('\n', s)
+			if i > 0
+			   then rb.line := rb.line + lines(s, i) end
+		   end
+	   tag tty (tb: tbuf):
+		flush(up(st))
+		if st.scripting  cand  (tb.index = 0  cor  tb.image)
+		   then script(st, tb.prompt, false) end
+		s := edit(tb, term)
+	   tag istr (sb: sbuf):
+		s := str_get(sb, term)
+	   tag nul:
+		signal end_of_file
+	   tag write, ostr, closed:
+		signal not_possible("cannot read from this stream")
+	   end resignal end_of_file, not_possible
+	if st.scripting
+	   then script(st, s, false) end
+	return(s)
+	end getbuf
+
+lines = proc (s: string, i: int) returns (int)
+	cnt: int := 0
+	while i > 0 do
+		cnt := cnt + 1
+		i := _bytevec$indexc('\n', _cvt[string, _bytevec](s), i + 1)
+		end
+	return(cnt)
+	end lines
+
+script = proc (st: rep, s: string, image: bool)
+	for scr: stream in qst$elements(st.scripts) do
+		if image
+		   then stream$puts_image(scr, s)
+		   else stream$puts(scr, s)
+		   end except when not_possible (*): end
+		end
+	end script
+
+edit = proc (tb: tbuf, term: string) returns (string)
+				signals (end_of_file, not_possible(string))
+	if tb.eof  cand  tb.eofok
+	   then signal end_of_file end
+	_event$defer()
+	ch: _chan := tb.chan
+	bvec: _bytevec := tb.bvec
+	redisp: int
+	if tb.index = 0  cor  tb.image
+	   then tb.index := string$size(tb.prompt)
+		_bytevec$move_lr(_cvt[string, _bytevec](tb.prompt), 1,
+				 bvec, 1, tb.index)
+		redisp := 1
+	   else _chan$putb(ch, bvec, tb.disp, tb.index, false)
+		redisp := 0
+	   end
+	tb.disp := tb.index
+	c: char
+	while true do
+		if redisp ~= 0
+		   then if redisp < 0
+			   then redisp := tb.disp
+ 				while true do
+					c := bvec[redisp]
+					if c = '\^\'  cor  c = '\n'
+					   then break end
+					redisp := redisp - 1
+					end except when bounds: end
+			   else redisp := 0
+			   end
+			while redisp < tb.disp do
+				redisp := redisp + 1
+				c := bvec[redisp]
+				echo(ch, c)
+				if c = '\^\'
+				   then _chan$putc(ch, '\n', false) end
+				end
+			redisp := 0
+		   end
+		doecho: bool
+		if ~ac$empty(tb.rescan)
+		   then c := ac$reml(tb.rescan)
+			doecho := tb.echo
+			tb.echo := false
+		   else c := _chan$getc(ch, true)
+			doecho := true
+		   end
+		if c = '\n'
+		   then tb.line := tb.line + 1 end
+		if string$indexc(c, term) > 0
+		   then tb.echo := doecho
+			ac$addl(tb.rescan, c)
+			break
+		elseif c = '\177'
+		   then % rubout one character
+			redisp := rubout(tb)
+		elseif c = '\^D'  cand  tb.eofok
+		   then if doecho
+			   then echo(ch, c) end
+			exit end_of_file
+		elseif c = '\^X'
+		   then % forget the line
+			tb.disp := tb.index
+			_chan$putc(ch, '\n', false)
+			redisp := 1
+		elseif c = '\^L'
+		   then % clear screen & redisplay the line
+			_chan$puts(tb.chan, tb.clear, false)
+			redisp := 1
+		elseif c = '\^R'
+		   then % redisplay the line
+			_chan$putc(ch, '\n', false)
+			redisp := 1
+		elseif c = '\^U'
+		   then % erase line
+			redisp := erase(tb, true)
+		elseif c = '\^W'
+		   then % erase word
+			redisp := erase(tb, false)
+		else if doecho
+			then echo(ch, c) end
+		     if c = '\^\'
+			then _chan$putc(ch, '\n', false) end
+		     tb.disp := tb.disp + 1
+		     bvec[tb.disp] := c
+		end
+		end
+	    resignal not_possible
+	    except when end_of_file:
+			tb.eof := true
+			if tb.disp = tb.index
+			   then tb.disp := tb.index + 1
+				signal end_of_file
+			   end
+		   end
+	s: string := ""
+	nl: int := 0
+	lag: int := tb.index + 1
+	max: int := tb.disp + 1
+	bvec[max] := '\^\'
+	for i: int in int$from_to(lag, max) do
+		c := bvec[i]
+		if c = '\^\'
+		   then s := s || string$substr(_cvt[_bytevec, string](bvec),
+						lag, i - lag)
+			lag := i + 1
+			if lag < max
+			   then nl := lag end
+		elseif c = '\n'
+		   then nl := i + 1 end
+		end
+	if nl > 0
+	   then tb.index := max - nl
+		_bytevec$move_lr(bvec, nl, bvec, 1, tb.index)
+		tb.disp := tb.index + 1
+	   else tb.index := tb.disp
+		tb.disp := max
+	   end
+	_event$undefer()
+	return(s)
+	end edit
+
+echo = proc (ch: _chan, c: char) signals (not_possible(string))
+	if c >= '\177'
+	   then if c = '\177'
+		   then _chan$puts(ch, "^?", false)
+		elseif char$c2i(c) < 160  cor
+		       char$c2i(c) = 255
+		   then _chan$putc(ch, '!', false)
+			_chan$puti(ch, (char$c2i(c) - 64) // 128, false)
+		else _chan$putc(ch, '&', false)
+		     _chan$puti(ch, char$c2i(c) - 128, false)
+		end
+	elseif c >= ' '  cor  c = '\n'  cor  c = '\t'
+	   then _chan$putc(ch, c, false)
+	else _chan$putc(ch, '^', false)
+	     _chan$puti(ch, char$c2i(c) + 64, false)
+	end resignal not_possible
+	end echo
+
+rubout = proc (tb: tbuf) returns (int)
+	if tb.disp <= tb.index
+	   then return(0) end
+	c: char := tb.bvec[tb.disp]
+	tb.disp := tb.disp - 1
+	if ~tb.edit
+	   then if c = '\^\'  cor  c = '\n'
+		   then _chan$putc(tb.chan, '\n', false)
+			return(-1)
+		   end
+		_chan$putc(tb.chan, '\\', false)
+		_chan$putc(tb.chan, c, false)
+		return(0)
+	   end
+	cnt: int
+	if c >= ' '  cand  c < '\177'
+	   then cnt := 1
+	elseif c = '\t'
+	   then cnt := 8 - (calc_pos(tb) // 8)
+	elseif c = '\^\'  cor  c = '\n'
+	   then return(-1)
+	else cnt := 2 end
+	for i: int in int$from_to_by(cnt, 1, -1) do
+		_chan$puts(tb.chan, tb.back, false)
+		end
+	_chan$puts(tb.chan, tb.kill, false)
+	return(0)
+	end rubout
+
+erase = proc (tb: tbuf, all: bool) returns (int)
+	if tb.disp <= tb.index
+	   then return(0) end
+	redisp: int := 0
+	pre: int := calc_pos(tb)
+	post: int
+	if all
+	   then post := _bytevec$indexc('\^\', tb.bvec, tb.index + 1)
+		if post = 0
+		   then post := _bytevec$indexc('\n', tb.bvec, tb.index + 1)
+		   end
+		if post > 0  cand  post <= tb.disp
+		   then _chan$putc(tb.chan, '\n', false)
+			tb.disp := tb.index
+			return(-1)
+		   end
+		tb.disp := tb.index
+		post := calc_pos(tb)
+	   else while tb.disp > tb.index do
+			c: char := tb.bvec[tb.disp]
+			if c = '\^\'
+			   then redisp := -1
+				tb.disp := tb.disp - 1
+				continue
+			elseif c = '\n'
+			   then redisp := -1 end
+			wchar: bool :=	(c >= 'a'  cand  c <= 'z')  cor
+					(c >= '0'  cand  c <= '9')  cor
+					(c >= 'A'  cand  c <= 'Z')  cor
+					(c = '_')
+			if ~all
+			   then all := wchar
+			elseif ~wchar
+			   then break end
+			tb.disp := tb.disp - 1
+			end
+		if redisp < 0
+		   then post := 0
+		   else post := calc_pos(tb)
+		   end
+	   end
+	if ~tb.edit
+	   then _chan$putc(tb.chan, '\n', false)
+		return(-1)
+	   end
+	for i: int in int$from_to_by(pre - post, 1, -1) do
+		_chan$puts(tb.chan, tb.back, false)
+		end
+	_chan$puts(tb.chan, tb.kill, false)
+	return(redisp)
+	end erase
+
+calc_pos = proc (tb: tbuf) returns (int)
+	pos: int := 0
+	for i: int in int$from_to(1, tb.disp) do
+		c: char := tb.bvec[i]
+		if c >= ' '  cand  c < '\177'
+		   then pos := pos + 1
+		elseif c = '\t'
+		   then pos := pos + 8 - (pos // 8)
+		elseif c = '\^\'  cor  c = '\n'
+		   then pos := 0
+		else pos := pos + 2 end
+		end
+	return(pos)
+	end calc_pos
+
+display = proc (st: cvt, s: string) returns (bool)
+				    signals (not_possible(string))
+	tagcase st.buf
+	   tag tty (tb: tbuf):
+		flush(up(st))
+		return(ttydsp(tb, s))
+	   tag write, nul, ostr:
+		return(false)
+	   tag read, istr, closed:
+		signal not_possible("cannot write to this stream")
+	   end resignal not_possible
+	end display
+
+modify_display = proc (st: cvt, term: string) signals (not_possible(string))
+	tagcase st.buf
+	   tag tty (tb: tbuf):
+		tb.edit := false
+		tb.back := ""
+		tb.kill := ""
+		tb.clear := ""
+		termcap(tb, term)
+	   others:
+		signal not_possible("not a terminal stream")
+	   end
+	end modify_display
+
+ttydsp = proc (tb: tbuf, s: string) returns (bool)
+	if ~tb.edit
+	   then return(false) end
+	ch: _chan := tb.chan
+	i: int := 1
+	max: int := string$size(s)
+	while i <= max do
+		c: char := s[i]
+		i := i + 1
+		if ~(c = '\^P'  cand  i <= max)
+		   then _chan$putc(ch, c, false)
+			continue
+		   end
+		c := s[i]
+		i := i + 1
+		if c = 'C'
+		   then _chan$puts(ch, tb.clear, false)
+		elseif c = 'B'
+		   then _chan$puts(ch, tb.back, false)
+		elseif c = 'L'
+		   then _chan$puts(ch, tb.kill, false)
+		else _chan$putc(ch, '\^P', false)
+		     _chan$putc(ch, c, false)
+		end
+		end except when not_possible (*): return(false) end
+	return(true)
+	end ttydsp
+
+get_prompt = proc (st: cvt) returns (string)
+	tagcase st.buf
+	   tag tty (tb: tbuf):
+		return(tb.prompt)
+	   others:
+		return("")
+	   end
+	end get_prompt
+
+set_prompt = proc (st: cvt, prompt: string)
+	tagcase st.buf
+	   tag tty (tb: tbuf):
+		tb.prompt := prompt
+	   others:
+	   end
+	end set_prompt
+
+get_rescan = proc (st: cvt) returns (string)
+	tagcase st.buf
+	   tag tty (tb: tbuf):
+		s: string := string$ac2s(tb.rescan)
+		if tb.echo
+		   then s := string$rest(s, 2) end
+		return(s)
+	   others:
+		return("")
+	   end
+	end get_rescan
+
+set_rescan = proc (st: cvt, s: string) signals (not_possible(string))
+	tagcase st.buf
+	   tag tty (tb: tbuf):
+		scan: ac := string$s2ac(s)
+		if tb.echo
+		   then ac$addl(scan, ac$bottom(tb.rescan)) end
+		tb.rescan := scan
+	   others:
+		signal not_possible("cannot rescan on this stream")
+	   end
+	end set_rescan
+
+get_input_buffered = proc (st: cvt) returns (bool)
+	tagcase st.buf
+	   tag read, istr, nul:
+		return(true)
+	   tag tty (tb: tbuf):
+		return(tb.ibf)
+	   tag write, ostr, closed:
+		return(false)
+	   end
+	end get_input_buffered
+
+set_input_buffered = proc (st: cvt, flag: bool) signals (not_possible(string))
+	tagcase st.buf
+	   tag read, istr, nul:
+		if ~flag
+		   then signal not_possible("input is always buffered") end
+	   tag tty (tb: tbuf):
+		tb.ibf := flag
+	   tag write, ostr, closed:
+		signal not_possible("cannot read from this stream")
+	   end
+	end set_input_buffered
+
+get_output_buffered = proc (st: cvt) returns (bool)
+	tagcase st.buf
+	   tag write (wb: wbuf):
+		return(wb.obf)
+	   tag tty (tb: tbuf):
+		return(tb.obf)
+	   tag ostr, nul:
+		return(true)
+	   tag read, istr, closed:
+		return(false)
+	   end
+	end get_output_buffered
+
+set_output_buffered = proc (st: cvt, flag: bool) signals (not_possible(string))
+	tagcase st.buf
+	   tag write (wb: wbuf):
+		if ~flag  cand  wb.obf
+		   then flush(up(st)) end
+		wb.obf := flag
+	   tag tty (tb: tbuf):
+		if ~flag  cand  tb.obf
+		   then flush(up(st)) end
+		tb.obf := flag
+	   tag ostr, nul:
+		signal not_possible("output is always buffered")
+	   tag read, istr, closed:
+		signal not_possible("cannot write to this stream")
+	   end resignal not_possible
+	end set_output_buffered
+
+get_eof_flag = proc (st: cvt) returns (bool)
+	tagcase st.buf
+	   tag tty (tb: tbuf):
+		return(tb.eofok)
+	   tag read, istr, closed:
+		return(true)
+	   others:
+		return(false)
+	   end
+	end get_eof_flag
+
+set_eof_flag = proc (st: cvt, eofok: bool) signals (not_possible(string))
+	tagcase st.buf
+	   tag tty (tb: tbuf):
+		tb.eofok := eofok
+	   tag read, istr, closed:
+		if ~eofok
+		   then signal not_possible("cannot disable eof on this stream")
+		   end
+	   others:
+		if eofok
+		   then signal not_possible("cannot enable eof on this stream")
+		   end
+	   end
+	end set_eof_flag
+
+equal = proc (x, y: cvt) returns (bool)
+	return(x = y)
+	end equal
+
+similar = proc (x, y: cvt) returns (bool)
+	return(x = y)
+	end similar
+
+copy = proc (x: stream) returns (stream)
+	return(x)
+	end copy
+
+print = proc (x: stream, ps: pstream)
+	pstream$text(ps, "stream[")
+	if can_read(x)
+	   then pstream$textc(ps, 'R') end
+	if can_write(x)
+	   then pstream$textc(ps, 'W') end
+	if is_closed(x)
+	   then pstream$textc(ps, 'C') end
+	pstream$textc(ps, ' ')
+	file_name$print(x.name, ps)
+	    except when not_possible (*): pstream$text(ps, "(internal)") end
+	pstream$textc(ps, ']')
+	end print
+
+get_chan = proc (st: cvt) returns (_chan) signals (not_possible(string))
+	tagcase st.buf
+	   tag read (rb: rbuf):
+	       return(rb.chan)
+	   tag write (wb: wbuf):
+	       return(wb.chan)
+	   tag tty (tb: tbuf):
+	       return(tb.chan)
+	   others:
+	       signal not_possible("does not contain a _chan")
+	   end
+	end get_chan
+
+_open_streams = iter () yields (stream)
+	for s: stream in ast$elements(open_streams()) do
+		yield(s)
+		end except when bounds: end
+	end _open_streams
+
+_close_all = proc ()
+	opens: ast := open_streams()
+	for st: stream in ast$elements(opens) do
+		flush(st)
+		    except when not_possible (*): end
+		end
+	for st: stream in ast$elements(opens) do
+		down(st).scripts := qst$new()
+		down(st).scripting := false
+		end
+	i: int := 1
+	while true do
+		st: stream := opens[i]
+		close(st)
+		    except when not_possible (*): abort(st) end
+		if st = opens[i]
+		   then i := i + 1 end
+		end except when bounds: end
+	end _close_all
+
+%    fork_process = proc( fn: file_name, arguments: string )
+%					returns( stream, stream )
+%	
+%	read_from, write_to: _chan := _chan$fork_process( fn, arguments)
+%
+%	bvecr: _bytevec := _bytevec$create(_bvec_size)
+%	br: buf := buf$make_read(rbuf${ bvec:  bvecr,
+%					index: 1,
+%					max:   0,
+%					line:  1,
+%					chan:  read_from})
+%	sr: stream := up(rep${name:      read_from.name,
+%			      scripts:   qst$new(),
+%			      scripting: false,
+%			      buf:       br})
+%	ast$addh(open_streams(), sr)
+%
+%	bvecw: _bytevec := _bytevec$create(_bvec_size)
+%	bw: buf := buf$make_write(wbuf${bvec:  bvecw,
+%				        index: 0,
+%				        obf:   true,
+%				        chan:  write_to})
+%	sw: stream := up(rep${name:      write_to.name,
+%			      scripts:   qst$new(),
+%			      scripting: false,
+%			      buf:       bw})
+%	ast$addh(open_streams(), sw)
+%
+%	return(sr, sw)
+%	end fork_process
+%    
+ end stream

@@ -1,0 +1,92 @@
+How to install the portable CLU compiler
+----------------------------------------
+
+     Let ~CLU be the directory in which the distribution is located.
+
+     If your platform is Linux, simply type "make".  See below for a description
+of the steps automated by this Makefile, as well as for information about error
+messages that may appear.
+
+     To use the compiler and runtime system, only a few files need to be in
+~CLU.  After performing the above "make", you can move these to a new CLU home
+directory by editing the definition of INSTALL_DIR in ~CLU/Makefile and typing
+"make install".  You can also conserve disk space by typing "make clean".
+
+     You probably do not need to read any more of the information in this file.
+
+     If your platform (myPlat in what follows) is not Linux, you need to perform
+an analog of "make configure" by hand.  You can do this, and build the CLU
+system at the same time, by following the (suitably modified) steps performed by
+~CLU/Makefile.
+
+1. Define the shell variable CLUHOME to wherever the distribution is installed
+   (use setenv CLUHOME <dir> with csh; use export CLUHOME=<dir> with bash).
+
+2. Build and test the garbage collector
+	cd ~CLU/code/gc
+	     (the README there suggests the supported architectures)
+	./configure
+	make clean; make; make gctest
+	./gctest
+	     (if gctest works, you are in good shape; otherwise get help)
+
+3.  Create a suitably modified Makefile.myPlat from Makefile.linux in each of
+    the following directories:
+        code/cmpasm code/libasm code/libclu code/sysasm code/sysclu
+	code/cmp cludent debug driver util
+    You may need to adjust OPT_FLAGS, DEBUG_FLAGS, and DEBUGGER_FLAGS.  Then
+        ln -s Makefile.myPlat Makefile in each of these directories
+
+4. Build libpclu.a
+	cd ~CLU/code; make
+	     ar truncates some file names: this hasn't been a problem so far
+	     sometimes there isn't enough space in /tmp for ar's temporary files
+	     to get around this problem,
+		add the l option to the ar command in the Makefile
+		or use the TMPDIR environment variable to specify an
+			alternate location for temporary files
+	     if ranlib does not have enough space, 
+		the TMPDIR fix above should help
+
+5. Build the compiler
+	cd ~CLU/code/cmp; make
+
+6. Build the CLU .lib files
+	(This step uses compiler built in Step 5.)
+	cd ~CLU/lib; make
+		various undefined symbols appear but are not significant
+
+7.  Build support for the CLU debugger (if you want to use it)
+    (Currently, this does not work.)
+	cd ~CLU; make debugger
+
+     Now you are ready to compile any CLU code you have, to build some
+utilities, to build an example, or to rebuild the compiler.  The main change
+that you will notice in using the portable compiler is that all files must be
+"spec'd" before any are compiled.  This is a restriction that the recent native
+compilers haven't had.  (Once spec'ing is done, the result, as usual, may be
+"dump'd" to a .lib file for future use.)
+
+     The following actions use the compiler built in Step 5.
+
+8.  To build an indenter for CLU programs
+	cd ~CLU; make cludent
+
+9.  To build a sample program
+	cd ~CLU/example; make
+
+10.  To build a debugging version of the sample program
+     (uses the debugger support built in Step 6)
+	cd ~CLU/example/debug; make
+
+11.  To rebuild the compiler
+	cd ~CLU; make newcompiler
+
+12.  To use a C debugger
+	cd ~CLU.; make cdebugger
+
+     Standard C debuggers will give you a pretty good idea what the calling
+stack looks like and where you are in a procedure (/*--- 46 ---*/ is the line
+number of the .clu file that produced the statements in the .c file).  Printing
+out values of variables is difficult and invocation of functions is not usually
+supported.)

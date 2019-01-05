@@ -1,0 +1,220 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	PTTKN	CLU
+%
+%	CLU Compiler: print routines for tokens
+
+pt_token = proc (t: token, st: stream)
+	s: str
+	tagcase t
+	   tag expr (x: exprabs):
+		tagcase x
+		   tag null_:
+			 s := "nil"
+		   tag bool_ (k: bool):
+			 if k
+			    then s := "true"
+			    else s := "false"
+			    end
+		   tag int_ (k: int):
+			 s := int$unparse(k)
+		   tag real_ (k: real):
+			 s := real$unparse(k)
+		   tag char_ (k: char):
+			 pt_char(k, st)
+			 return
+		   tag str (k: str):
+			 pt_str(k, st)
+			 return
+		   others:
+			 s := "???"
+		   end
+	   tag idn (k: idn):
+			 s := k.str
+	   tag equal, op (k: infixop):
+			 pt_infixop(k, st)
+			 return
+	   tag not:	 s := "~"
+	   tag assn:	 s := ":="
+	   tag colon:	 s := ":"
+	   tag comma:	 s := ","
+	   tag semi:	 s := ";"
+	   tag dollar:	 s := "$"
+	   tag period:	 s := "."
+	   tag sharp:	 s := "#"
+	   tag l_paren:	 s := "("
+	   tag l_bkt:	 s := "["
+	   tag l_curly:	 s := "{"
+	   tag r_paren:	 s := ")"
+	   tag r_bkt:	 s := "]"
+	   tag r_curly:	 s := "}"
+	   tag type_ (k: typespec):
+		tagcase k.abs
+		   tag cluster_ (clut: clutype):
+			 s := clut.gen.unique
+		   tag any_:
+			 s := "any"
+		   tag type_:
+			 s := "type"
+		   tag cvt_:
+			 s := "cvt"
+		   others:
+			 s := "???"
+		   end
+	   tag typekey (k: typekey):
+			 s := typekey_string(k)
+	   tag exprkey (k: exprkey):
+			 s := exprkey_string(k)
+	   tag stmtkey (k: stmtkey):
+			 s := stmtkey_string(k)
+	   tag defnkey (k: defnkey):
+			 s := defnkey_string(k)
+	   tag do_:	 s := "do"
+	   tag end_:	 s := "end"
+	   tag then_:	 s := "then"
+	   tag elseif_:	 s := "elseif"
+	   tag else_:	 s := "else"
+	   tag tag_:	 s := "tag"
+	   tag in_:	 s := "in"
+	   tag others_:	 s := "others"
+	   tag except_:	 s := "except"
+	   tag when_:	 s := "when"
+	   tag returns_: s := "returns"
+	   tag signals_: s := "signals"
+	   tag resignal_:s := "resignal"
+	   tag yields_:	 s := "yields"
+	   tag where_:	 s := "where"
+	   tag is_:	 s := "is"
+	   tag has_:	 s := "has"
+	   tag eof:	 return
+	   end
+	stream$puts(st, s)
+	    except when not_possible (*): end
+	end pt_token
+
+typekey_string = proc (k: typekey) returns (str)
+	s: str
+	tagcase k
+	   tag cluster_, selector_, applytype_ (d: DU):
+		s := d.unique
+	   tag rep_:
+		s := "rep"
+	   end
+	return(s)
+	end typekey_string
+
+exprkey_string = proc (k: exprkey) returns (str)
+	s: str
+	tagcase k
+	   tag force_:	 s := "force"
+	   tag type_of_: s := "type_of"
+	   tag up_:	 s := "up"
+	   tag down_:	 s := "down"
+	   end
+	return(s)
+	end exprkey_string
+
+stmtkey_string = proc (k: stmtkey) returns (str)
+	s: str
+	tagcase k
+	   tag if_:	  s := "if"
+	   tag for_:	  s := "for"
+	   tag tagcase_:  s := "tagcase"
+	   tag while_:	  s := "while"
+	   tag return_:	  s := "return"
+	   tag yield_:	  s := "yield"
+	   tag signal_:	  s := "signal"
+	   tag exit_:	  s := "exit"
+	   tag break_:	  s := "break"
+	   tag continue_: s := "continue"
+	   tag begin_:	  s := "begin"
+	   tag own_:	  s := "own"
+	   end
+	return(s)
+	end stmtkey_string
+
+defnkey_string = proc (k: defnkey) returns (str)
+	s: str
+	tagcase k
+	   tag proc_:	   s := "proc"
+	   tag iter_:	   s := "iter"
+	   tag cluster_:   s := "cluster"
+	   tag selector_:  s := "selector"
+	   tag applytype_: s := "applytype"
+	   end
+	return(s)
+	end defnkey_string
+
+pt_str = proc (s: str, st: stream)
+	begin
+	stream$putc(st, '"')
+	pt_charseq(s, true, st)
+	stream$putc(st, '"')
+	end except when not_possible (*): end
+	end pt_str
+
+pt_char = proc (c: char, st: stream)
+	begin
+	stream$puts(st, "'")
+	pt_charseq(str$c2s(c), false, st)
+	stream$puts(st, "'")
+	end except when not_possible (*): end
+	end pt_char
+
+pt_charseq = proc (s: str, is_str: bool, st: stream)
+	for c: char in str$chars(s) do
+		if c < ' '
+		   then stream$puts(st, "\\^")
+			stream$putc(st, char$i2c(char$c2i(c) + 64))
+		elseif c = '"'
+		   then if is_str
+			   then stream$puts(st, "\\\"")
+			   else stream$putc(st, '"')
+			   end
+		elseif c = '\''
+		   then if is_str
+			   then stream$putc(st, '\'')
+			   else stream$puts(st, "\\'")
+			   end
+		elseif c = '\\'
+		   then stream$puts(st, "\\\\")
+		elseif c < '\177'
+		   then stream$putc(st, c)
+		elseif c = '\177'
+		   then stream$puts(st, "\\^?")
+		else i: int := char$c2i(c)
+		     if i < 160  cor  i = 255
+			then i := (i - 64) // 128
+			     stream$puts(st, "\\!")
+			else i := i - 128
+			     stream$puts(st, "\\&")
+			end
+		     stream$putc(st, char$i2c(i))
+		end
+		end except when not_possible (*): end
+	end pt_charseq
+
+pt_infixop = proc (op: infixop, st: stream)
+	s: name := op.op
+	if s = "power"		then  s := "**"
+	elseif s = "mod"	then  s := "//"
+	elseif s = "div"	then  s := "/"
+	elseif s = "mul"	then  s := "*"
+	elseif s = "concat"	then  s := "||"
+	elseif s = "add"	then  s := "+"
+	elseif s = "sub"	then  s := "-"
+	elseif s = "lt"		then  s := "<"
+	elseif s = "le"		then  s := "<="
+	elseif s = "gt"		then  s := ">"
+	elseif s = "ge"		then  s := ">="
+	elseif s = "equal"	then  s := "="
+	elseif s = "and"	then  s := "&"
+	elseif s = "cand"	then  s := "cand"
+	elseif s = "or"		then  s := "|"
+	else			      s := "cor" end
+	if op.neg
+	   then stream$putc(st, '~')
+		    except when not_possible (*): end
+	   end
+	stream$puts(st, s)
+	   except when not_possible (*): end
+	end pt_infixop

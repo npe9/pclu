@@ -1,0 +1,204 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	XREF CLU
+%
+%	Cross-reference table
+
+xref = cluster is	create,		% -> xref
+			add_ref,	% xref, str, str ->
+			add_refs,	% xref, str, array[str] ->
+			rem_refs,	% xref, str -> array[str]
+			elements,	% xref --> str, str	
+			keys,		% xref --> str
+			output,		% xref, str, str, stream => not_possible(string)
+			merge,		% xref, xref ->
+			flush		% xref ->
+
+str		= string
+as		= array[str]
+entry		= record[key:   str,
+			 users: as]
+rep		= array[entry]
+minus1		= -1
+
+% Create a cross-reference table
+
+create = proc () returns (cvt)
+	return(rep$create(0))
+	end create
+
+% Add a (key, user) pair.  Duplications are ignored.
+
+add_ref = proc (tab: cvt, key: str, user: str)
+	musers: as := tab[find_index[entry](tab, key, entry$get_key, entry_maker)].users
+	for muser: str in as$elements(musers) do
+		if user = muser
+		   then return end
+		end
+	find_index[str](musers, user, str$copy, str$copy)
+	end add_ref
+
+% Add a bunch of (key, user) pairs.
+
+add_refs = proc (tab: cvt, key: str, users: as)
+	musers: as := tab[find_index[entry](tab, key, entry$get_key, entry_maker)].users
+	for user: str in as$elements(users) do
+		new: bool := true
+		for muser: str in as$elements(musers) do
+			if user = muser
+			   then new := false
+				break
+			   end
+			end
+		if new
+		   then find_index[str](musers, user, str$copy, str$copy) end
+		end
+	end add_refs
+
+% Remove and return all users of the given key
+
+rem_refs = proc (tab: cvt, key: str) returns (as)
+	i: int := find_index[entry](tab, key, entry$get_key, entry_maker)
+	users: as := tab[i].users
+	ll: int := rep$low(tab)
+	hh: int := rep$high(tab)
+	if i - ll > hh - i
+	   then for j: int in int$from_to(i + 1, hh) do
+			tab[j - 1] := tab[j]
+			end
+		rep$remh(tab)
+	   else for j: int in int$from_to_by(i - 1, ll, minus1) do
+			tab[j + 1] := tab[j]
+			end
+		rep$reml(tab)
+	   end
+	return(users)
+	end rem_refs
+
+% Internal
+
+entry_maker = proc (key: str) returns (entry)
+	return(entry${key:   key,
+		      users: as$create(0)})
+	end entry_maker
+
+% Internal
+
+find_index = proc [etype: type] (tab: elist, key: str, get: gettype, cons: constype)
+							returns (int)
+	elist = array[etype]
+	gettype = proctype (etype) returns (str)
+	constype = proctype (str) returns (etype)
+	ll: int := elist$low(tab)
+	hh: int := elist$high(tab)
+	l: int := ll
+	h: int := hh
+	while l <= h do			% Binary search
+		m: int := (l + h)/2
+		me: etype := tab[m]
+		mkey: str := get(me)
+		if key < mkey
+		   then h := m - 1
+		elseif key = mkey
+		   then return(m)
+		else  l := m + 1 end
+		end
+	% (h = l - 1) and entry should be inserted between them
+	ent: etype := cons(key)
+	if hh - l <= h - ll		% Which move is shorter?
+	   then elist$addh(tab, ent)
+		for n: int in int$from_to_by(hh, l, minus1) do
+			tab[n + 1] := tab[n]
+			end
+		tab[l] := ent
+		return(l)
+	   else elist$addl(tab, ent)
+		for n: int in int$from_to_by(ll, h, 1) do
+			tab[n - 1] := tab[n]
+			end
+		tab[h] := ent
+		return(h)
+	   end
+	end find_index
+
+% Yield all (key, user) pairs.
+
+elements = iter (tab: cvt) yields (str, str)
+	for ent: entry in rep$elements(tab) do
+		key: str := ent.key
+		for user: str in as$elements(ent.users) do
+			yield(key, user)
+			end
+		end
+	end elements
+
+% Yield all keys
+
+keys = iter (tab: cvt) yields (str)
+	for ent: entry in rep$elements(tab) do
+		yield(ent.key)
+		end
+	end keys
+
+% Output all references.
+
+output = proc (tab: cvt, lhead, rhead: str, st: stream)
+					signals (not_possible(string))
+	if rep$size(tab) = 0
+	   then return end
+	max: int := str$size(lhead)
+	for ent: entry in rep$elements(tab) do
+		n: int := str$size(ent.key)
+		if n > max
+		   then max := n end
+		end
+	max := max + 4
+	begin
+	putout(st, lhead, as$[rhead], max)
+	for i: int in int$from_to(1, 7) do
+		stream$puts(st, "__________")
+		end
+	stream$puts(st, "\n\n")
+	for ent: entry in rep$elements(tab) do
+		putout(st, ent.key, ent.users, max)
+		end
+	end resignal not_possible
+	end output
+
+% Internal
+
+putout = proc (st: stream, key: str, users: as, max: int)
+					signals (not_possible(string))
+	begin
+	stream$putleft(st, key, max)
+	pos: int := max
+	for user: str in as$elements(users) do
+		n: int := str$size(user) + 1
+		if pos + n > 70
+		   then stream$putc(st, '\n')
+			stream$putspace(st, max)
+			pos := max
+		   end
+		stream$putc(st, ' ')
+		stream$puts(st, user)
+		pos := pos + n
+		end
+	stream$putc(st, '\n')
+	end resignal not_possible
+	end putout
+
+% Merge the second table into the first.  The second table is not altered.
+
+merge = proc (tab1: xref, tab2: xref)
+	for key, user: str in elements(tab2) do
+		add_ref(tab1, key, user)
+		end
+	end merge
+
+% Flush all references
+
+flush = proc (tab: cvt)
+	rep$set_low(tab, 1)
+	rep$trim(tab, 1, 0)
+	end flush
+
+end xref

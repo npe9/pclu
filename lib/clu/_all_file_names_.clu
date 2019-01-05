@@ -1,0 +1,150 @@
+% Copyright Massachusetts Institute of Technology 1982, 1989
+
+% * matches zero or more chars, ^@ matches * char
+% . and .. directory entries are ignored
+
+_all_file_names_ = iter (fs: string) yields (file_name)
+				     signals (bad_format, not_possible(string))
+	fspec = file_spec
+	fname = file_name
+	as = array[string]
+	own inuse: bool := false
+	own temp: as := as$new()
+	if string$indexc('*', fs) = 0
+	   then fn: fname := file_name_fill(fname$parse(_restar(fs)), "")
+		% 3/24/94: dwc: added cor phrase to make spec *.spc work in compiler
+		%	probably preferable to hacking up file_exists
+		if file_exists(fn) cor fname$unparse(fn) = ""
+		   then yield(_fixup_file_name(fn, false)) end
+		return
+	   end resignal bad_format, not_possible
+	dr: string := fs
+	z: int := _last_indexc('/', fs)
+	fs := string$rest(fs, z + 1)
+	while z > 1  cand  dr[z] = '/' do
+		z := z - 1
+		end
+	dr := string$substr(dr, 1, z)
+	nm, sf, ot: string
+	ok: bool
+	if string$indexc('*', fs) = 0
+	   then ok := true
+		nm, sf, ot := _split_name_part(_restar(fs))
+	   else ok := false
+	   end
+	if dr[1] = '~'  cand  string$indexc('/', dr) = 0
+	   then if z = 1
+		   then dr := _environ("HOME")
+		   else dr := _home_dir(string$rest(dr, 2))
+		   end
+	   end except when bounds, not_found: end
+	for fn: fname in _all_file_names_(dr) do
+		dr := fname$unparse(fn)
+		if ok
+		   then fn := fname$create(dr, nm, sf, ot)
+			if file_exists(fn)
+			   then yield(_fixup_file_name(fn, true)) end
+			   except when not_possible (*): end
+			continue
+		   end
+		list: as
+		used: bool := inuse
+		if used
+		   then list := as$new()
+		   else list := temp
+			as$trim(list, 1, 0)
+			inuse := true
+		   end
+		for off: int, buf: _bytevec in _all_dir_entries_(dr) do
+			z := _match_name_spec(off, buf, fs)
+			if z = 0
+			   then continue end
+			nm := string$substr(_cvt[_bytevec, string](buf), off, z)
+			for z in as$indexes(list) do
+				if list[z] < nm
+				   then continue end
+				while true do
+					ot := list[z]
+					list[z] := nm
+					nm := ot
+					z := z + 1
+					end
+				end except when bounds: end
+			as$addh(list, nm)
+			end
+		for nm in as$elements(list) do
+			nm, sf, ot := _split_name_part(nm)
+			yield(fname$create(dr, nm, sf, ot))
+			end
+		inuse := used
+		if ~inuse
+		   then as$trim(list, 1, 0) end
+		end resignal not_possible, bad_format
+	end _all_file_names_
+
+_restar = proc (s: string) returns (string)
+	while true do
+		i: int := string$indexc('\000', s)
+		if i = 0
+		   then return(s) end
+		s := string$append(string$substr(s, 1, i - 1), '*') ||
+		     string$rest(s, i + 1)
+		end
+	end _restar
+
+_match_name_spec = proc (off: int, buf: _bytevec, nm: string) returns (int)
+	l: int := off
+	i: int := 1
+	h: int := string$size(nm)
+	while true do
+		c: char := nm[i]
+		if c = '*'
+		   then break
+		elseif c = '\000'
+		   then c := '*' end
+		if c ~= buf[l]
+		   then return(0) end
+		l := l + 1
+		i := i + 1
+		end
+	while true do
+		i := i + 1
+		j: int := i
+		while nm[j] ~= '*' do
+			j := j + 1
+			end
+		j := i
+		while true do
+			m: int := l
+			while true do
+				c2: char := nm[i]
+				if c2 = '*'
+				   then exit found
+				elseif c2 = '\000'
+				   then c2 := '*' end
+				c1: char := buf[l]
+				if c1 = '\000'
+				   then return(0)
+				elseif c1 ~= c2
+				   then break end
+				l := l + 1
+				i := i + 1
+				end
+			l := m + 1
+			i := j
+			end except when found: end
+		end except when bounds: end
+	m: int := _bytevec$indexc('\000', buf, l) - (h - i + 1)
+	if l > m
+	   then return(0) end
+	while i <= h do
+		c: char := nm[i]
+		if c = '\000'
+		   then c := '*' end
+		if c ~= buf[m]
+		   then return(0) end
+		m := m + 1
+		i := i + 1
+		end
+	return(m - off)
+	end _match_name_spec

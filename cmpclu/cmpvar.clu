@@ -1,0 +1,172 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+cmpvar = cluster is locals, set_locals,
+		    force_, set_force_,
+		    externals, set_externals,
+		    dir, set_dir,
+		    suffix, set_suffix,
+		    allow, set_allow,
+		    expunge, set_expunge,
+		    modules, set_modules,
+		    version, set_version,
+		    date, set_date,
+		    stuffs, set_stuffs,
+		    save_c, set_save_c,
+		    cc_opt_cmd, cc_dbg_cmd,
+		    set_cc_opt_cmd, set_cc_dbg_cmd
+
+    rep = null
+
+    own local_vars: bool := true
+    own do_force: bool := true
+    own list_externals: bool := false
+    own binary_dir: str := ""
+    own bin_suffix: str := binary_suffix()
+    own allow_errors: bool := false
+    own expunge_specs: bool := false
+    own reserved_modules: str := ""
+    own compiler_version: str := "???"
+    own compiler_save_date: str := "???"
+    own compiler_stuff: stuff
+    own save_c_files: bool := false
+    own base_cc_opt_cmd_string: string := init_base_cmd("opt")
+    own base_cc_dbg_cmd_string: string := init_base_cmd("dbg")
+    own cc_opt_cmd_string: string := base_cc_opt_cmd_string
+    own cc_dbg_cmd_string: string := base_cc_dbg_cmd_string
+
+    % "cc -I" || _system_root() || "/include -w -c -G 4 -O2"
+    % "cc -I" || _system_root() || "/include/debug -w -c -G 4"
+
+    locals = proc () returns (bool)
+	return(local_vars)
+	end locals
+
+    set_locals = proc (b: bool)
+	local_vars := b
+	end set_locals
+
+    force_ = proc () returns (bool)
+	return(do_force)
+	end force_
+
+    set_force_ = proc (b: bool)
+	do_force := b
+	end set_force_
+
+    externals = proc () returns (bool)
+	return(list_externals)
+	end externals
+
+    set_externals = proc (b: bool)
+	list_externals := b
+	end set_externals
+
+    dir = proc () returns (str)
+	return(binary_dir)
+	end dir
+
+    set_dir = proc (s: str)
+	binary_dir := s
+	end set_dir
+
+    suffix = proc () returns (str)
+	return(bin_suffix)
+	end suffix
+
+    set_suffix = proc (s: str)
+	if str$empty(s)
+	   then s := binary_suffix() end
+	bin_suffix := s
+	end set_suffix
+
+    allow = proc () returns (bool)
+	return(allow_errors)
+	end allow
+
+    set_allow = proc (b: bool)
+	allow_errors := b
+	end set_allow
+
+    expunge = proc () returns (bool)
+	return(expunge_specs)
+	end expunge
+
+    set_expunge = proc (b: bool)
+	expunge_specs := b
+	end set_expunge
+
+    modules = proc () returns (str)
+	return(reserved_modules)
+	end modules
+
+    set_modules = proc (s: str)
+	reserved_modules := s
+	end set_modules
+
+    version = proc () returns (str)
+	return(compiler_version)
+	end version
+
+    set_version = proc (s: str)
+	compiler_version := s
+	end set_version
+
+    date = proc () returns (str)
+	return(compiler_save_date)
+	end date
+
+    set_date = proc (s: str)
+	compiler_save_date := s
+	end set_date
+
+    stuffs = proc () returns (stuff)
+	return(compiler_stuff)
+	end stuffs
+
+    set_stuffs = proc (s: stuff)
+	compiler_stuff := s
+	end set_stuffs
+
+    save_c = proc() returns(bool)
+	return(save_c_files)
+	end save_c
+
+    set_save_c = proc(save:bool)
+	save_c_files := save
+	end set_save_c
+
+    cc_opt_cmd = proc() returns (string)
+	return(cc_opt_cmd_string)
+	end cc_opt_cmd
+
+    cc_dbg_cmd = proc() returns (string)
+	return(cc_dbg_cmd_string)
+	end cc_dbg_cmd
+
+    set_cc_opt_cmd = proc(cmd:string)
+	if string$empty(cmd) then cc_opt_cmd_string := base_cc_opt_cmd_string
+	   else cc_opt_cmd_string := cmd end
+	end set_cc_opt_cmd
+
+    set_cc_dbg_cmd = proc(cmd:string)
+	if string$empty(cmd) then cc_dbg_cmd_string := base_cc_dbg_cmd_string
+	   else cc_dbg_cmd_string := cmd end
+	end set_cc_dbg_cmd
+
+    init_base_cmd = proc(ty: string) returns (string)
+	begin
+	    fn: file_name := file_name$create(_system_root()||"/cmp", 
+					"cc" || ty, "cmd", "")
+	    st: stream := stream$open(fn, "read")
+	    line: string := stream$getl(st)
+	    pos: int := string$indexs("~CLU", line)
+	    if (pos ~= 0) then
+		line := string$substr(line, 1, pos-1) || _system_root() ||
+			string$rest(line, pos+4)
+		end
+	    stream$close(st)
+	    return(line)
+	    end
+	   except others: return("") end
+	end init_base_cmd
+
+    end cmpvar

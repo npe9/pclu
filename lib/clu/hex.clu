@@ -1,0 +1,59 @@
+% Copyright Massachusetts Institute of Technology 1980, 1989
+
+i_hparse = proc (s: string) returns (int) signals (bad_format, overflow)
+	zero = char$c2i('0')
+	upper = char$c2i('A') - 10
+	lower = char$c2i('a') - 10
+	num: int := 0
+	i: int := 1
+	sign: char := s[1]
+	   except when bounds: signal bad_format end
+	c: char := sign
+	if sign = '+'  cor  sign = '-'
+	   then i := 2
+		c := s[2]
+		   except when bounds: signal bad_format end
+	   end
+	while true do
+		if c >= '0'  cand  c <= '9'
+		   then num := num * 16 - (char$c2i(c) - zero)
+		elseif c >= 'A'  cand  c <= 'F'
+		   then num := num * 16 - (char$c2i(c) - upper)
+		elseif c >= 'a'  cand  c <= 'f'
+		   then num := num * 16 - (char$c2i(c) - lower)
+		else signal bad_format end
+		i := i + 1
+		c := s[i]
+		end
+	   resignal overflow
+	   except when bounds: end
+	if sign = '-'
+	   then return(num)
+	   else return(-num)
+	   end resignal overflow
+	end i_hparse
+
+i_hunparse = proc (i: int) returns (string)
+	fixup1 = char$c2i('0') + 16
+	fixup2 = char$c2i('A') + 6
+	sign: string := ""
+	if i < 0
+	   then sign := "-"
+	   else i := -i
+	   end
+	s: string := ""
+	while true do
+		j: int := i // 16
+		i := i / 16
+		if j = 0
+		   then s := "0" || s
+		elseif j >= 7
+		   then s := string$c2s(char$i2c(fixup1 - j)) || s
+			i := i + 1
+		else s := string$c2s(char$i2c(fixup2 - j)) || s
+		     i := i + 1
+		end
+		if i = 0
+		   then return(sign || s) end
+		end
+	end i_hunparse

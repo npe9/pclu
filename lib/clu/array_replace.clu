@@ -1,0 +1,90 @@
+% Copyright Massachusetts Institute of Technology 1980, 1989
+
+array_replace = proc [t: type] (a1: at, b1, w1: int, a2: at, b2, w2: int)
+						signals (bounds, negative_size)
+	at = array[t]
+	vt = _vec[t]
+	dt = _adv[t]
+	f1: int := b1 - at$low(a1)
+	r1: int := at$size(a1) - f1
+	f2: int := b2 - at$low(a2)
+	r2: int := at$size(a2) - f2
+	if f1 < 0  cor  r1 < 0  cor  f2 < 0  cor  r2 < 0
+	   then signal bounds end
+	if w1 < 0  cor  w2 < 0
+	   then signal negative_size end
+	_event$defer()
+	v1: vt := _cvt[at, dt](a1).vector
+	if r1 < w1
+	   then w1 := r1 end
+	if r2 < w2
+	   then w2 := r2 end
+	if w2 = 0
+	   then if w1 = 0
+		   then _event$undefer()
+			return
+		   end
+		s1: int := _cvt[at, dt](a1).start + f1
+		if f1 = 0
+		   then _cvt[at, dt](a1).start := s1 + w1
+		   else if r1 > w1
+			   then vt$move_lr(v1, s1 + w1, v1, s1, r1 - w1) end
+			_cvt[at, dt](a1).size := at$size(a1) - w1
+		   end
+		_event$undefer()
+		return
+	   end
+	v2: vt := _cvt[at, dt](a2).vector
+	w3: int := r1 - w1
+	tot: int := f1 + w2 + w3
+	s1: int := _cvt[at, dt](a1).start
+	s2: int := _cvt[at, dt](a2).start + f2
+	s3: int := s1 + f1 + w1
+	if w1 >= w2
+	   then if v1 = v2
+		   then nv: vt := vt$create(w2)
+			vt$move_lr(v2, s2, nv, 1, w2)
+			v2 := nv
+			s2 := 1
+		   end
+		vt$move_lr(v2, s2, v1, s1 + f1, w2)
+		if w1 > w2
+		   then vt$move_lr(v1, s3, v1, s3 - w1 + w2, w3)
+			_cvt[at, dt](a1).size := tot
+		   end
+		_event$undefer()
+		return
+	   end
+	if vt$size(v1) < tot
+	   then v3: vt := vt$create(tot)
+		vt$move_lr(v1, s1, v3, 1, f1)
+		vt$move_lr(v2, s2, v3, f1 + 1, w2)
+		vt$move_lr(v1, s3, v3, f1 + w2 + 1, w3)
+		_cvt[at, dt](a1).vector := v3
+		_event$undefer()
+		return
+	   end
+	if v1 = v2
+	   then nv: vt := vt$create(w2)
+		vt$move_lr(v2, s2, nv, 1, w2)
+		v2 := nv
+		s2 := 1
+	   end
+	df: int := w2 - w1
+	if s1 > df
+	   then s0: int := s1 - df
+		_cvt[at, dt](a1).start := s0
+		vt$move_lr(v1, s1, v1, s0, f1)
+		vt$move_lr(v2, s2, v1, s0 + f1, w2)
+	elseif vt$size(v1) - s1 - at$size(a1) + 1 >= df
+	   then _cvt[at, dt](a1).size := tot
+		vt$move_rl(v1, s3, v1, s3 + df, w3)
+		vt$move_lr(v2, s2, v1, s1 + f1, w2)
+	else _cvt[at, dt](a1).vector := v1
+	     vt$move_lr(v1, s1, v1, 1, f1)
+	     vt$move_rl(v1, s3, v1, f1 + w2 + 1, w3)
+	     vt$move_lr(v2, s2, v1, f1 + 1, w2)
+	     _cvt[at, dt](a1).size := tot
+	end
+	_event$undefer()
+	end array_replace

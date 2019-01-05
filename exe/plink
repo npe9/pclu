@@ -1,0 +1,34 @@
+#!/bin/sh
+output=a.out
+files=
+verbose=
+opt=
+syms=
+lflag=-lpclu_opt
+usage="Usage: plink <object file> ... <Option>*\n\
+Options: -debug, -opt,  -prof, -o outputfile, ^outputfile, -v"
+if [ $# = 0 ]; then echo $usage; exit 2; fi
+while [ $# != 0 ];
+do
+    case "$1" in
+	\^*) output=`echo "$1" | sed 's/^\\^//'`;;
+	-debug) lflag=-lpclu_debug;;
+	-opt) lflag=-lpclu_opt;;
+	-o*) output=`echo "$1" | sed 's/^-o//'`
+	     test -n "$output"
+	     if [ $? != 0 ]; then
+		shift || exit 2
+		output=$1
+	     fi;;
+	-v*) verbose=y;;
+	-prof*) syms=-p;;
+	-*) echo $usage; exit 2;;
+	*) files="$files $1";;
+    esac
+    if [ $# -ge 1 ]; then shift; fi
+done
+if [ -n "$verbose" ]; then
+    echo cc $syms -o $output $files -L$CLUHOME/code $lflag -lm  -lgc -lpthread
+fi
+cc $syms -o $output $files -L$CLUHOME/code $lflag -lm -lgc -lpthread
+

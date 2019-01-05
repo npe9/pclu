@@ -1,0 +1,394 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	CEXPR2 CLU
+%
+%	CLU Compiler Version 3: expression checker
+
+c_force = proc (e: c_env, x: expr, t: typespec) returns (typespec)
+	t := c_type(e, t)
+	x.abs := exprabs$make_force_(t)
+	% 3/1/94: dcurtis changed illegal_type to wrong_type
+	sig: exception := exception${name:  "wrong_type",
+				     types: typelist$new()}
+	at: applytype := applytype${gen:  e.proc_,
+				    args: typelist$e2s(e.any_type),
+				    vals: typelist$e2s(t),
+				    sigs: exceptionlist$e2s(sig)}
+	return(c_env$get_type(e, typeabs$make_apply(at)))
+	end c_force
+
+c_up = proc (e: c_env, x: expr) returns (typespec)
+	t: typespec := c_expr(e, x)
+	if c_env$in_cluster(e)
+	   then	if typespec$mismatch(e.down_type, t)
+		   then c_env$errt(e, qs$["argument to UP"], e.down_type, t)
+		   end
+		   except when anyize:
+				 x.abs := exprabs$make_any_(expr$create(x.abs, t))
+				 x.typespec := e.any_type
+			  end
+	   else c_env$err1(e, "use of UP operation outside of a cluster")
+	   end
+	return(e.up_type)
+	end c_up
+
+c_down = proc (e: c_env, x: expr) returns (typespec)
+	t: typespec := c_expr(e, x)
+	if c_env$in_cluster(e)
+	   then if typespec$mismatch(e.up_type, t)
+		   then c_env$errt(e, qs$["argument to DOWN"], e.up_type, t)
+		   end
+	   else c_env$err1(e, "use of DOWN operation outside of a cluster")
+	   end
+	return(e.down_type)
+	end c_down
+
+c_bracketref = proc (e: c_env, x: expr, ref: bracketref) returns (typespec)
+	i: idn := ref.idn
+	parms: exprlist := ref.parms
+	tagcase i.kind
+	   tag gen (k: DU):
+		return(c_gen_expr(e, x, clutype${gen:   k,
+						 parms: parms}))
+	   tag opgen (k: name):
+		ref.parms := c_constlist(e, parms)
+		cop: clusterop := clusterop${type_: e.up_type,
+					     name:  k,
+					     parms: ref.parms}
+		x.abs := exprabs$make_op(cop)
+		return(c_clusterop1(e, cop))
+	   tag unknown:
+		c_env$lookup(e, i, want_gen)
+		return(c_bracketref(e, x, ref))
+	   others:
+	   end
+	if exprlist$size(parms) > 1
+	   then	c_env$err(e, qs$["'", i.str, "' does not name a DU"])
+		return(e.unknown_type)
+	   end
+	x1: expr := expr$create(exprabs$make_idn(i), e.unknown_type)
+	return(c_sugar(e, x, "fetch", exprlist$[x1, exprlist$bottom(parms)]))
+	end c_bracketref
+
+c_apply_ref = proc (e: c_env, x: expr, clut: clutype) returns (typespec)
+	clut.parms := c_constlist(e, clut.parms)
+	t: typespec := c_gen_parms(e, clut)
+	if t = e.type_type
+	   then tt: typespec := c_env$get_type(e, typeabs$make_cluster_(clut))
+		x.abs := exprabs$make_type_(tt)
+		if c_env$types_illegal(e)
+		   then c_env$err(e, qs$["use of type as expression: ",
+					 get_type_print(t)])
+		   end
+	   end
+	return(t)
+	end c_apply_ref
+
+c_expr_type = proc (e: c_env, x: expr, t: typespec) returns (typespec)
+	t := c_type(e, t)
+	x.abs := exprabs$make_type_(t)
+	if c_env$types_illegal(e)
+	   then c_env$err(e, qs$["use of type as expression: ",
+				 get_type_print(t)])
+	   end
+	return(e.type_type)
+	end c_expr_type
+
+c_anyize = proc (e: c_env, x: expr) returns (typespec)
+	c_expr(e, x)
+	return(e.any_type)
+	end c_anyize
+
+c_type_of = proc (e: c_env, x: expr) returns (typespec)
+	c_expr(e, x)
+	return(e.type_type)
+	end c_type_of
+
+c_gen_expr = proc (e: c_env, x: expr, dut: clutype) returns (typespec)
+	dut.parms := c_constlist(e, dut.parms)
+	t: typespec := c_gen_parms(e, dut)
+	tagcase t.abs
+	   tag type_:
+		xt: typespec := c_env$get_type(e, typeabs$make_cluster_(dut))
+		if c_env$types_illegal(e)
+		   then c_env$err(e, qs$["use of type as expression: ",
+					 get_type_print(xt)])
+		   end
+		x.abs := exprabs$make_type_(xt)
+	   others:
+		x.abs := exprabs$make_apply(dut)
+	   end
+	return(t)
+	end c_gen_expr
+
+c_gen_parms = proc (e: c_env, dut: clutype) returns (typespec)
+	gen: DU := dut.gen
+	parms: exprlist := dut.parms
+	specs: DUspecs := c_get_DUspecs(e, gen)
+	tagcase specs
+	   tag cluster_ (inf: typeinfo):
+		if c_parms(e, parms, inf.parms)
+		   then return(e.type_type) end
+	   tag apply (inf: applyinfo):
+		if c_parms(e, parms, inf.parms)
+		   then return(subst_parms(e, parms, inf.parms, inf.type_)) end
+	   tag none:
+		ot: othertype := othertype$make_du(dut)
+		return(c_env$get_type(e, typeabs$make_other(ot)))
+	   others:
+	   end
+	c_env$err(e, qs$["illegal parameters to DU '", gen.common, "'"])
+	return(e.unknown_type)
+	end c_gen_parms
+
+c_parms1 = proc (e: c_env, vals: exprlist, forms: idnlist) returns (bool)
+	if exprlist$size(vals) ~= idnlist$size(forms)
+	   then return(false) end
+	for i: int in exprlist$indexes(vals) do
+		t: typespec := vals[i].typespec
+		tagcase forms[i].kind
+		   tag tparm:
+			if typespec$mismatch(e.type_type, t)
+			   then return(false) end
+		   tag vparm (k: typespec):
+			if typespec$mismatch(k, t)
+			   then return(false) end
+		   others:
+			return(false)
+	 	   end
+		end
+	return(true)
+	end c_parms1
+
+c_parms = proc (e: c_env, vals: exprlist, forms: idnlist) returns (bool)
+	ok: bool := c_parms1(e, vals, forms)
+	if ~ok
+	   then return(false) end
+	for i: int in exprlist$indexes(vals) do
+		tagcase forms[i].kind
+		   tag tparm (k: opspeclist):
+			ok := c_restrictions(e, vals[i], vals, forms, k)  cand  ok
+		   others:
+		   end
+		end
+	return(ok)
+	end c_parms
+
+c_2_parms = proc (e: c_env, vals: exprlist, forms: idnlist,
+		  cvals: exprlist, cforms: idnlist, reqs: typesetlist)
+								returns (bool)
+	ok: bool := c_parms1(e, vals, forms)
+	if ~ok
+	   then return(false) end
+	bvals: exprlist := cvals || vals
+	bforms: idnlist := cforms || forms
+	for i: int in exprlist$indexes(vals) do
+		tagcase forms[i].kind
+		   tag tparm (k: opspeclist):
+			ok := c_restrictions(e, vals[i], bvals, bforms, k)
+				cand  ok
+		   others:
+		   end
+		end
+	for req: typeset in typesetlist$elements(reqs) do
+		p: idn := req.parm
+		for i: int in idnlist$indexes(cforms) do
+			if p = cforms[i]
+			   then c_restrictions(e, cvals[i], bvals,
+						bforms, req.opers)
+			   end
+			end	
+		end
+	return(ok)
+	end c_2_parms
+
+c_invoke = proc (e: c_env, inv: invoke, done_first: bool) returns (typelist)
+	pt: typespec := c_expr(e, inv.apply)
+	args: exprlist := inv.args
+	beg: int := 1
+	if done_first then beg := beg + 1 end
+	for i: int in int$from_to_by(beg, exprlist$size(args), 1) do
+		c_expr(e, args[i])
+		end
+	tagcase pt.abs
+	   tag apply (pta: applytype):
+		vals: typelist := c_call(e, pta, inv)
+		if pta.gen = e.proc_
+		   then return(vals)
+		elseif pta.gen = e.iter_
+		   then c_env$err(e, qs$["illegal iterator invocation: ",
+					 get_inv_print(inv)])
+			return(vals)
+		end
+		x: expr := expr$create(exprabs$make_type_(e.any_type),
+				       e.type_type)
+		st: typespec := c_env$get_type(e,
+					       typeabs$make_cluster_(
+						clutype${gen:   e.seq_,
+							 parms: exprlist$[x]}))
+		x := expr$create(exprabs$make_a_cons(
+					arraycons${type_: st,
+						   low:   mexpr$make_none(nil),
+						   elts:  args}),
+				 st)
+		inv.args := exprlist$[inv.apply, x]
+		p: exprabs := exprabs$make_op(clusterop${type_: pt,
+							 name: "%call",
+							 parms: exprlist$[]})
+		pta := applytype${gen:  e.proc_,
+				  args: typelist$[pt, st],
+				  vals: pta.vals,
+				  sigs: pta.sigs}
+		pt := c_env$get_type(e, typeabs$make_apply(pta))
+		inv.apply := expr$create(p, pt)
+		return(vals)
+	   tag other:
+		ot: othertype := othertype$make_return_(pt)
+		t: typespec := c_env$get_type(e, typeabs$make_other(ot))
+		return(typelist$e2s(t))
+	   tag unknown:
+	   others:
+		c_env$err(e, qs$["invocation of non-procedure: ",
+				 get_inv_print(inv)])
+	   end
+	ut: typespec := e.unknown_type
+	return(typelist$e2s(ut))
+	end c_invoke
+
+c_call = proc (e: c_env, at: applytype, inv: invoke) returns (typelist)
+	c_args(e, at.args, inv)
+	for sig: exception in exceptionlist$elements(at.sigs) do
+		c_env$add_cond(e, sig, signal_)
+		end
+	return(at.vals)
+	end c_call
+
+c_args = proc (e: c_env, types: typelist, inv: invoke)
+	args: exprlist := inv.args
+	if exprlist$size(args) ~= typelist$size(types)
+	   then	c_env$err(e, qs$[int$unparse(exprlist$size(args)),
+				 " arguments to '",
+				 get_inv_print(inv), "', ",
+				 int$unparse(typelist$size(types)),
+				 " expected"])
+		return
+	   end
+	for i: int in exprlist$indexes(args) do
+	    if typespec$mismatch(types[i], args[i].typespec)
+	       then c_env$errt(e, qs$["argument ", int$unparse(i), " to '",
+					get_inv_print(inv), "'"],
+				types[i], args[i].typespec)
+	       end
+	       except when anyize: x: expr := expr$create(exprabs$make_any_(args[i]),
+							  types[i])
+				   inv.args := exprlist$replace(inv.args, i, x)
+		      end
+	    end
+	end c_args
+
+c_exprlist = proc (e: c_env, exprs: exprlist) returns (typelist)
+	types: typelist := typelist$new()
+	for x: expr in exprlist$elements(exprs) do
+		types := typelist$addh(types, c_expr(e, x))
+		end
+	return(types)
+	end c_exprlist
+
+get_type_print = proc (t: typespec) returns (str)
+	tagcase t.abs
+	   tag cluster_ (ta: clutype):
+		return(get_clutype_print(ta))
+	   tag select (ta: seltype):
+		return(ta.gen.common || "[.." ||
+			int$unparse(fieldspeclist$size(ta.parms)) || "..]")
+	   tag idn (ta: idn):
+		return(ta.str)
+	   tag other (ta: othertype):
+		tagcase ta
+		   tag du (clut: clutype):
+			return("type_of(" || get_clutype_print(clut) || ")")
+		   tag op (cop: clusterop):
+			return("type_of(" || get_clusterop_print(cop) || ")")
+		   tag return_ (ty: typespec):
+			return("return_type_of(" || get_type_print(ty) || ")")
+		   end
+	   tag any_:
+		return("any")
+	   tag type_:
+		return("type")
+	   tag cvt_:
+		return("cvt")
+	   tag apply (ta: applytype):
+		return(ta.gen.common || "[.." ||
+			int$unparse(typelist$size(ta.args)) || ".." ||
+			int$unparse(typelist$size(ta.vals)) || ".." ||
+			int$unparse(exceptionlist$size(ta.sigs)) || "..]")
+	   tag unknown:
+		return("?type?")
+	   others:
+		return("'ILLEGAL TYPE!'")
+	   end
+	end get_type_print
+
+get_inv_print = proc (inv: invoke) returns (str)
+	tagcase inv.apply.abs
+	   tag idn (xa: idn):
+		return(xa.str)
+	   tag apply (xa: clutype):
+		return(get_clutype_print(xa))
+	   tag op (xa: clusterop):
+		return(get_clusterop_print(xa))
+	   tag force_ (xa: typespec):
+		return("force[" || get_type_print(xa) || "]")
+	   others:
+		return("(computed value)")
+	   end
+	end get_inv_print
+
+get_clusterop_print = proc (cop: clusterop) returns (string)
+	n: name := cop.name
+	if n[1] = '%' then n := str$rest(n, 2) end
+	n := get_type_print(cop.type_) || "$" || n
+	if exprlist$empty(cop.parms)
+	   then return(n)
+	   else return(n || "[.." ||
+			int$unparse(exprlist$size(cop.parms)) || "..]")
+	   end
+	end get_clusterop_print
+
+get_clutype_print = proc (clut: clutype) returns (string)
+	gs: str := clut.gen.common
+	if exprlist$empty(clut.parms)
+	   then return(gs)
+	elseif exprlist$size(clut.parms) = 1
+	   then return(gs || "[" ||
+			get_expr_print(exprlist$bottom(clut.parms)) || "]")
+	else return(gs || "[.." ||
+			int$unparse(exprlist$size(clut.parms)) || "..]")
+	end
+	end get_clutype_print
+
+get_expr_print = proc (x: expr) returns (string)
+	tagcase x.abs
+	   tag null_:
+		return("nil")
+	   tag bool_ (b: bool):
+		if b
+		   then return("true")
+		   else return("false")
+		   end
+	   tag int_ (i: int):
+		return(int$unparse(i))
+	   tag real_ (r: real):
+		return(real$unparse(r))
+	   tag char_ (c: char):
+		return("'" || str$c2s(c) || "'")
+	   tag str (s: str):
+		return("\"" || s || "\"")
+	   tag type_ (t: typespec):
+		return(get_type_print(t))
+	   tag idn (i: idn):
+		return(i.str)
+	   others:
+		return("...")
+	   end
+	end get_expr_print

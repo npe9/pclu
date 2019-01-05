@@ -1,0 +1,85 @@
+%
+% STRING
+%
+% Useful string and character routines.
+%
+% Written by: Alan Snyder
+%   padlc and padrc added by Paul R. Johnson
+%
+% padl (s, width) => s		pad string on left to desired width with space
+% padr (s, width) => s		pad string on right to desired width with space
+% padlc (s, width, c) => s	pad string on left to desired width with char
+% padrc (s, width, c) => s	pad string on right to desired width with char
+% upper (c) => c		convert character to upper case
+% lower (c) => c		convert character to lower case
+% supper (s) => s		convert string to upper case
+% slower (s) => s		convert string to lower case
+% verify (s1, s2) => bool	return true if s1 has a char not in s2
+% remblank (s) => s		remove leading blanks
+
+padl = proc (s: string, w: int) returns (string)
+	return (padlc(s, w, ' '))
+	end padl
+
+padr = proc (s: string, w: int) returns (string)
+	return (padrc(s, w, ' '))
+	end padr
+
+padlc = proc (s: string, w: int, c: char) returns (string)
+	cs: string := string$c2s(c)
+	while string$size(s) < w do
+		s := cs || s
+		end
+	return (s)
+	end padlc
+
+padrc = proc (s: string, w: int, c: char) returns (string)
+	while string$size(s) < w do
+		s := string$append(s, c)
+		end
+	return (s)
+	end padrc
+
+upper = proc (c: char) returns (char)
+	if c >= 'a' cand c <= 'z' then return (char$i2c (char$c2i (c) - 32))
+	    else return (c)
+	    end
+	end upper
+
+lower = proc (c: char) returns (char)
+	if c >= 'A' cand c <= 'Z' then return (char$i2c (char$c2i (c) + 32))
+	    else return (c)
+	    end
+	end lower
+
+supper = proc (s: string) returns (string)
+	ac = array[char]
+	a: ac := string$s2ac (s)
+	for i: int in ac$indexes (a) do
+		a[i] := upper (a[i])
+		end
+	return (string$ac2s (a))
+	end supper
+
+slower = proc (s: string) returns (string)
+	ac = array[char]
+	a: ac := string$s2ac (s)
+	for i: int in ac$indexes (a) do
+		a[i] := lower (a[i])
+		end
+	return (string$ac2s (a))
+	end slower
+
+verify = proc (s: string, chars: string) returns (bool)
+	for c: char in string$chars (s) do
+		if string$indexc (c, chars) = 0 then return (true) end
+		end
+	return (false)
+	end verify
+
+remblank = proc (s: string) returns (string)
+	i: int := 1
+	hi: int := string$size (s)
+	while i<=hi cand s[i]=' ' do i := i + 1 end
+	return (string$rest (s, i))
+	end remblank

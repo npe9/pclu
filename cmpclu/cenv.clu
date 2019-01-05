@@ -1,0 +1,800 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	CENV	CLU
+%
+%	CLU Compiler Version 3: checker environment
+
+c_env = cluster is	create,			% CE, stream -> c_env
+			reset,			% c_env, CE, stream ->
+			hack,			% c_env ->
+			unhack,			% c_env ->
+			is_hacked,		% c_env -> bool
+			set_line,		% c_env, int ->
+			new_apply,		% c_env, applytype ->
+			begin_specs,		% c_env ->
+			end_specs,		% c_env ->
+			begin_recheck,		% c_env, bool ->
+			end_recheck,		% c_env, bool ->
+			begin_scope,		% c_env ->
+			end_scope,		% c_env ->
+			begin_while,		% c_env ->
+			begin_for,		% c_env ->
+			end_loop,		% c_env -> bool
+			begin_type_scope,	% c_env ->
+			end_type_scope,		% c_env ->
+			equates,		% c_env, equatelist ->
+			eval_parms,		% c_env, decllist, equatelist ->
+			eval_equates,		% c_env ->
+			get_type,		% c_env, typeabs -> typespec
+			fix_type,		% c_env, typeabs -> typespec, bool
+			get_unknown_type,	% c_env -> typespec
+			get_null_type,		% c_env -> typespec
+			get_bool_type,		% c_env -> typespec
+			get_int_type,		% c_env -> typespec
+			get_real_type,		% c_env -> typespec
+			get_char_type,		% c_env -> typespec
+			get_str_type,		% c_env -> typespec
+			get_type_type,		% c_env -> typespec
+			get_any_type,		% c_env -> typespec
+			get_cvt_type,		% c_env -> typespec
+			get_up_type,		% c_env -> typespec
+			set_up_type,		% c_env, typespec ->
+			get_down_type,		% c_env -> typespec
+			set_down_type,		% c_env, typespec ->
+			get_array_,		% c_env -> DU
+			get_record_,		% c_env -> DU
+			get_oneof_,		% c_env -> DU
+			get_seq_,		% c_env -> DU
+			get_struct_,		% c_env -> DU
+			get_variant_,		% c_env -> DU
+			get_proc_,		% c_env -> DU
+			get_iter_,		% c_env -> DU
+			get_du,			% c_env, DU -> DU
+			get_mod_gen,		% c_env -> DU
+			set_mod_gen,		% c_env -> DU
+			get_module_name,	% c_env -> name
+			set_varlist,		% c_env, idnrow ->
+			pop_externals,		% c_env -> idnrow
+			add_undefined,		% c_env, DU ->
+			pop_undefined,		% c_env -> DUlist
+			in_cluster,		% c_env -> bool
+			in_proc,		% c_env -> bool
+			break_illegal,		% c_env -> bool
+			continue_illegal,	% c_env -> bool
+			types_illegal,		% c_env -> bool
+			building_specs,		% c_env -> bool
+			checking_specs,		% c_env -> bool
+			rechecking_types,	% c_env -> bool
+			err,			% c_env, qs ->
+			err1,			% c_env, str ->
+			errt,			% c_env, qs, typespec, typespec ->
+			warn,			% c_env, qs ->
+			warn1,			% c_env, str ->
+			eval_err,		% c_env, str, str, str ->
+			get_err,		% c_env -> int
+			end_reset,		% c_env, bool ->
+			get_xsignals,		% c_env -> exceptionlist
+			get_values,		% c_env -> typelist
+			get_bad_expr,		% c_env -> expr
+			push_vals,		% c_env, idnlist, exprlist ->
+			push_parms,		% c_env, idnlist, idnlist ->
+			push_parm,		% c_env, idn, idn ->
+			declare,		% c_env, idn, idnkind ->
+			add_var,		% c_env, idn, typespec ->
+			add_ownvar,		% c_env, idn, typespec ->
+			scopify,		% c_env, idn ->
+			lookup,			% c_env, idn, bool ->
+			push_handlers,		% c_env, exceptstmt ->
+			push_resigs,		% c_env, namelist ->
+			pop_handlers,		% c_env ->
+			add_cond		% c_env, exception ->
+
+m1		= -1
+
+entry		= record[idn:  idn,
+			 kind: idnkind]
+idnstack	= array[entry]
+equiv		= oneof[equate: equateval,
+			parm:   typespec]
+eqentry		= record[idn:    idn,
+			 code:   int,
+			 line:   int,
+			 equiv:  equiv]
+unknown_	= 0
+in_progress_	= 1
+known_		= 2
+eqstack		= array[eqentry]
+condstack	= array[condentry]
+condentry	= oneof[except_:   exceptstmt,
+			resignal_: namelist]
+none		= 0
+warning		= 1
+baderr		= 2
+building_	= 0
+rechecking_	= 1
+checking_	= 2
+
+while_loop_	= 0
+for_loop_	= 1
+xent_for_loop_	= 2
+
+rep		= record[ce:        CE,
+			 hacked:    bool,
+			 line:      int,
+			 scopes:    ai,
+			 idns:      idnstack,
+			 vars:      idnrow,
+			 exts:      idnrow,
+			 undefs:    DUlist,
+			 up_:       typespec,
+			 down_:     typespec,
+			 apply:     applytype,
+			 mod_gen:   DU,
+			 loops:     ai,
+			 types_ok:  int,
+			 err:       int,
+			 errst:     stream,
+			 state:     int,
+			 depth:     int,
+			 tdepth:    int,
+			 eqstack:   eqstack,
+			 equates:   bool,
+			 condstack: condstack,
+			 failure:   exception]
+
+create = proc (comp: CE, errst: stream) returns (cvt)
+	ut: typespec := comp.unknown_type
+	gen: DU := comp.proc_
+	return(rep${ce:		comp,
+		    hacked:     false,
+		    line:	0,
+		    scopes:	ai$predict(1, 20),
+		    idns:	idnstack$predict(1, 300),
+		    vars:	idnrow$new(),
+		    exts:	idnrow$predict(1, 10),
+		    undefs:	DUlist$predict(1, 10),
+		    up_:	ut,
+		    down_:	ut,
+		    apply:	applytype${gen:  gen,
+					   args: typelist$new(),
+					   vals: typelist$new(),
+					   sigs: exceptionlist$new()},
+		    mod_gen:	gen,
+		    loops:	ai$predict(1, 5),
+		    types_ok:	0,
+		    err:	none,
+		    errst:	errst,
+		    state:	checking_,
+		    depth:	0,
+		    tdepth:	0,
+		    eqstack:	eqstack$predict(1, 200),
+		    equates:	false,
+		    condstack:	condstack$predict(1, -5),
+		    failure:	exception${name:  "failure",
+					   types: typelist$[comp.str_type]}})
+	end create
+
+reset = proc (e: cvt, comp: CE, errst: stream)
+	e.ce := comp
+	e.line := 0
+	ai$trim(e.scopes, 1, 0)
+	idnstack$trim(e.idns, 1, 0)
+	idnrow$trim(e.vars, 1, 0)
+	idnrow$trim(e.exts, 1, 0)
+	DUlist$trim(e.undefs, 1, 0)
+	ai$trim(e.loops, 1, 0)
+	e.types_ok := 0
+	e.hacked := false
+	e.errst := errst
+	e.err := none
+	e.state := checking_
+	e.depth := 0
+	e.tdepth := 0
+	eqstack$trim(e.eqstack, 1, 0)
+	e.equates := false
+	condstack$trim(e.condstack, 1, 0)
+	e.up_ := comp.unknown_type
+	e.down_ := e.up_
+	end reset
+
+hack = proc (e: cvt)
+	e.hacked := true
+	e.types_ok := 1
+	end hack
+
+unhack = proc (e: cvt)
+	e.hacked := false
+	e.types_ok := 0
+	end unhack
+
+is_hacked = proc (e: cvt) returns (bool)
+	return(e.hacked)
+	end is_hacked
+
+set_line = proc (e: cvt, line: int)
+	e.line := line
+	end set_line
+
+new_apply = proc (e: cvt, at: applytype)
+	e.apply := at
+	end new_apply
+
+begin_specs = proc (e: cvt)
+	e.state := building_
+	e.depth := e.depth + 1
+	begin_scope(up(e))
+	end begin_specs
+
+end_specs = proc (e: cvt)
+	e.depth := e.depth - 1
+	if e.depth = 0 then e.state := checking_ end
+	end_scope(up(e))
+	end end_specs
+
+begin_recheck = proc (e: cvt, types: bool)
+	if types
+	   then e.tdepth := e.tdepth + 1 end
+	e.state := rechecking_
+	e.depth := e.depth + 1
+	end begin_recheck
+
+end_recheck = proc (e: cvt, types: bool)
+	if types
+	   then e.tdepth := e.tdepth - 1 end
+	e.depth := e.depth - 1
+	if e.depth = 0 then e.state := checking_ end
+	end end_recheck
+
+begin_scope = proc (e: cvt)
+	ai$addh(e.scopes, idnstack$size(e.idns))
+	end begin_scope
+
+end_scope = proc (e: cvt)
+	i: int := ai$remh(e.scopes)
+	stack: idnstack := e.idns
+	for j: int in int$from_to_by(idnstack$high(stack), i + 1, m1) do
+		ent: entry := stack[j]
+		ent.idn.kind := ent.kind
+		end
+	idnstack$trim(stack, 1, i)
+	end end_scope
+
+begin_while = proc (e: cvt)
+	ai$addh(e.loops, while_loop_)
+	end begin_while
+
+begin_for = proc (e: cvt)
+	ai$addh(e.loops, for_loop_)
+	end begin_for
+
+end_loop = proc (e: cvt) returns (bool)
+	return(ai$remh(e.loops) = xent_for_loop_)
+	end end_loop
+
+begin_type_scope = proc (e: cvt)
+	e.types_ok := e.types_ok + 1
+	end begin_type_scope
+
+end_type_scope = proc (e: cvt)
+	e.types_ok := e.types_ok - 1
+	end end_type_scope
+
+equates = proc (e: cvt, list: equatelist)
+	size: int := eqstack$size(e.eqstack)
+	push_equates(e, list)
+	process(e, size)
+	end equates
+
+eval_parms = proc (e: cvt, parms: decllist, list: equatelist)
+	idns: idnstack := e.idns
+	stack: eqstack := e.eqstack
+	line: int := e.line
+	push_equates(e, list)
+	size: int := eqstack$size(stack)
+	for d: decl in decllist$elements(parms) do
+		eq: equiv := equiv$make_parm(d.type_)
+		for i: idn in idnlist$elements(d.idns) do
+			eqstack$addh(stack, eqentry${idn:   i,
+						     code:  unknown_,
+						     line:  line,
+						     equiv: eq})
+			idnstack$addh(idns, entry${idn:  i,
+						   kind: i.kind})
+			end
+		end
+	process(e, size)
+	end eval_parms
+
+eval_equates = proc (e: cvt)
+	process(e, 0)
+	end eval_equates
+
+push_equates = proc (e: rep, list: equatelist)
+	idns: idnstack := e.idns
+	stack: eqstack := e.eqstack
+	for eq: equate in equatelist$elements(list) do
+		i: idn := eq.idn
+		eqstack$addh(stack, eqentry${idn:   i,
+					     code:  unknown_,
+					     line:  eq.line,
+					     equiv: equiv$make_equate(eq.val)})
+		idnstack$addh(idns, entry${idn:  i,
+					   kind: i.kind})
+		end
+	end push_equates
+
+process = proc (e: rep, size: int)
+	e.equates := true
+	e.types_ok := e.types_ok + 1
+	stack: eqstack := e.eqstack
+	for i: int in int$from_to_by(size + 1, eqstack$size(stack), 1) do
+		ent: eqentry := stack[i]
+		if ent.code = unknown_
+		   then	e.line := ent.line
+			do_entry(e, ent)
+		   end
+		end
+	eqstack$trim(stack, 1, size)
+	e.equates := size > 0
+	e.types_ok := e.types_ok - 1
+	end process
+
+get_type = proc (e: cvt, ta: typeabs) returns (typespec)
+	t: typespec, old: bool := CE$get_type(e.ce, ta)
+	return(t)
+	end get_type
+
+fix_type = proc (e: cvt, ta: typeabs) returns (typespec, bool)
+	t: typespec, old: bool := CE$get_type(e.ce, ta)
+	return(t, old)
+	end fix_type
+
+get_unknown_type = proc (e: cvt) returns (typespec)
+	return(e.ce.unknown_type)
+	end get_unknown_type
+
+get_null_type = proc (e: cvt) returns (typespec)
+	return(e.ce.null_type)
+	end get_null_type
+
+get_bool_type = proc (e: cvt) returns (typespec)
+	return(e.ce.bool_type)
+	end get_bool_type
+
+get_int_type = proc (e: cvt) returns (typespec)
+	return(e.ce.int_type)
+	end get_int_type
+
+get_real_type = proc (e: cvt) returns (typespec)
+	return(e.ce.real_type)
+	end get_real_type
+
+get_char_type = proc (e: cvt) returns (typespec)
+	return(e.ce.char_type)
+	end get_char_type
+
+get_str_type = proc (e: cvt) returns (typespec)
+	return(e.ce.str_type)
+	end get_str_type
+
+get_type_type = proc (e: cvt) returns (typespec)
+	return(e.ce.type_type)
+	end get_type_type
+
+get_any_type = proc (e: cvt) returns (typespec)
+	return(e.ce.any_type)
+	end get_any_type
+
+get_cvt_type = proc (e: cvt) returns (typespec)
+	return(e.ce.cvt_type)
+	end get_cvt_type
+
+get_up_type = proc (e: cvt) returns (typespec)
+	return(e.up_)
+	end get_up_type
+
+set_up_type = proc (e: cvt, t: typespec)
+	e.up_ := t
+	end set_up_type
+
+get_down_type = proc (e: cvt) returns (typespec)
+	return(e.down_)
+	end get_down_type
+
+set_down_type = proc (e: cvt, t: typespec)
+	e.down_ := t
+	end set_down_type
+
+get_array_ = proc (e: cvt) returns (DU)
+	return(e.ce.array_)
+	end get_array_
+
+get_record_ = proc (e: cvt) returns (DU)
+	return(e.ce.record_)
+	end get_record_
+
+get_oneof_ = proc (e: cvt) returns (DU)
+	return(e.ce.oneof_)
+	end get_oneof_
+
+get_seq_ = proc (e: cvt) returns (DU)
+	return(e.ce.seq_)
+	end get_seq_
+
+get_struct_ = proc (e: cvt) returns (DU)
+	return(e.ce.struct_)
+	end get_struct_
+
+get_variant_ = proc (e: cvt) returns (DU)
+	return(e.ce.variant_)
+	end get_variant_
+
+get_proc_ = proc (e: cvt) returns (DU)
+	return(e.ce.proc_)
+	end get_proc_
+
+get_iter_ = proc (e: cvt) returns (DU)
+	return(e.ce.iter_)
+	end get_iter_
+
+get_du = proc (e: cvt, d: DU) returns (DU)
+	return(CE$add_du(e.ce, d))
+	end get_du
+
+get_mod_gen = proc (e: cvt) returns (DU)
+	return(e.mod_gen)
+	end get_mod_gen
+
+set_mod_gen = proc (e: cvt, gen: DU)
+	e.mod_gen := gen
+	idnrow$addh(e.exts, idn$create(gen.unique, idnkind$make_unknown(nil)))
+	end set_mod_gen
+
+get_module_name = proc (e: cvt) returns (name)
+	return(e.mod_gen.common)
+	end get_module_name
+
+set_varlist = proc (e: cvt, vars: idnrow)
+	e.vars := vars
+	end set_varlist
+
+pop_externals = proc (e: cvt) returns (idnrow)
+	exts: idnrow := idnrow$copy1(e.exts)
+	idnrow$trim(e.exts, 1, 0)
+	return(exts)
+	end pop_externals
+
+add_undefined = proc (e: cvt, d: DU)
+	DUlist$addh(e.undefs, d)
+	end add_undefined
+
+pop_undefined = proc (e: cvt) returns (DUlist)
+	undefs: DUlist := DUlist$copy1(e.undefs)
+	DUlist$trim(e.undefs, 1, 0)
+	return(undefs)
+	end pop_undefined
+
+in_cluster = proc (e: cvt) returns (bool)
+	return(e.up_ ~= e.ce.unknown_type)
+	end in_cluster
+
+in_proc = proc (e: cvt) returns (bool)
+	return(e.apply.gen ~= e.ce.iter_)
+	end in_proc
+
+break_illegal = proc (e: cvt) returns (bool)
+	loops: ai := e.loops
+	if ai$empty(loops)
+	   then return(true)
+	elseif ai$top(loops) ~= while_loop_
+	   then for i: int in int$from_to_by(ai$size(loops) - 1, 1, m1) do
+			if loops[i] ~= while_loop_
+			   then loops[i]  := xent_for_loop_
+				break
+			   end
+			end
+	end
+	return(false)
+	end break_illegal
+
+continue_illegal = proc (e: cvt) returns (bool)
+	return(ai$empty(e.loops))
+	end continue_illegal
+
+types_illegal = proc (e: cvt) returns (bool)
+	return(e.types_ok = 0)
+	end types_illegal
+
+building_specs = proc (e: cvt) returns (bool)
+	return(e.state = building_)
+	end building_specs
+
+checking_specs = proc (e: cvt) returns (bool)
+	return(e.state = rechecking_)
+	end checking_specs
+
+rechecking_types = proc (e: cvt) returns (bool)
+	return(e.tdepth > 0)
+	end rechecking_types
+
+err = proc (e: cvt, msg: qs)
+	e.err := baderr
+	output(e, msg)
+	end err
+
+err1 = proc (e: cvt, msg: str)
+	e.err := baderr
+	output1(e, msg)
+	end err1
+
+errt = proc (e: cvt, msg: qs, t1, t2: typespec)
+	e.err := baderr
+	output(e, qs$addh(msg, " of wrong type"))
+	st: stream := e.errst
+	begin
+	stream$puts(st, "\texpected type: ")
+	stream$putl(st, get_type_print(t1))
+	stream$puts(st, "\tactual type: ")
+	stream$putl(st, get_type_print(t2))
+	end except others: end
+	end errt
+
+warn = proc (e: cvt, msg: qs)
+	if e.err = none then e.err := warning end
+	output(e, msg)
+	end warn
+
+warn1 = proc (e: cvt, msg: str)
+	if e.err = none then e.err := warning end
+	output1(e, msg)
+	end warn1
+
+eval_err = proc (e: cvt, type_: str, op: str, sig: str)
+	e.err := baderr
+	output(e, qs$[type_, "$", op, " invocation evaluates to '", sig,
+								"' exception"])
+	end eval_err
+
+output = proc (e: rep, msg: qs)
+	st: stream := e.errst
+	l: int := e.line
+	begin
+	if l > 0
+	   then	stream$puts(st, int$unparse(e.line))
+		stream$putc(st, ':')
+	   end
+	stream$putc(st, '\t')
+	for s: str in qs$elements(msg) do
+		stream$puts(st, s)
+		end
+	stream$putc(st, '\n')
+	end except others: end
+	end output
+
+output1 = proc (e: rep, msg: str)
+	st: stream := e.errst
+	l: int := e.line
+	begin
+	if l > 0
+	   then	stream$puts(st, int$unparse(e.line))
+		stream$putc(st, ':')
+	   end
+	stream$putc(st, '\t')
+	stream$putl(st, msg)
+	end except others: end
+	end output1
+
+get_err = proc (e: cvt) returns (int)
+	return(e.err)
+	end get_err
+
+end_reset = proc (e: cvt, lasting: bool)
+	e.err := none
+	CE$reset_entries(e.ce, lasting)
+	end end_reset
+
+get_xsignals = proc (e: cvt) returns (exceptionlist)
+	return(e.apply.sigs)
+	end get_xsignals
+
+get_values = proc (e: cvt) returns (typelist)
+	return(e.apply.vals)
+	end get_values
+
+get_bad_expr = proc (e: cvt) returns (expr)
+	return(expr$create(exprabs$make_bad(nil), e.ce.unknown_type))
+	end get_bad_expr
+
+push_vals = proc (e: cvt, idns: idnlist, vals: exprlist)
+	stack: idnstack := e.idns
+	for n: int in idnlist$indexes(idns) do
+		i: idn := idns[n]
+		idnstack$addh(stack, entry${idn:   i,
+					    kind:  i.kind})
+		i.kind := idnkind$make_expr(vals[n])
+		end
+	end push_vals
+
+push_parms = proc (e: c_env, parms: idnlist, nparms: idnlist)
+	for i: int in idnlist$indexes(parms) do
+		push_parm(e, parms[i], nparms[i])
+		end
+	end push_parms
+
+push_parm = proc (e: cvt, parm: idn, nparm: idn)
+	stack: idnstack := e.idns
+	tt: typespec := e.ce.type_type
+	idnstack$addh(stack, entry${idn:   parm,
+				    kind:  parm.kind})
+	x: expr
+	tagcase nparm.kind
+	   tag tparm:
+		t: typespec := get_type(up(e), typeabs$make_idn(nparm))
+		x := expr$create(exprabs$make_type_(t), tt)
+	   tag vparm (k: typespec):
+		x := expr$create(exprabs$make_idn(nparm), k)
+	   others:
+		x := up(e).bad_expr
+	   end
+	parm.kind := idnkind$make_expr(x)
+	end push_parm
+
+declare = proc (e: cvt, i: idn, nk: idnkind)
+	k: idnkind := i.kind
+	line: int := CE$local(e.ce, i.str)
+	if ~idnkind$is_unknown(k)
+	   then if line = 0
+		   then err(up(e), qs$["redeclaration of '", i.str, "'"])
+		   else err(up(e), qs$["declaration of external '", i.str,
+					"' used on line ", int$unparse(line)])
+		   end
+	   end
+	idnstack$addh(e.idns, entry${idn:  i,
+				     kind: k})
+	i.kind := nk
+	end declare
+
+add_var = proc (e: cvt, i: idn, t: typespec)
+	declare(up(e), i, idnkind$make_var(t))
+	vars: idnrow := e.vars
+	for i1: idn in idnrow$elements(vars) do
+		if i = i1 then return end
+		end
+	idnrow$addh(vars, i)
+	end add_var
+
+add_ownvar = proc (e: cvt, i: idn, t: typespec)
+	declare(up(e), i, idnkind$make_ownvar(t))
+	end add_ownvar
+
+scopify = proc (e: cvt, i: idn)
+	idnstack$addh(e.idns, entry${idn:  i,
+				     kind: idnkind$make_unknown(nil)})
+	end scopify
+
+lookup = proc (e: cvt, i: idn, want: int)
+	if ~e.equates
+	   then lookup2(e, i, want)
+		return
+	   end
+	for ent: eqentry in eqstack$elements(e.eqstack) do
+		if i = ent.idn
+		   then	if ent.code = unknown_
+			   then do_entry(e, ent)
+			   else	ent.code := known_
+				err(up(e), qs$["recursive use of identifier '", i.str,
+						"' declared in line ",
+						int$unparse(ent.line)])
+				i.kind := idnkind$make_expr(up(e).bad_expr)
+			   end
+			return
+		   end
+		end
+	lookup2(e, i, want)
+	end lookup
+
+do_entry = proc (e: rep, ent: eqentry)
+	ent.code := in_progress_
+	oline: int := e.line
+	e.line := ent.line
+	i: idn := ent.idn
+	k: idnkind
+	tagcase ent.equiv
+	   tag equate (eq: equateval):
+		k := c_equateval(up(e), eq)
+	   tag parm (eq: typespec):
+		eq, k := c_parm_type(up(e), i, eq)
+		ent.equiv := equiv$make_parm(eq)
+	   end
+	line: int := CE$local(e.ce, i.str)
+	if ~idnkind$is_unknown(i.kind)
+	   then if line = 0
+		   then err(up(e), qs$["redeclaration of '", i.str, "'"])
+		   else err(up(e), qs$["declaration of external '", i.str,
+					"' used on line ", int$unparse(line)])
+		   end
+	   end
+	i.kind := k
+	e.line := oline
+	ent.code := known_
+	end do_entry
+
+lookup2 = proc (e: rep, i: idn, want: int)
+	k: idnkind := CE$lookup(e.ce, i.str, e.line)
+	   except when local:
+			err(up(e), qs$["use of '", i.str,
+						"' outside scope of declaration"])
+			i.kind := idnkind$make_expr(up(e).bad_expr)
+			return
+		  end
+	if idnkind$is_unknown(k)
+	   then gen: DU := CE$add_du(e.ce, XLIB$get_DU(i.str))
+		k := c_get_idnkind(up(e), gen, want)
+		tagcase gen.mspecs
+		   tag specs (specs: DUspecs):
+			tagcase specs
+			   tag none:
+			   others:
+				idnrow$addh(e.exts, i)
+			   end
+		   others:
+		   end
+	   end
+	i.kind := k
+	end lookup2
+
+push_handlers = proc (e: cvt, xs: exceptstmt)
+	loops: ai := e.loops
+	for i: int in int$from_to_by(ai$size(loops), 1, m1) do
+		if loops[i] ~= while_loop_
+		   then loops[i] := xent_for_loop_
+			break
+		   end
+		end
+	condstack$addl(e.condstack, condentry$make_except_(xs))
+	end push_handlers
+
+push_resigs = proc (e: cvt, resigs: namelist)
+	condstack$addl(e.condstack, condentry$make_resignal_(resigs))
+	end push_resigs
+
+pop_handlers = proc (e: cvt)
+	add_cond(up(e), e.failure, signal_)
+	condstack$reml(e.condstack)
+	end pop_handlers
+
+add_cond = proc (e: cvt, cond: exception, is_exit: bool)
+	cn: name := cond.name
+	for ent: condentry in condstack$elements(e.condstack) do
+		tagcase ent
+		   tag except_ (xs: exceptstmt):
+			for arm: handler in handlerlist$elements(xs.arms) do
+				for n: name in namelist$elements(arm.names) do
+					if n = cn
+					   then c_when_assn(up(e), arm.vars,
+								cond, is_exit)
+						return
+					   end
+					end
+				end
+			if mothersarm$is_arm(xs.others_)
+			   then if is_exit
+				   then err(up(e),
+					    qs$["exit '", cn,
+						"' caught by OTHERS arm"])
+				   end
+				return
+			   end
+		   tag resignal_ (resigs: namelist):
+			for resig: name in namelist$elements(resigs) do
+				if cn = resig
+				   then c_resig_catch(up(e), cond, is_exit)
+					return
+				   end
+				end
+		   end
+		end
+	if is_exit
+	   then err(up(e), qs$["exit '", cn, "' not caught"]) end
+	end add_cond
+
+end c_env

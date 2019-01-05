@@ -1,0 +1,508 @@
+
+%  Copyright    Massachusetts Institute of Technology     1990,1991
+
+%%%
+%%% Cluster to generate tables for records and other selectors and parameters
+%%%
+
+g_const = cluster is find_consts, g_consts, exist
+
+    rep = null
+    own cum_const: constlist := constlist$new()
+
+    exist = proc() returns (bool)
+	if constlist$size(cum_const) = 0
+	   then
+		return (false)
+	   else
+		return (true)
+	   end
+	end exist
+
+    % actually finds constants and generates decls
+
+    find_consts = proc(e: g_env, bod: stmtlist)
+	const: constlist := constlist$new()
+	find_consts2(bod, const)
+	const := const_uniq(const)
+        cum_const := const
+	% logit("g_const size: " || int$unparse(constlist$size(cum_const)))
+	g_consts(e, static)
+	return
+	end find_consts
+
+    %    combs the parse tree of stmts for exprs that might be constants
+
+    find_consts2 = proc(bod:stmtlist, const: constlist)
+	for s: stmt in stmtlist$elements(bod) do
+	    % logit(102, "\n/**** " || int$unparse(s.line) || " ****/\n")
+	    % stmt_print(s)
+	    tagcase s.abs
+	       tag declinit(di: declinit):
+		   find_const_exprs(di.expr, const)
+	       tag assn(as: assn):
+		   find_const_exprlist(as.right, const)
+	       tag sugarassn(as: sugarassn):
+		   find_const_exprs(as.left, const)
+		   find_const_exprs(as.right, const)
+	       tag invoke(inv:invoke):
+		   find_const_exprs(inv.apply, const)
+		   find_const_exprlist(inv.args, const)
+	       tag while_(w: whilestmt):
+		   find_const_exprs(w.test, const)
+		   find_consts2(w.body.stmts, const)
+	       tag for_ (f: forstmt):
+		   find_const_exprs(f.call.apply, const)
+		   find_const_exprlist(f.call.args, const)
+		   find_consts2(f.body.stmts, const)
+	       tag if_ (i: ifstmt):
+		   for arm: ifarm in ifarmlist$elements (i.arms) do
+		       find_const_exprs(arm.test, const)
+		       find_consts2 (arm.body.stmts, const)
+		       end % for
+		   tagcase i.else_
+		      tag body (b:body):
+			  find_consts2(b.stmts, const)
+		      others:
+		      end
+	       tag tag_ (t: tagstmt):
+		   find_const_exprs(t.obj, const)
+		   for arm: tagarm in tagarmlist$elements(t.arms) do
+		       find_consts2(arm.body.stmts, const)
+		       end % for
+		   tagcase t.others_
+		      tag body (b: body):
+			  find_consts2(b.stmts, const)
+		      others:
+		      end
+	       tag return_(el: exprlist):
+		   find_const_exprlist(el, const)
+	       tag yield_(el: exprlist):
+		   find_const_exprlist(el, const)
+	       tag signal_(c: condition):
+		   find_const_exprlist(c.args, const)
+	       tag exit_(c: condition):
+		   find_const_exprlist(c.args, const)
+	       tag body (b: body):
+		   find_consts2(b.stmts, const)
+	       tag except_ (e: exceptstmt):
+		   find_consts2(stmtlist$fill(1, e.stmt), const)
+		   for a: handler in handlerlist$elements(e.arms) do
+		       find_consts2(a.body.stmts, const)
+		       end % for
+		   tagcase e.others_
+		      tag arm (a: othersarm):
+			  find_consts2(a.body.stmts, const)
+		      others:
+		      end
+	       tag resignal_ (r: resignalstmt):
+		   find_consts2(stmtlist$fill(1, r.stmt), const)
+	       tag force_ (f: forcestmt):
+		   find_const_exprs(f.expr, const)
+	       others:
+	       end
+	    end % for
+	end find_consts2
+
+    %    iterates over exprlists
+
+    find_const_exprlist = proc(el: exprlist, const: constlist)
+	for each_e: expr in exprlist$elements(el) do
+	    find_const_exprs(each_e, const)
+	    end % for
+	end find_const_exprlist
+
+    %    iterates over fieldspeclists
+
+    find_const_fieldspeclist = proc(fl: fieldspeclist, const: constlist)
+	for each_f: fieldspec in fieldspeclist$elements(fl) do
+	    find_const_field(each_f, const)
+	    end % for
+	end find_const_fieldspeclist
+
+    % actually looks at exprs for constants (recurses on exprs as well)
+
+    find_const_exprs = proc(exp: expr, const: constlist)
+
+	% any_ and type_of_ MAY BE MISSING FROM FOLLOWING TAGCASE
+
+	% expr_print(exp, 10)
+	tagcase exp.abs
+	   tag apply(ct: clutype):
+	       %if ~base_apply_test(ct) then
+	       %find_const_exprlist(ct.parms, const)
+	       %if exprlist$size(ct.parms) > 0
+	       %then
+	       % constlist$addh(const, cst$make_apply(ct))
+	       %logit("adding apply")
+	       %else
+	       %if parmd_dus(ct.gen) then
+	       %logit("adding apply")
+	       % constlist$addh(const, cst$make_apply(ct)) end
+	       %end
+	       %end
+	   tag op(cop: clusterop):
+	       tagcase cop.type_.abs
+		  tag select (sel:seltype):
+		      if parmd_op(sel.gen, cop.name) then
+			 %find_const_fieldspeclist(sel.parms, const)
+			 %logit("adding select")
+			 % constlist$addh(const, cst$make_selinfo(
+			 %selectinfo${name:sel.gen.common,
+			 %fields:sel.parms}))
+			 end
+		  tag apply (a:applytype):
+		      %if parmd_op(a.gen, "") then
+		      %find_const_exprlist(cop.parms, const)
+		      %logit("adding op")
+		      % constlist$addh(const, cst$make_op(cop)) end
+		  tag cluster_, type_ (ct:clutype):
+		      %if parmd_dus(ct.gen) cand ~base_cluster_test(cop, ct) then
+		      find_const_exprlist(cop.parms, const)
+		      find_const_exprlist(ct.parms, const)
+		      % constlist$addh(const, cst$make_apply(ct))
+		      % constlist$addh(const, cst$make_op(cop))
+		      %end
+		  tag idn:
+		  others:
+		      % logit("op: unhandled typespec")
+		      % typespec_print(cop.type_)
+		  end
+	   tag s_cons(s: selectcons):
+	       if typeabs$is_select(s.type_.abs) then
+		  sel : seltype := typeabs$value_select(s.type_.abs)
+		  for this_field: field in fieldlist$elements(s.fields) do
+		      find_const_exprs(this_field.val, const)
+		      end % for
+		  %  1/30/90: omit this: let op and type_ clauses carry the load
+		  %	  constlist$addh(const, cst$make_selinfo(selectinfo${name:sel.gen.common,
+		  %						       fields: typeabs$value_select(s.type_.abs).parms}))
+		  end % if
+	   tag a_cons(a: arraycons):
+	       find_const_exprlist(a.elts, const)
+	       %constlist$addh(const, cst$make_a_cons(a))
+	   tag cand_(c: condop):
+	       find_const_exprs(c.left, const)
+	       find_const_exprs(c.right, const)
+	   tag cor_ (c: condop):
+	       find_const_exprs(c.left, const)
+	       find_const_exprs(c.right, const)
+	   tag invoke (inv: invoke):
+	       find_const_exprs(inv.apply, const)
+	       find_const_exprlist(inv.args, const)
+	   tag up_ (e: expr):
+	       find_const_exprs(e, const)
+	   tag down_ (e: expr):
+	       find_const_exprs(e, const)
+	   tag type_ (t: typespec):
+	       tagcase t.abs
+		  tag select (sel:seltype):
+		      %find_const_fieldspeclist(sel.parms, const)
+		      %logit("adding type_/select")
+		      %constlist$addh(const, cst$make_selinfo(
+		      %selectinfo${name:sel.gen.common,
+		      %fields:sel.parms}))
+		  tag apply (a:applytype):
+		      if parmd_dus(a.gen) then
+			 %logit("gconst FIND_EXPRS: apply found in type_")
+			 % this occurs when an array is parmd by a proctype
+			 % it seems that nothing need be done
+			 %logit(a.gen.common)
+			 %constlist$addh(const, cst$make_op(cop)) end
+			 end
+		  tag cluster_, type_ (ct:clutype):
+		      if parmd_dus(ct.gen) then
+			 %find_const_exprlist(ct.parms, const)
+			 %logit("adding type_/cluster")
+			 %constlist$addh(const, cst$make_apply(ct))
+			 end
+		  tag idn:
+		  tag any_:
+		  others:
+		      % logit(100, "type_: unhandled typespec")
+		      % typespec_print(t)
+		  end
+	   tag str (s:str):
+	       constlist$addh(const, cst$make_str(s))
+	   tag type_of_ (ex: expr):
+	       % logit(101, "type_of_")
+	       % expr_print(exp, 9)
+	   tag any_ (ex: expr):
+	       find_const_exprs(ex, const)
+	   others:
+	       %expr_print(exp, 10)
+	   end % tag
+	end find_const_exprs
+
+    % actually looks for constants in record components
+
+    find_const_field = proc(f: fieldspec, const: constlist)
+	%logit("Arrived in find_const_field:")
+	%typespec_print(f.type_)
+	tagcase f.type_.abs
+	   tag cluster_, type_ (ct: clutype):
+	       %find_const_exprlist(ct.parms, const)
+	       if exprlist$size(ct.parms) > 0
+		  then
+		       %logit("adding field/cluster_/type_")
+		       %constlist$addh(const, cst$make_apply(ct))
+		  else
+		       if parmd_dus(ct.gen)
+			  then
+			       %logit("adding field/apply")
+			       %constlist$addh(const, cst$make_apply(ct))
+			  end
+		  end
+	   tag select (sel:seltype):
+	       %logit("f_t_f: adding select")
+	       find_const_fieldspeclist(sel.parms, const)
+	       %logit("adding field/select")
+	       %constlist$addh(const, cst$make_selinfo(
+	       %selectinfo${name:sel.gen.common,
+	       %fields:sel.parms}))
+	   tag apply (a: applytype):
+	       %logit("unimplemented find_const_field arm: apply")
+	   tag idn, cvt_, unknown, any_, xsel, xclu, other:
+	   end
+	end find_const_field
+    
+    const_uniq = proc(const: constlist) returns (constlist)
+	low: int := constlist$low(const)
+	size: int := constlist$size(const)
+	if size <= 1 then return (const) end
+	newconst: constlist := constlist$new()
+	constlist$addh(newconst, const[low])
+	%    logit(" UNIQ ")
+	%    cst_print(const[low])
+	for index:int in int$from_to(low+1, size) do
+	    %	cst_print(const[index])
+	    possible_cst: cst := const[index]
+	    for each_cst: cst in constlist$elements(newconst) do
+		tagcase each_cst
+		   tag str(each_s:str):
+		       if ~cst$is_str(possible_cst) then continue end
+		       if each_s = cst$value_str(possible_cst)
+			  then exit cont end
+		   others:
+		   end
+		end % for
+	       except when cont: continue end
+	    constlist$addh(newconst, possible_cst)
+	    end % for
+	return(newconst)
+	end const_uniq
+
+
+    % declares CLUREF for const
+
+    g_consts = proc(e: g_env, pass: int)
+	
+	% logit("field_tables pass: " || int$unparse(pass) || ", size: " || int$unparse(constlist$size(cum_const)))
+	for each_cst: cst in constlist$elements(cum_const) do
+	    % cst_print(each_cst)
+	    if pass = static
+	       then
+		    tagcase each_cst
+		       tag str (s: str):
+			   g_str_decl(e, s)
+		       others:
+		       end
+		    % test: bool := test_cst(each_cst)
+		    % test is true if table changes dynamically 
+		    %			=> put in owns block (pass = dynamic)
+		    %         false if table is constant 
+		    %			=> make it static (pass = static)
+		    % if test then logit("field_tables test: true")
+		    % else logit("field_tables test: false") end
+		    % if test cand pass = static then continue end
+		    % if ~test cand pass = dynamic then continue end
+
+	       else
+		    tagcase each_cst
+		       tag str (s: str):
+			   g_str_cons(e, s)
+		       others:
+		       end
+	       end
+	    end % for
+	end g_consts
+
+    g_str_decl = proc(e: g_env, s:str)
+	if g_env$add_str(s) then
+	   g_env$putl(e, "CLUREF STR_" || s_string_embed(s) ||";")
+	   end
+	end g_str_decl
+
+    g_str_cons = proc(e: g_env, s:str)
+	size: int := string$size(s)
+	if int_const$exists(size)
+	   then
+		g_env$puts(e, "string" || sep || "cons(")
+		g_string(e, s)
+		g_env$puts(e, ", CLU_1, CLU_" || int$unparse(string$size(s)))
+		g_env$putl(e,  ", &" || s_string_name(s) ||");")
+	   else
+	        g_env$putl(e, "CLU_string_size.num = " || int$unparse(size) || ";")
+		g_env$puts(e, "string" || sep || "cons(")
+		g_string(e, s)
+		g_env$puts(e, ", CLU_1, CLU_string_size")
+		g_env$putl(e,  ", &" || s_string_name(s) ||");")
+	   end
+	end g_str_cons
+
+    %    % returns true if this cst depends on a parameter (== cst is dynamic)
+    %
+    %    test_cst = proc(p: cst) returns (bool)
+    %	tagcase p
+    %	   tag op (cop: clusterop):
+    %	       % logit("op")
+    %	       return(test_cst_exprs_asst(cop.parms))
+    %	   tag apply (ct: clutype):
+    %	       % logit("apply")
+    %	       return(test_cst_exprs_asst(ct.parms))
+    %	   tag a_cons (a: arraycons):
+    %	       % logit("a_cons")
+    %	       return(test_cst_exprs_asst(a.elts))
+    %	   tag selinfo (s: selectinfo):
+    %	       % logit("selinfo")
+    %	       return(test_cst_fields_asst(s.fields))
+    %	   others:
+    %	       % logit ("test_cst: others")
+    %	       return (false)
+    %	   end
+    %	end test_cst
+    %
+    %    % returns true if this exprlist depends on a parameter (== exprlist is dynamic)
+    %    %    5/31/90: adjusted to not return false prematurely
+    %    %    6/7/90:  adjusted to not return false prematurely, again
+    %
+    %    test_cst_exprs_asst = proc(el: exprlist) returns (bool)
+    %
+    %	% logit("exprlist$size : " || int$unparse(exprlist$size(el)))
+    %	for each_e: expr in exprlist$elements(el) do
+    %	    % expr_print(each_e, 52)
+    %	    tagcase each_e.abs
+    %	       tag type_(ty: typespec):
+    %		   tagcase ty.abs
+    %		      tag idn:
+    %			  return (true)
+    %		      tag type_, cluster_ (ct: clutype):
+    %			  if test_cst_exprs_asst(ct.parms) then return (true) end
+    %		      tag select (s: seltype):
+    %			  if test_cst_fields_asst(s.parms) then return (true) end
+    %		      others:
+    %		      end % tag
+    %	       tag null_:
+    %	       tag int_, str, bool_, char_, real_:
+    %		   %		   return (true)  % chucked 6/18/90
+    %	       tag idn(i:idn):
+    %		   return (true)
+    %	       others:
+    %		   logit("test_cst_expr_asst: exprabs not type_ or constant")
+    %		   expr_print(each_e, 40)
+    %		   return (false)
+    %	       end % tag
+    %	    end % for
+    %	return(false)
+    %
+    %	end test_cst_exprs_asst
+
+    % returns true if base type without owns and op has no restrict clause
+
+    %    base_cluster_test = proc(cop: clusterop, ct: clutype) returns (bool)
+    %	if (ct.gen.common = "array"
+    %	      cor ct.gen.common = "sequence"
+    %	      cor ct.gen.common = "_vec")
+    %	     cand ~parmd_op(ct.gen, cop.name)
+    %	   then return (true) end
+    %	return(false)
+    %	end base_cluster_test
+    %
+    %    base_apply_test = proc(ct:clutype) returns (bool)
+    %	if ct.gen.common = "_cvt"
+    %	   then return (true)
+    %	   end
+    %	return (false)
+    %	end base_apply_test
+
+    % returns true if this fieldspeclist depends on a parameter (== fieldspeclist is dynamic)
+    %    5/31/90: adjusted to not return false prematurely
+
+    %    test_cst_fields_asst = proc(fl: fieldspeclist) returns (bool)
+    %
+    %	for each_f: fieldspec in fieldspeclist$elements(fl) do
+    %	    ty: typespec := each_f.type_
+    %	    tagcase ty.abs
+    %	       tag idn:
+    %		   return (true)
+    %	       tag type_, cluster_ (ct: clutype):
+    %		   if(test_cst_exprs_asst(ct.parms)) then return (true) end
+    %	       tag select (s: seltype):
+    %		   if(test_cst_fields_asst(s.parms)) then return (true) end
+    %	       tag apply:
+    %	       others:
+    %		   logit("test_cst_fields_asst: unexpected typespec")
+    %		   typespec_print(each_f.type_)
+    %	       end
+    %	    end % for
+    %	return(false)
+    %
+    %	end test_cst_fields_asst
+
+    % generates code to invoke procedures to initialize contents of _table
+    %		and _ops structures
+
+    %    build_one_selector_table = proc(e: g_env, each_fn:name, each_fl:fieldspeclist)
+    %	ind: int := 0
+    %	for each_field:fieldspec in fieldspeclist$elements(each_fl) do
+    %	    g_env$puts(e, "add_selector_info(")
+    %
+    %	    % Field Name
+    %	    g_env$puts(e, "\"" || each_field.sel || "\", ")
+    %
+    %	    % Field Index
+    %	    g_env$puts(e, int$unparse(ind) || ", ")
+    %
+    %	    % TYPE OPERATIONS TABLE
+    %	    g_ref_name_typespec(e, each_field.type_)                            %%% refer to ops in owns if appropriate
+    %	    g_env$putl(e, "_ops); ")
+    %
+    %	    ind := ind + 1
+    %	    end % for
+    %	prefix: string := s_owns_prefix_fieldlist(each_fl)
+    %	sel_name: string := make_sel_name(each_fl)
+    %	g_env$putl(e, "find_selector_ops(\"" || each_fn || "\", " ||
+    %		      int$unparse(fieldspeclist$size(each_fl)) ||
+    %		      ", &(" || prefix || each_fn || "_" || sel_name || "_ops));")
+    %	end build_one_selector_table
+    %
+    end g_const
+
+
+const_defn = cluster is start, test, stop
+
+    rep = null
+    as = array[string]
+    own old: as   :=  as $new()
+    own active: bool := false
+
+    start = proc()
+	old := as$new()
+	active := true
+	return
+	end start
+
+    test = proc(s: string) returns (bool)
+	if ~active then return (true) end
+	for each_s: string in as$elements(old) do
+	    if each_s = s then return (false) end
+	    end % for
+	as$addh(old, s)
+	return (true)
+	end test
+
+    stop = proc()
+	active := false
+	end stop
+
+    end const_defn

@@ -1,0 +1,455 @@
+
+%  Copyright    Massachusetts Institute of Technology     1990,1991
+
+adl = array[decl]
+an = array[name]
+
+%%%
+%%% Find Proc Variables, to generate extern statements for them
+%%%
+
+g_expr_proc_names = proc(a: an, bod: stmtlist)
+
+    for s: stmt in stmtlist$elements(bod) do
+	tagcase s.abs
+	   tag declinit(di: declinit):
+	       g_proc_exprs(a, di.expr)
+	   tag invoke (inv: invoke):
+	       g_proc_exprs(a, inv.apply)
+	       g_proc_exprlist(a, inv.args)
+	   tag assn (as: assn):
+	       g_proc_exprlist(a, as.right)
+	   tag sugarassn (as: sugarassn):
+	       g_proc_exprs(a, as.right)
+	       g_proc_exprs(a, as.left)
+	   tag while_ (w: whilestmt):
+	       g_proc_exprs(a, w.test)
+	       g_expr_proc_names(a, w.body.stmts)
+	   tag for_ (f: forstmt):
+	       g_proc_exprs(a, f.call.apply)
+	       g_proc_exprlist(a, f.call.args)
+	       g_expr_proc_names(a, f.body.stmts)
+	   tag if_ (i: ifstmt):
+	       for arm: ifarm in ifarmlist$elements (i.arms) do
+	           g_proc_exprs(a, arm.test)
+		   g_expr_proc_names (a, arm.body.stmts)
+		   end % for
+	       tagcase i.else_
+		  tag body (b:body):
+		      g_expr_proc_names(a, b.stmts)
+		  others:
+		  end
+           tag tag_ (t: tagstmt):
+	       g_proc_exprs(a, t.obj)
+	       % if t.obj is not a oneof or variant set a flag
+	       %	and save the name of the type of t.obj
+	       ty: typespec :=  t.obj.typespec
+	       nm: string := ""
+	       if typeabs$is_cluster_(ty.abs) then
+	          nm := typeabs$value_cluster_(ty.abs).gen.common
+		  end
+	       for arm: tagarm in tagarmlist$elements(t.arms) do
+		   % if flag set, look at arm.tags which is a namelist
+		   %	and cause type$is_each_name to be an external
+		   if ~string$empty(nm) then
+			for each_nm: name in namelist$elements(arm.tags) do
+				addh_if_new[name](a, nm || sep ||"is_" || each_nm)
+				end
+			end
+		   g_expr_proc_names(a, arm.body.stmts)
+		   end % for
+	       tagcase t.others_
+		  tag body (b: body):
+		      g_expr_proc_names(a, b.stmts)
+		  others:
+		  end
+	   tag return_ (el: exprlist):
+	       g_proc_exprlist(a, el)
+	   tag yield_ (el: exprlist):
+	       g_proc_exprlist(a, el)
+	   tag signal_ (c: condition):
+	       g_proc_exprlist(a, c.args)
+	   tag exit_ (c: condition):
+	       g_proc_exprlist(a, c.args)
+	   tag body (b: body):
+	       g_expr_proc_names (a, b.stmts)
+	   tag except_ (e: exceptstmt):
+	       g_expr_proc_names(a, stmtlist$fill(1, e.stmt))
+	       for ah: handler in handlerlist$elements(e.arms) do
+		   g_expr_proc_names(a, ah.body.stmts)
+		   end
+	       tagcase e.others_
+		  tag arm (o: othersarm):
+		      g_expr_proc_names(a, o.body.stmts)
+		  others:
+		  end
+	   tag force_ (f: forcestmt):
+	       g_proc_exprs(a, f.expr)
+	   tag resignal_ (r: resignalstmt):
+		g_expr_proc_names(a, stmtlist$fill(1, r.stmt))
+	   tag decl, break_, continue_, bad:
+	   end
+	end % for
+    end g_expr_proc_names
+
+g_proc_exprlist = proc(a:an, el: exprlist)
+    for each_expr: expr in exprlist$elements(el) do
+	g_proc_exprs(a, each_expr)
+	end
+    end g_proc_exprlist
+
+g_proc_exprs = proc(a:an, ex:expr)
+    tagcase ex.abs
+       tag any_ (e:expr):
+	   g_proc_exprs(a, e)
+       tag cand_, cor_ (c:condop):
+	   g_proc_exprs(a, c.left)
+	   g_proc_exprs(a, c.right)
+       tag invoke (inv: invoke):
+	   g_proc_exprs(a, inv.apply)
+	   g_proc_exprlist(a, inv.args)
+       tag a_cons (ar: arraycons):
+	   if mexpr$is_one(ar.low) then
+	      g_proc_exprs(a, mexpr$value_one(ar.low)) end
+	   for each_elt: expr in exprlist$elements(ar.elts) do
+	       g_proc_exprs(a, each_elt)
+	       end
+       tag s_cons (xa: selectcons):
+	   for each_field: field in fieldlist$elements(xa.fields) do
+	       g_proc_exprs(a, each_field.val)
+	       end
+       tag apply (ct:clutype):
+	   addh_if_new[name](a, ct.gen.common)
+       tag op (cop:clusterop):
+	   nm: string := cop.name
+	   if nm[1] = '%'
+	      then nm := string$substr(nm, 2, string$size(nm) - 1)
+	      end
+	   if typeabs$is_select(cop.type_.abs) then
+	      ta: seltype := typeabs$value_select(cop.type_.abs)
+	      op: string, ind: int := field_index(nm, ta.parms)
+	      if ind ~= 0 then
+		 indstr: string := int$unparse(ind)
+		 addh_if_new[name](a, ta.gen.common || sep ||op||indstr)
+		 return
+		 else
+		      addh_if_new[name](a, ta.gen.common || sep || op)
+		      return
+		 end
+	      end
+	   prefix: string := ""
+         skip: bool := false
+	   tagcase (cop.type_.abs)
+	      tag cluster_ (ct: clutype):
+		  prefix := ct.gen.common
+	      tag apply (at:applytype):
+		  prefix := at.gen.common
+            % skipping is new behavior 3/10/98 dwc
+            % suppresses "extern errcode div()"
+            % needed for RedHat 5.0
+            tag idn (id: idn):
+              if parm$member_op(id.str) cor parm$member_base(id.str) then
+                      skip := true
+                      end
+	      others:
+	      end
+      if skip then
+      else
+	   if prefix ~= "" then
+	      addh_if_new[name](a, prefix || sep || nm)
+	      else
+		   addh_if_new[name](a, nm)
+	      end
+      end
+       tag type_of_ (e: expr):
+	   g_proc_exprs(a, e)
+       tag up_ (e: expr):
+	   g_proc_exprs(a, e)
+       tag down_ (e: expr):
+	   g_proc_exprs(a, e)
+       others:
+       end
+    end g_proc_exprs
+
+addh_if_new = proc[ty: type](a:array[ty], elt:ty)
+		where ty has equal: proctype(ty,ty) returns(bool)
+	for each_elt:ty in array[ty]$elements(a) do
+		if ty$equal(each_elt, elt) then
+			return
+		end
+	end
+	array[ty]$addh(a, elt)
+	return
+end addh_if_new
+
+%%%
+%%% Local Variables
+%%%
+
+g_lvs_stmts = proc(dl: array[decl], bod: stmtlist)
+
+    for s: stmt in stmtlist$elements(bod) do
+	tagcase s.abs
+	   tag decl (d: decl):
+	       array[decl]$addh(dl, d)
+	   tag declinit(di: declinit):
+	       array_extend[decl](dl, di.decls)
+	   tag for_ (f: forstmt):
+	       tagcase f.vars
+		  tag new (n:decllist):
+		      array_extend[decl](dl, n)
+		  others:
+		  end
+	       g_lvs_stmts(dl, f.body.stmts)
+	   tag body (b: body):
+	       g_lvs_stmts (dl, b.stmts)
+	   tag while_ (w: whilestmt):
+	       g_lvs_stmts(dl, w.body.stmts)
+	   tag resignal_ (rs: resignalstmt):
+	       g_lvs_stmts(dl, stmtlist$fill(1,rs.stmt))
+	   tag if_ (i: ifstmt):
+	       for arm: ifarm in ifarmlist$elements (i.arms) do
+		   g_lvs_stmts (dl, arm.body.stmts)
+		   end % for
+	       tagcase i.else_
+		  tag body (b:body):
+		      g_lvs_stmts(dl, b.stmts)
+		  others:
+		  end
+	   tag tag_ (t: tagstmt):
+	       for arm: tagarm in tagarmlist$elements(t.arms) do
+		   tagcase arm.var
+		      tag decl (d: decl):
+			  array[decl]$addh (dl, d)
+		      others:
+		      end
+		   g_lvs_stmts(dl, arm.body.stmts)
+		   end % for
+	       tagcase t.others_
+		  tag body (b: body):
+		      g_lvs_stmts(dl, b.stmts)
+		  others:
+		  end
+	   tag except_ (e: exceptstmt):
+	       g_lvs_stmts(dl, stmtlist$fill(1, e.stmt))
+	       for a: handler in handlerlist$elements(e.arms) do
+		   tagcase a.vars
+		      tag decls (di: decllist):
+			  array_extend[decl](dl, di)
+		      others:
+		      end % tagcase
+		   g_lvs_stmts(dl, a.body.stmts)
+		   end
+	       tagcase e.others_
+		  tag arm (a: othersarm):
+		      tagcase a.decl
+			 tag decl (d:decl):
+			     array[decl]$addh(dl, d)
+			 others:
+			 end
+		      g_lvs_stmts(dl, a.body.stmts)
+		  others:
+		  end
+	   others:
+	   end
+	end % for
+    end g_lvs_stmts
+
+%%%
+%%%	Routine to remove duplicate decls from local variable list
+%%%
+
+g_lvs_uniq = proc(old: adl) returns(adl)
+
+    if adl$size(old) < 2 then return (old) end
+    new:adl := adl$new()
+    for this_decl: decl in adl$elements(old) do
+	dupe_count: int := 0
+	for this_idn: idn in idnlist$elements(this_decl.idns) do
+	    for that_decl: decl in adl$elements(new) do
+		for that_idn: idn in idnlist$elements(that_decl.idns) do
+		    if this_idn.str = that_idn.str then
+		       %%% duplicate detected
+		       dupe_count := dupe_count + 1
+		       end
+		    end
+		end
+	    end
+	if dupe_count = 0 then adl$addh(new, this_decl)
+	   else
+		new_idns: idnlist := idnlist$new()
+		for this_idn: idn in idnlist$elements(this_decl.idns) do
+		    addit: bool := true
+		    for that_decl: decl in adl$elements(new) do
+			for that_idn: idn in idnlist$elements(that_decl.idns) do
+			    if this_idn.str = that_idn.str then
+			       addit := false
+			       break
+			       end
+			    end
+			if ~addit then break end
+			end
+		    if addit then new_idns := idnlist$addh(new_idns, this_idn) end
+		    end
+		new_decl: decl := decl${type_:this_decl.type_, idns:new_idns}
+		adl$addh(new, new_decl)
+	   end
+	end
+    return(new)
+    end g_lvs_uniq
+
+%%%
+%%%  Cluster to generate fake ids for return values
+
+fid = cluster is g_fidn_save, g_fidn_restore, g_fid
+    rep = null
+
+    own cur_fid: int := 0
+    own old_fid: int
+
+    g_fidn_save = proc()
+	old_fid := cur_fid
+	end g_fidn_save
+
+    g_fidn_restore = proc()
+	cur_fid := old_fid
+	end g_fidn_restore
+
+    g_fid = proc(ret: typespec) returns (string)
+	cur_fid := cur_fid + 1
+	return("ret_"||int$unparse(cur_fid))
+	end g_fid
+    end fid
+
+%%%
+%%% Exception Handler Scoping Cluster
+%%%
+
+ex = cluster is init, enter, leave, get_current_ex_label, 
+		get_current_end_label
+
+    rep = null
+    own current: int := 0
+    own next: int := 1
+    own save: array[int] := array[int]$new()
+
+    init = proc()
+	current := 0
+	next := 1
+	save := array[int]$new()
+	end init
+
+    enter = proc()
+	array[int]$addh(save, current)
+	current := next
+	next := next + 1
+	end enter
+
+    leave = proc()
+	current := array[int]$remh(save)
+	end leave
+
+    get_current_ex_label = proc() returns (string)
+	return("ex_"||int$unparse(current))
+	end get_current_ex_label
+
+    get_current_end_label = proc() returns (string)
+	return("end_"||int$unparse(current))
+	end get_current_end_label
+
+    end ex
+
+%%%
+%%% Temporary Variable Cluster
+%%%
+
+tv = cluster is enter, leave, reset, decl_next, idn_next, blind_decl_next,
+		save, restore
+
+    rep = null
+
+    own environ: int := 0           % count of environments
+    own dcounter: int := 0           % count of temporaries (decls) within an environment
+    own icounter: int := 0           % count of temporaries (exprs) within an environment
+    own old_environs: array[int] := array[int]$new()
+    own old_dcounters: array[int] := array[int]$new()
+    own old_icounters: array[int] := array[int]$new()
+    own save_icounter: int := 0	     % to reuse temps for array constructors
+
+    enter = proc()                  % enter an environment
+
+	ai$addh(old_dcounters, dcounter)
+	ai$addh(old_icounters, icounter)
+	ai$addh(old_environs, environ)
+	environ := environ + 1
+	dcounter := 0
+	icounter := 0
+
+	end enter
+
+    leave = proc()                  % leave an environment
+
+	environ := ai$remh(old_environs)
+	dcounter := ai$remh(old_dcounters)
+	icounter := ai$remh(old_icounters)
+
+	end leave
+
+    reset = proc()                  % clear out owns for next defn
+
+	environ  := 0
+	dcounter := 0
+	icounter := 0
+	old_environs  := array[int]$new()
+	old_dcounters := array[int]$new()
+	old_icounters := array[int]$new()
+	save_icounter := 0
+
+	end reset
+
+    decl_next = proc(e: g_env, t: typespec)   % generate a declaration for the next temporary
+	%    variable in the current environment
+
+	dcounter := dcounter + 1
+
+	newidn: idn := idn$create("T_"||int$unparse(environ)||
+				  "_"||int$unparse(dcounter),
+				  idnkind$make_var(t))
+	
+	g_decl(e, decl${idns: idnlist$fill(1, newidn),
+			type_: t})
+
+	end decl_next
+
+    blind_decl_next = proc(e: g_env)   % generate a declaration for the next temporary
+	%    variable in the current environment
+
+	dcounter := dcounter + 1
+
+	g_env$putl(e, "CLUREF T_"||int$unparse(environ)||
+		      "_"||int$unparse(dcounter)||";")
+
+	end blind_decl_next
+
+    idn_next = proc(ty: typespec) returns (expr)  % return the idn for the next
+	%    temporary in the current environment
+
+	icounter := icounter + 1
+
+	newidn: idn := idn$create("T_"||int$unparse(environ)||
+				  "_"||int$unparse(icounter),
+				  idnkind$make_var(ty))
+
+	return(expr$create(exprabs$make_idn(newidn), ty))
+	
+	end idn_next
+
+    save = proc()
+	save_icounter := icounter
+	end save
+
+    restore = proc()
+	icounter := save_icounter
+	end restore
+
+    end tv

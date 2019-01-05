@@ -1,0 +1,53 @@
+?					% print this file
+ALLOW	  [ TRUE | FALSE ]		% do/don't generate code if errors
+BINDIR	  [ directory ]			% set/reset directory for binary files
+BINSUF	  [ suffix ]			% set/reset suffix for binary files
+CCDBG	  [ | string | RESET ]		% show/set/reset cc debug command
+CCOPT	  [ | string | RESET ]		% show/set/reset cc opt command
+CE	  [ input { , input } ]		% create new CE
+CFILES    [ TRUE | FALSE ]		% do/don't save .c files
+CHECK	  input { , input }		% check for semantic errors
+CLU	  input { , input }		% produce binary
+COMPILE   input { , input }		% produce binary
+DIR	  [ directory ]			% set/reset default directory
+DUMP	  filename			% dump in-core library to file
+ESCAPE					% temporarily exit CLU
+EXPUNGE	  [ TRUE | FALSE ]		% do/don't remember non-cluster specs
+EXTERNALS [ TRUE | FALSE ]		% do/don't list external references
+FORCE	  [ TRUE | FALSE ]		% do/don't generator code for FORCE[t]
+FORGET	  module { , module }		% forget DU specs of modules
+HELP					% print this file
+KILL					% kill CLU
+LOCALS	  [ TRUE | FALSE ]		% do/don't generate local var names
+MERGE	  input { , input }		% merge libraries with in-core one
+NEWLIB					% flush in-core library
+OPTIMIZE  [ TIME | SPACE | FALSE ]	% set/clear optimization mode
+PARSE	  input { , input }		% check for syntactic errors
+QUIT					% kill CLU
+SAFE	  [ TRUE | FALSE ]		% do/don't check if idns used in system
+SPECS	  input { , input }		% create DU specs
+UNMERGE	  input { , input }		% forget DU specs of library modules
+XCE	  input { , input }		% add to existing CE
+XFILE	  input { , input }		% execute commands in files
+
+input:	  filespec  |  @ filename	% *'s allowed in filespec
+
+Commands and command arguments can be specified with unambiguous prefixes.
+Commas may be replaced with spaces or tabs.
+Default is TRUE for TRUE/FALSE commands, TIME for OPTIMIZE command.
+The jcl line has the form:  [ # cmnd ] args { # cmnd args } [ ^ [ filename ] ]
+A command line has the form:    cmnd   args { # cmnd args } [ ^ [ filename ] ]
+The default cmnd in the jcl line is CLU.
+Errors, etc. go to primary output unless ^ is specified.
+Default filename after ^ is clu.junk.
+Character case is ignored except in filenames. Do not type {}'s and []'s, just
+what's inside them.  Things in {}'s may be repeated zero or more times. Things
+in []'s are optional.
+Default suffix for SPECS input files is "spc" or "clu".
+Default suffix for CE and XCE input files is "equ".
+Default suffix for XFILE input files is "xfile".
+Default suffix for DUMP, MERGE, and UNMERGE files is "lib".
+Default suffix for input files to other commands is "clu".
+Default suffix for an @-file is "xload".
+An @-file contains a sequence of input specifications, separated by newlines.
+An @-file may reference @-files.

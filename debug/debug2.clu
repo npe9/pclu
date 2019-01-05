@@ -1,0 +1,852 @@
+
+% clusters & procs to support debug.clu
+estack = cluster is create, addh, top, bottom, fetch, size, push, trim,
+		    elements, store
+
+    rep = array[dexpr]
+
+    create = proc() returns (cvt)
+	return(rep$new())
+	end create
+
+    push = proc(a: cvt, e: dexpr)
+	rep$addh(a, e)
+	end push
+
+    addh = proc(a: cvt, e: dexpr)
+	rep$addh(a, e)
+	end addh
+
+    top = proc(a:cvt) returns(dexpr)
+	return(rep$bottom(a))
+	end top
+
+    bottom = proc(a:cvt) returns (dexpr)
+	return(rep$bottom(a))
+	end bottom
+
+    fetch = proc(a:cvt, i: int) returns (dexpr)
+	return(rep$fetch(a, i))
+	end fetch
+
+    store = proc(a:cvt, i: int, e: dexpr)
+	rep$store(a, i, e)
+	end store
+
+    size = proc(a:cvt) returns(int)
+	return(rep$size(a))
+	end size
+
+    trim = proc(es: cvt, start, cnt: int)
+	rep$trim(es, start, cnt)
+	end trim
+
+    elements = iter(es: cvt) yields (dexpr)
+	for each_d: dexpr in rep$elements(es) do
+	    yield(each_d)
+	    end
+	end elements
+
+    end estack
+
+logit = proc(s: string)
+    own pe : stream := stream$error_output()
+
+    stream$putl(pe, s)
+
+    end logit
+
+% needs to write output to a temp file in /tmp (or use mktemp/tempfile/tmpname)
+
+sym = cluster is get_address, clear_owns, get_name
+
+    rep = null
+
+    cache_entry = record[name: string, address: int]
+    ace = array[cache_entry]
+    own st: stream
+    own init: bool := false
+    own inv_pgm_name: string := ""
+    own symfile: string := ""
+    own symfn: file_name
+    own cache: ace := ace$predict(1, 25)
+    own prefix: string := " "
+    own dir: string := ""
+
+    setup = proc()
+	% caller should set init flag
+	begin
+	    % 1/6/94 dcurtis: reworked the following code to use file_name
+	    %	cluster properly for a.out, etc. 
+	    inv_pgm_name := _get_xjname()
+	    fn: file_name := file_name$parse(inv_pgm_name)
+	    symfn := extend_file_name(fn, "sym")
+	    symfile := file_name$unparse(symfn)
+	    if file_exists(symfn) then
+	       fn_date: date := file_date(fn, false)
+	       sym_date: date := file_date(symfn, false)
+	       if sym_date > fn_date then
+	    	  exit done
+	    	  end
+	       end
+	    unix_cmd("nm -B " || inv_pgm_name || " </dev/null 2>/dev/null >"
+	    	       || symfile)
+	       except others:
+	    		   unix_cmd("nm " || inv_pgm_name || " </dev/null >"
+	    			      || symfile)
+	    	      end
+	    end
+	   except when done: end
+
+	% old algorithm follows:
+	% loc: int := string_lindexs("/", pgm_name)
+	% if loc < string$size(pgm_name) then
+	%    dir := string$substr(pgm_name, 1, loc)
+	%    pgm_name := string$rest(pgm_name, loc+1)
+	%    end
+	% fn: file_name := file_name$create(dir, pgm_name, "", "")
+	% symfn: file_name := file_name$create(dir, pgm_name, "sym", "")
+	% if file_exists(symfn) then
+	%   fn_date: date := file_date(fn, false)
+	%   sym_date: date := file_date(symfn, false)
+	%   if sym_date > fn_date then
+	%	  exit done
+	%	  end
+	%   end
+	% unix_cmd("nm -B " || dir || pgm_name || " </dev/null 2>/dev/null >" 
+	%	       || dir || pgm_name || ".sym")
+	%   except others:
+	%		   unix_cmd("nm " || dir || pgm_name || " </dev/null >"
+	%			      || dir || pgm_name || ".sym")
+	%	      end
+	% end
+	% except when done: end
+	end setup
+
+    get_address = proc(s: string) returns (int) signals (not_found)
+    
+	if ~init then
+	   setup()
+	   end
+
+	% change $ to OP
+	n: int := string$indexc('$', s)
+	if n ~= 0 then
+	   s := string$substr(s, 1, n-1) || "OP" || string$rest(s, n+1)
+	   % logit("looking for " || s)
+	   end
+	s := prefix || s
+	s_size: int := string$size(s)
+
+	% first check cache
+	for each_ent: cache_entry in ace$elements(cache) do
+	    if s = each_ent.name then return (each_ent.address) end
+	    end
+    
+	while true do
+	    st := stream$open(symfn,"read")
+	    while true do
+		l: string := stream$getl(st)
+		loc: int := string$indexs(s, l)
+		if loc = 0 then continue end
+		if string$size(l) - loc + 1 ~= s_size then continue end
+		sp: int := string$indexc(' ', l)
+		num: string := string$substr(l, 1, sp-1)
+		stream$close(st)
+		add: int := i_hparse(num)
+		ace$addh(cache, cache_entry${name: s, address: add})
+		init := true
+		return (add)
+		end
+	       except when end_of_file:
+			   stream$close(st)
+			   if init
+			      then
+				   % logit(s || " not found")
+				   signal not_found
+			      else
+				   init := true
+				   prefix := " _"
+				   s := prefix || string$rest(s, 2)
+				   s_size := string$size(s)
+			      end
+		      end
+	    end
+	end get_address
+
+    get_name = proc(addr: int) returns (string) signals (not_found)
+	if ~init then
+	   setup()
+	   end
+
+	% first check cache
+	for each_ent: cache_entry in ace$elements(cache) do
+	    if addr = each_ent.address then return (string$rest(each_ent.name, string$size(prefix)+1)) end
+	    end
+    
+        s: string := slower(i_hunparse(addr))
+	s_size: int := string$size(s)
+	%	if s_size ~= 8 then logit("losing in get_name: " || int$unparse(s_size) ||
+	%				  " " || s) end
+	while true do
+	    st := stream$open(symfn,"read")
+	    while true do
+		l: string := stream$getl(st)
+		loc: int := string$indexs(s, l)
+		if loc = 0 then continue end
+		if loc ~= 1 then logit ("losing (2) in get_name: " || int$unparse(loc)) end
+		sp: int := string_lindexs(prefix, l)
+		nm: string := string$rest(l, sp + string$size(prefix))
+		stream$close(st)
+		ace$addh(cache, cache_entry${name: prefix || nm, address: addr})
+		return (nm)
+		end
+	       except when end_of_file:
+			   % logit("get_name losing")
+			   signal not_found
+		      end
+	    end
+	end get_name
+
+    clear_owns = proc()
+	if ~init then setup() init := true end
+	st := stream$open(symfn,"read")
+	while true do
+	    l: string := stream$getl(st)
+	    ls: int := string$size(l)
+	    if ls < 13 then continue end
+	    if string_lindexs("_own_init", l) = ls - 8
+	       then
+		    sp: int := string$indexc(' ', l)
+		    num: string := string$substr(l, 1, sp-1)
+		    add: int := i_hparse(num)
+		    debugOPassign(add, 0)
+	       end
+	    end
+	   except when end_of_file:
+		       stream$close(st)
+		  end
+	end clear_owns
+    end sym
+
+
+internalize = proc(arg: string) returns (string)
+    arg := lower_case(arg)
+    index: int := string$indexc('$', arg)
+    if index ~= 0 then
+       return (string$substr(arg, 1, index - 1) || "OP" ||
+	       string$rest(arg, index + 1))
+       else
+	    return (arg)
+       end
+    end internalize
+
+externalize = proc(arg: string) returns (string)
+    index: int := string$indexs("OP", arg)
+    if index ~= 0 then
+       return (string$substr(arg, 1, index - 1) || "$" ||
+	       string$rest(arg, index + 2))
+       else
+	    return (arg)
+       end
+    end externalize
+
+
+ctl_pts = cluster is clear, bp_add, sig_add, bp_remove, sig_remove,
+		     bp_exists, sig_exists, print, sbp_elements, lbp_elements,
+		     fbp_elements, sig_elements
+
+    rep = abkpt
+
+    as = array[string]
+
+    abkpt = array[bkpt]
+
+    % probably should keep _TRACE address in rep, for speed in untracing
+    % possibly should keep bkpt in inactive state, rather than removing
+
+    bkpt = oneof[line: lbkpt, func: fbkpt, step: sbkpt, temp: tbkpt]
+    lbkpt = record[line: int, mod: string] % line (break at line in mod
+    fbkpt = record[mod: string]		   % func (break on entry/exit)
+    sbkpt = record[mod: string]		   % step (break at all lines)
+    tbkpt = record[mod: string]		   % temporary breakpoint
+
+    own current_bkpts: rep := rep$predict(1,25)
+    own tyo: stream
+    own trpts: as := as$fill(1,1,"failure")
+    own all: bool := false
+
+    clear = proc()
+	off: as := as$predict(1,25)
+	for each_bkpt: bkpt in rep$elements(current_bkpts) do
+	    found: bool
+	    tagcase each_bkpt
+	       tag step (s: sbkpt):
+		   found := false
+		   for n: string in as$elements(off) do
+		       if n = s.mod then found := true break end
+		       end
+		   if ~found then as$addh(off, s.mod) end
+	       tag line (l: lbkpt):
+		   found := false
+		   for n: string in as$elements(off) do
+		       if n = l.mod then found := true break end
+		       end
+		   if ~found then as$addh(off, l.mod) end
+	       tag temp (t: tbkpt):
+		   found := false
+		   for n: string in as$elements(off) do
+		       if n = t.mod then found := true break end
+		       end
+		   if ~found then as$addh(off, t.mod) end
+	       tag func (f: fbkpt):
+	       end
+	    end
+	for n: string in as$elements(off) do
+	    line_tracing_off(n)
+	    end
+	current_bkpts := rep$predict(1,25)
+	all := false
+	trpts := as$fill(1,1,"failure")
+	dbg_env$dump()
+	end clear
+
+    bp_add = proc(mod, kind: string, line: int) signals (not_found)
+	mod := internalize(mod)
+	if kind = "s" cand ~bp_exists(mod, kind, line) then
+	   line_tracing_on(mod)
+	      resignal not_found
+	   rep$addh(current_bkpts,
+		    bkpt$make_step(sbkpt${mod: mod}))
+	 elseif kind = "t" cand ~bp_exists(mod, kind, line) then
+	   line_tracing_on(mod)
+	      resignal not_found
+	   rep$addh(current_bkpts,
+		    bkpt$make_temp(tbkpt${mod: mod}))
+	 elseif kind = "f" cand ~bp_exists(mod, kind, line) then
+	   if func_exists(mod)
+	      then
+		   rep$addh(current_bkpts,
+			    bkpt$make_func(fbkpt${mod: mod}))
+	      else signal not_found end
+	 elseif kind = "l" cand ~bp_exists(mod, kind, line) then
+	   line_tracing_on(mod)
+	      resignal not_found
+	   rep$addh(current_bkpts,
+		    bkpt$make_line(lbkpt${mod: mod, line: line}))
+	 end
+	dbg_env$dump()
+	end bp_add
+
+    bp_remove = proc(mod, kind: string, line: int) signals (not_found)
+	
+	% first remove the indicated breakpoint
+
+	mod := internalize(mod)
+	found: bool := false
+	for i: int in rep$indexes(current_bkpts) do
+	    each_bkpt: bkpt := current_bkpts[i]
+	    tagcase each_bkpt
+	       tag step (s: sbkpt):
+		   if kind = "s" cand s.mod = mod then
+		      asize: int := rep$size(current_bkpts)
+		      current_bkpts[i] := current_bkpts[asize]
+		      rep$trim(current_bkpts, 1, asize - 1)
+		      found := true
+		      break
+		      end
+	       tag line (l: lbkpt):
+		   if kind = "l" cand l.mod = mod
+			cand line = l.line
+		      then
+			   asize: int := rep$size(current_bkpts)
+			   current_bkpts[i] := current_bkpts[asize]
+			   rep$trim(current_bkpts, 1, asize - 1)
+			   found := true
+			   break
+		      end
+	       tag func (f: fbkpt):
+		   if kind = "f" cand f.mod = mod then
+		      asize: int := rep$size(current_bkpts)
+		      current_bkpts[i] := current_bkpts[asize]
+		      rep$trim(current_bkpts, 1, asize - 1)
+		      found := true
+		      break
+		      end
+	       tag temp (t: tbkpt):
+		   if kind = "t" cand t.mod = mod then
+		      asize: int := rep$size(current_bkpts)
+		      current_bkpts[i] := current_bkpts[asize]
+		      rep$trim(current_bkpts, 1, asize - 1)
+		      found := true
+		      break
+		      end
+	       end
+	    end
+
+	if ~found then signal not_found end
+	dbg_env$dump()
+
+	% now decide whether to turn off line_tracing
+
+	for i: int in rep$indexes(current_bkpts) do
+	    each_bkpt: bkpt := current_bkpts[i]
+	    tagcase each_bkpt
+	       tag step (s: sbkpt):
+		   if s.mod = mod then return end
+	       tag line (l: lbkpt):
+		   if mod = l.mod then return end
+	       others:
+	       end
+	    end
+	line_tracing_off(mod)
+	end bp_remove
+
+    bp_exists = proc(mod, kind: string, line: int) returns (bool)
+	for each_b: bkpt in rep$elements(current_bkpts) do
+	    tagcase each_b
+	       tag line (l: lbkpt):
+		   if l.mod = mod cand kind = "l" cand line = l.line
+		      then return (true) end
+		   if l.mod = mod cand kind = "sl" cand line = l.line
+		      then return (true) end
+	       tag func (f: fbkpt):
+		   if f.mod = mod cand kind = "f" then return (true) end
+		   if f.mod = mod cand kind = "a" then return (true) end
+	       tag step (s: sbkpt):
+		   if s.mod = mod cand kind = "s" then return (true) end
+		   if s.mod = mod cand kind = "sl" then return (true) end
+		   if s.mod = mod cand kind = "a" then return (true) end
+	       tag temp (t: tbkpt):
+		   if t.mod = mod cand kind = "sl" then return (true) end
+		   if t.mod = mod cand kind = "a" then return (true) end
+		   if t.mod = mod cand kind = "t" then return (true) end
+	       end
+	    end % for
+	return (false)
+	end bp_exists
+
+    sig_add = proc(sig: string)
+	if sig = "all" cand all = false then all := true dbg_env$dump() return end
+	for each: string in as$elements(trpts) do
+	    if each = sig then return end
+	    end
+	as$addh(trpts, sig)
+	dbg_env$dump()
+	end sig_add
+
+    sig_exists = proc(sig: string) returns (bool)
+	if all  = true then return (true) end
+	for each: string in as$elements(trpts) do
+	    if each = sig then return (true) end
+	    end
+	return(false)
+	end sig_exists
+
+    sig_remove = proc(sig: string) signals (not_found)
+	if sig = "all" cand all = true then all := false dbg_env$dump() return end
+	found: bool := false
+	for i: int in as$indexes(trpts) do
+	    each: string := trpts[i]
+	    if each = sig then
+	       tsize: int := as$size(trpts)
+	       trpts[i] := trpts[tsize]
+	       as$trim(trpts, 1, tsize - 1)
+	       found := true
+	       end
+	    end
+	if found then dbg_env$dump() else signal not_found end
+	end sig_remove
+
+    print = proc(st: stream)
+	stream$putl(st, "Breakpoints:")
+	for each_b: bkpt in rep$elements(current_bkpts) do
+	    tagcase each_b
+	       tag func (f: fbkpt):
+		   stream$putl(st, "\t entry/exit: " || externalize(f.mod))
+	       tag line (l: lbkpt):
+		   stream$putl(st, "\t" || externalize(l.mod) || " " || int$unparse(l.line))
+	       tag step (s: sbkpt):
+		   stream$putl(st, "\t single step: " || externalize(s.mod))
+	       tag temp (t: tbkpt):
+		   stream$putl(st, "\t temporary single step: " || externalize(t.mod))
+	       end
+	    end
+	stream$putl(st, "Traced Signals:")
+	for each_sig: string in as$elements(trpts) do
+	    stream$puts(st, "\t")
+	    stream$putl(st, each_sig)
+	    end
+	if all then
+	   stream$putl(st, "\tall signals are being traced")
+	   end
+	end print
+
+    sbp_elements = iter() yields (string)
+	for each_b: bkpt in rep$elements(current_bkpts) do
+	    tagcase each_b
+	       tag step (s: sbkpt):
+		   yield(externalize(s.mod))
+	       others: continue
+	       end
+	    end
+	end sbp_elements
+
+    fbp_elements = iter() yields (string)
+	for each_b: bkpt in rep$elements(current_bkpts) do
+	    tagcase each_b
+	       tag func (f: fbkpt):
+		   yield(externalize(f.mod))
+	       others: continue
+	       end
+	    end
+	end fbp_elements
+
+    lbp_elements = iter() yields (string)
+	for each_b: bkpt in rep$elements(current_bkpts) do
+	    tagcase each_b
+	       tag line (l: lbkpt):
+		   yield(externalize(l.mod) || " " || int$unparse(l.line))
+	       others: continue
+	       end
+	    end
+	end lbp_elements
+
+    sig_elements = iter() yields (string)
+	if all then yield("all") end
+	for each_sig: string in as$elements(trpts) do
+	    yield(each_sig)
+	    end
+	end sig_elements
+
+    func_exists = proc(mod: string) returns (bool)
+	addr: int := sym$get_address(mod)
+	   except when not_found:
+		       return (false)
+		  end
+	return(true)
+	end func_exists
+
+    line_tracing_on = proc(mod: string) signals (not_found)
+	addr: int := sym$get_address(mod || "_TRACE")
+	   resignal not_found
+	debugOPassign(addr, 1)
+	end line_tracing_on
+
+    line_tracing_off = proc(mod: string)
+	addr: int := sym$get_address(mod || "_TRACE")
+	debugOPassign(addr, 0)
+	end line_tracing_off
+
+    end ctl_pts
+
+
+opown2typeown = proc(nm: string) returns (string) signals (not_found)
+    % if nm is of the form aOPbOPc then return aOPc where a, b, c are arbitrary strings
+    %			and OP is exactly OP
+    % used for looking up own variables: aOPbOPc would be the full name
+    %	of the own variable named c in operation a$b
+    %	aOPc would be full name of an own variable c in cluster a
+	
+    lim: int := string$indexs("OP", nm)
+    if lim = 0 then signal not_found end    % shouldn't happen
+    tname: string := string$substr(nm, 1, lim - 1)
+    lim := string_lindexs("OP", nm)
+    vname: string := string$rest(nm, lim + 2)
+    return (tname || "OP" || vname)
+    end opown2typeown
+
+print_uninit = proc(po: pstream, v:_obj)
+    pstream$text(po, "???")
+    end print_uninit
+
+as = array[string]
+inst_from_info = proc(info:rtn_info, tparms, oparms: list) returns (int, int)
+    % do instantiation work
+    k: int := 0
+    nm: string := debugopget_name(info)
+    nm := externalize(nm)
+    loc: int := string$indexc('$', nm)
+    tname: string := ""
+    opname: string := nm
+    if loc ~= 0
+       then
+	    tname := string$substr(nm, 1, loc - 1)
+	    opname := string$rest(nm, loc + 1)
+       end
+    tformals: as := as$new()
+    for i: int in list$indexes(tparms) do
+	as$addh(tformals, debugOPget_nth_type_formal(info, i))
+	end
+    oformals: as := as$new()
+    for i: int in list$indexes(oparms) do
+	as$addh(oformals, debugOPget_nth_op_formal(info, i))
+	end
+    tops, oops: int := inst(tname, opname, tformals, oformals, tparms, oparms)
+    return(tops, oops)
+    end inst_from_info
+
+inst_from_name = proc(aiops: string, info: rtn_info, itparms, ioparms: list) returns (int)
+    % find type name in aiops
+    % note: type name may be a parameter
+    loc: int := string$indexc('_', aiops)
+    tname: string := string$substr(aiops, 1, loc-1)
+    % logit(aiops)
+    % logit("1")
+
+    % make list of components in aiops: 
+    %		some may be formals of invocation, some actuals
+    % note: there may be none
+    tcomps: as := as$new()
+    rest: string := string$rest(aiops, loc+1)
+    while true do
+	loc := string$indexc('_', rest)
+	if loc = 0 then break end
+	nth: string := string$substr(rest, 1, loc-1)
+	rest := string$rest(rest, loc+1)
+	if nth = "of" then continue end
+	as$addh(tcomps, nth)
+	% logit(nth)
+	end
+    % logit("2")
+
+    % make corresponding list of actuals via the following steps:
+
+    % find list of all possible formals from invoked routine
+    itformals: as := as$new()
+    for i: int in list$indexes(itparms) do
+	as$addh(itformals, debugOPget_nth_type_formal(info, i))
+	% logit(itformals[i])
+	end
+    % logit("2.5")
+    ioformals: as := as$new()
+    for i: int in list$indexes(ioparms) do
+	as$addh(ioformals, debugOPget_nth_op_formal(info, i))
+	% logit(ioformals[i])
+	end
+    % logit("3")
+
+    % find corresponding list of actuals from invoked routine
+    %	(these are the itparms and ioparms arguments)
+
+    % first check for tname member of itformals (and empty tcomps list)
+    if as$empty(tcomps) then
+       for i: int in as$indexes(itformals) do
+	   if itformals[i] = tname then
+	      d: dexpr := _cvt[_obj,dexpr](itparms[i])
+	      tagcase d
+		 tag idn, instance, sel, tgen:
+		     return(debug$teval(d))
+		 others:
+		     logit("still losing in inst_from_name (1)")
+		 end
+	      return(_cvt[_obj,int](itparms[i]))
+	      end
+	   end
+       % logit("4")
+       for i: int in as$indexes(ioformals) do
+	   if ioformals[i] = tname then
+	      d: dexpr := _cvt[_obj,dexpr](ioparms[i])
+	      tagcase d
+		 tag idn, instance, sel, tgen:
+		     return(debug$teval(d))
+		 others:
+		     logit("still losing in inst_from_name (2)")
+		 end
+	      end
+	   end
+       logit("still losing in inst_from_name (3)")
+       end
+    % logit("5")
+
+    % get formals for aiops
+    tformals: as := as$new()
+    aname: string := "tformals_" || tname
+    % logit(aname)
+    a: int := sym$get_address(aname)
+    % logit(int$unparse(a))
+    for i: int in int$from_to(1, debugopget_count_formals(a)) do
+	as$addh(tformals, debugopget_nth_formal(a, i))
+	end
+    % logit("6")
+
+    % intersect formals from invocation with formals needed
+    % and make list of corresponding actuals
+    tparms: list := list$new()
+    for formal: string in as$elements(tcomps) do
+	begin
+	    for i: int in as$indexes(itformals) do
+		if itformals[i] = formal then
+		   tparms := list$addh(tparms, itparms[i])
+		   exit done
+		   end
+		end
+	    for i: int in as$indexes(ioformals) do
+		if ioformals[i] = formal then
+		   tparms := list$addh(tparms, ioparms[i])
+		   exit done
+		   end
+		end
+	    d: dexpr := dexpr$make_idn(formal)
+	    dobj: _obj := _cvt[dexpr, _obj](d)
+	    tparms := list$addh(tparms, dobj)
+	    end except when done: continue end
+	end
+    % logit("7")
+    tops, oops: int := inst(tname, "", tformals, as$new(), tparms, list$new())
+    return(tops)
+    end inst_from_name
+
+inst = proc(tname, opname: string, tformals, oformals:as, tparms, oparms: list)
+	 returns (int, int)
+    % do instantiation work
+    k: int := 0
+    i: int := 1
+    for each_dexpr: dexpr in dexprlist$elements(l2d(tparms)) do
+	tagcase each_dexpr
+	   tag const (c: con):
+	       iobj: _obj
+	       tagcase c
+		  tag int_(num: int):
+		      iobj := _cvt[int, _obj](num)
+		  others:
+		      logit(" fill in others in const instantiation 1")
+		  end
+	       CLU_add_parm_info_const(k, iobj)
+	   tag idn, tgen, sel, instance:
+	       opers: int := debug$teval(each_dexpr)
+	       reqs: int := sym$get_address(tname || "_of_" ||
+					    tformals[i] || "_reqs_actual")
+	       CLU_add_parm_info_type(k, opers, reqs)
+	   others:
+	       logit(" unexpected dexpr in instantiation list 1")
+	   end
+	i := i + 1
+	k := k + 1
+	end
+    % logit("end tparms")
+    i := 1
+    for each_dexpr: dexpr in dexprlist$elements(l2d(oparms)) do
+	tagcase each_dexpr
+	   tag const (c: con):
+	       iobj: _obj
+	       tagcase c
+		  tag int_(num: int):
+		      iobj := _cvt[int, _obj](num)
+		  others:
+		      logit(" fill in others in const instantiation 2")
+		  end
+	       CLU_add_parm_info_const(k, iobj)
+	   tag idn (id: ident):
+	       opers: int := sym$get_address(id || "_ops_actual")
+	       reqs: int := sym$get_address(opname || "_of_" ||
+					    oformals[i] || "_reqs_actual")
+	       CLU_add_parm_info_type(k, opers, reqs)
+	       %	   tag acons:
+	       %		logit("acons")
+	       %	   tag apply:
+	       %		logit("apply")
+	       %	   tag assign:
+	       %		logit("assign")
+	       %	   tag field:
+	       %		logit("field")
+	       %	   tag instance:
+	       %		logit("instance")
+	       %	   tag none:
+	       %		logit("none")
+	       %	   tag object:
+	       %		logit("object")
+	       %	   tag scons:
+	       %		logit("scons")
+	       %	   tag sel:
+	       %		logit("sel")
+	       %	   tag tgen:
+	       %		logit("tgen")
+	       %	   tag vcons:
+	       %		logit("vcons")
+	   others:
+	       logit(" unexpected dexpr in instantiation list 2")
+	   end
+	i := i + 1
+	k := k + 1
+	end
+    % logit("end oparms")
+    % invoke appropriate instantiation operation
+    tops: int := 0
+    oops: int := 0
+    if dexprlist$size(l2d(tparms)) ~= 0
+       then
+	    opers: int := sym$get_address(tname || "_ops_actual")
+	    tcount: int := list$size(tparms)
+	    ownreqs: int := sym$get_address(tname || "_ownreqs")
+	    tops := clu_find_type_instance(opers, tcount, ownreqs)
+	    if dexprlist$size(l2d(oparms)) ~= 0
+	       then
+		    opownreqs: int := sym$get_address(tname || "_op_"
+							|| opname || "_ownreqs")
+		    opaddr: int := sym$get_address(tname || "OP" || opname)
+		    ocount: int := dexprlist$size(l2d(oparms))
+		    oops := clu_find_typeop_instance(opers, opaddr,
+						     tcount+ocount, tcount, opownreqs, ownreqs)
+	       end
+       else % no type parameters
+	    if list$size(oparms) ~= 0
+	       then
+		    opownreqs: int := sym$get_address(opname || "_ownreqs")
+		    opaddr: int := sym$get_address(opname)
+		    ocount: int := dexprlist$size(l2d(oparms))
+		    oops := clu_find_prociter_instance(opaddr, ocount, opownreqs)
+	       end
+       end
+    return(tops, oops)
+    end inst
+
+iter_yield = cluster is setup, print
+    rep = null
+    own valops: ops
+    own tparms: list
+    own oparms: list
+    own info: rtn_info
+    own po: pstream
+
+    setup = proc(val_ops:ops, t_parms, o_parms:list, inf:rtn_info, pstr: pstream)
+	valops := val_ops
+	tparms := t_parms
+	oparms := o_parms
+	info := inf
+	po := pstr
+	end setup
+
+    print = proc(o: _obj, nth: int)
+	ithops: anop := debugopget_nth_op(info.g_vals, nth, info, 0, 0)
+	   except when not_found (ops_name:string):
+		       ithops := _cvt[int, _vec[_obj]]
+				     (inst_from_name(ops_name, info,
+						     tparms, oparms))
+		  end
+	print_result(po, o, ithops)
+	end print
+
+    end iter_yield
+
+print_result = proc(pst: pstream, val: _obj, p: _vec[_obj])
+    pstream$start(pst, ": ")
+    debugopprint_val2(pst, val, p)
+    pstream$stop(pst, "")
+    pstream$pause(pst, "")
+    end print_result
+
+% 1/6/94 dcurtis: added the following code for extending file_names
+%	properly for a.out, etc. 
+
+extend_file_name = proc(fn: file_name, ext: string) returns (file_name)
+    if string$empty(fn.other) then
+       if string$empty(fn.suffix) then
+	  return(file_name$create(fn.dir, fn.name, ext, ""))
+	  else
+	       return(file_name$create(fn.dir, fn.name, fn.suffix, ext))
+	  end
+       else
+	    return(file_name$create(fn.dir, fn.name, "", fn.other || "." || ext))
+       end
+    end extend_file_name

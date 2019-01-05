@@ -1,0 +1,44 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+quick_sort = proc [t: type] (a: at, low, high: int, less, equal: pt)
+    pt = proctype (t, t) returns (bool)
+    at = array[t]
+
+    olow: int := low
+    ohigh: int := high
+    size: int := high - low + 1
+    if size <= 1 then return
+     elseif size = 2 then
+       if less(a[high], a[low]) then
+	  at$addh (a, a[low])
+	  a[low] := a[high]
+	  a[high] := at$remh (a)
+	  end
+       return
+     end
+    split: t := a[low + size / 2]
+    mid: int := low
+    while mid <= high do
+	val: t := a[mid]
+	if less (val, split) then
+	   if low ~= mid then
+	      at$addh (a, a[low])
+	      a[low] := a[mid]
+	      a[mid] := at$remh (a)
+	      end
+	   low := low + 1
+	   mid := mid + 1
+	 elseif equal (val, split) then
+	   mid := mid + 1
+	 else % val > split
+	      if mid ~= high then
+		 at$addh (a, a[mid])
+		 a[mid] := a[high]
+		 a[high] := at$remh (a)
+		 end
+	      high := high - 1
+	 end
+	end
+    quick_sort[t] (a, olow, low - 1, less, equal)
+    quick_sort[t] (a, high + 1, ohigh, less, equal)
+    end quick_sort
+

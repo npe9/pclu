@@ -1,0 +1,74 @@
+% Copyright Massachusetts Institute of Technology 1983, 1989, 1990
+
+_home_dir = proc (user: string) returns (string) signals (not_found)
+	qs = sequence[string]
+	own users, homes: qs
+	own have: bool := false
+	if string$empty(user)
+	   then return(_environ("HOME"))
+	   end resignal not_found
+	if have
+	   then for i: int in qs$indexes(users) do
+			if users[i] = user
+			   then return(homes[i]) end
+			end
+	   end
+	if (user = "CLU")
+	   then return (_environ("CLUHOME"))
+	   end
+	   except when not_found:
+		  end
+	if (user = "ARGUS")
+	   then return (_environ("ARGUSHOME"))
+	   end
+	   except when not_found:
+		  end
+	c: _chan := _chan$open(file_name$parse("/etc/passwd"), "read", 0)
+	   except when not_possible (*): signal not_found end
+	b: _bytevec := _bytevec$create(64)
+	max: int := _chan$getb(c, b)
+	buser: _bytevec := _cvt[string, _bytevec](user)
+	idx: int := string$size(user) + 1
+	home: string
+	begin
+	while _bytevec$indexv(buser, b, 1) ~= 1  cor  b[idx] ~= ':' do
+		max := _skip_fill(b, max, c, '\n')
+		end
+	for i: int in int$from_to_by(5, 1, -1) do
+		max := _skip_fill(b, max, c, ':')
+		end
+	home, idx, max := _chan$get(c, b, 1, max, ":", false)
+	end except when end_of_file, not_possible (*):
+			%% CLUHOME and ARGUSHOME have already been checked.
+			if (user = "CLU")
+			   then if _file_exists("/usr/local/lib/clu",4)
+				  then home := "/usr/local/lib/clu"
+				elseif _file_exists("/usr/lib/clu",4)
+				  then home := "/usr/lib/clu"
+				elseif _file_exists("/mit/PCLU/decmipslib",4)
+				  then home := "/mit/PCLU/decmipslib"
+				else
+				  home := "/usr/clu"
+				end
+			elseif (user = "ARGUS")
+			   then if _file_exists("/usr/local/lib/argus",4)
+				  then home := "/usr/local/lib/argus"
+				elseif _file_exists("/usr/lib/argus",4)
+				  then home := "/usr/lib/argus"
+				else
+				  home := "/usr/argus"
+				end
+			else _chan$close(c)
+			     signal not_found
+			end	
+		   end
+	_chan$close(c)
+	if ~have
+	   then users := qs$new()
+		homes := qs$new()
+		have := true
+	   end
+	users := qs$addh(users, user)
+	homes := qs$addh(homes, home)
+	return(home)
+	end _home_dir

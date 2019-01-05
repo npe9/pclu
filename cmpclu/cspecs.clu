@@ -1,0 +1,146 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	CSPECS CLU
+%
+%	CLU Compiler Version 3: DUspecs checker
+
+c_get_DUspecs = proc (e: c_env, gen: DU) returns (DUspecs)
+	tagcase gen.mspecs
+	   tag specs (ms: DUspecs):
+		return(ms)
+	   others:
+	   end
+	specs: DUspecs, fixdus: bool := DU$read_specs(gen)
+	if DUspecs$is_none(specs)
+	   then c_env$add_undefined(e, gen)
+	   else f_DUspecs(e, specs, fixdus)
+	   end
+	gen.mspecs := mspecs$make_specs(specs)
+	return(specs)
+	end c_get_DUspecs
+
+c_DUspecs = proc (e: c_env, specs: mspecs)
+	end c_DUspecs
+
+types_mismatch = proc (types1: typelist, types2: typelist) returns (bool)
+	if typelist$size(types1) ~= typelist$size(types2)
+	   then return(true) end
+	for i: int in typelist$indexes(types1) do
+		if typespec$mismatch2(types1[i], types2[i])
+		   then return(true) end
+		end
+	return(false)
+	end types_mismatch
+
+f_DUspecs = proc (e: c_env, specs: DUspecs, fixdus: bool)
+	tagcase specs
+	   tag apply (info: applyinfo):
+		f_idnkinds(e, info.parms, fixdus)
+		info.type_ := f_type(e, info.type_, fixdus)
+	   tag cluster_, select, atype (info: typeinfo):
+		f_idnkinds(e, info.parms, fixdus)
+		for inf: opinfo in opinfolist$elements(info.opers) do
+			for req: typeset in typesetlist$elements(inf.where_) do
+				f_opspeclist(e, req.opers, fixdus)
+				end
+			infinf: applyinfo := inf.info
+			f_idnkinds(e, infinf.parms, fixdus)
+			infinf.type_ := f_type(e, infinf.type_, fixdus)
+			end
+	   others:
+	   end
+	end f_DUspecs
+
+f_idnkinds = proc (e: c_env, parms: idnlist, fixdus: bool)
+	for i: idn in idnlist$elements(parms) do
+		tagcase i.kind
+		   tag tparm (k: opspeclist):
+			f_opspeclist(e, k, fixdus)
+		   tag vparm (k: typespec):
+			if ~(k.id = 0  cor  fixdus)
+			   then i.kind := idnkind$make_vparm(
+						f_type(e, k, fixdus))
+			   end
+		   tag tconst (k: opspeclist):
+			f_opspeclist(e, k, fixdus)
+		   others:
+		   end
+		end
+	end f_idnkinds
+
+f_opspeclist = proc (e: c_env, ops: opspeclist, fixdus: bool)
+	for op: opspec in opspeclist$elements(ops) do
+		f_exprlist(e, op.parms, fixdus)
+		op.type_ := f_type(e, op.type_, fixdus)
+		end
+	end f_opspeclist
+
+f_type = proc (e: c_env, t: typespec, fixdus: bool) returns (typespec)
+	if ~(t.id = 0  cor  fixdus)
+	   then return(t) end
+	abs: typeabs := t.abs
+	tagcase abs
+	   tag cluster_ (clut: clutype):
+		f_exprlist(e, clut.parms, fixdus)
+	   tag select (selt: seltype):
+		for fspec: fieldspec in fieldspeclist$elements(selt.parms) do
+			fspec.type_ := f_type(e, fspec.type_, fixdus)
+			end
+	   tag apply (at: applytype):
+		at.args := f_typelist(e, at.args, fixdus)
+		at.vals := f_typelist(e, at.vals, fixdus)
+		for sig: exception in exceptionlist$elements(at.sigs) do
+			sig.types := f_typelist(e, sig.types, fixdus)
+			end
+	   tag other (ot: othertype):
+		tagcase ot
+		   tag du (clut: clutype):
+			f_exprlist(e, clut.parms, fixdus)
+		   tag op (cop: clusterop):
+			cop.type_ := f_type(e, cop.type_, fixdus)
+			f_exprlist(e, cop.parms, fixdus)
+		   tag return_ (tt: typespec):
+			ot := othertype$make_return_(f_type(e, tt, fixdus))
+			abs := typeabs$make_other(ot)
+		   end
+	   others:
+	   end
+	return(c_env$get_type(e, abs))
+	end f_type
+
+f_typelist = proc (e: c_env, types: typelist, fixdus: bool) returns (typelist)
+	for i: int in typelist$indexes(types) do
+		t: typespec := types[i]
+		if t.id = 0  cor  fixdus
+		   then types := typelist$replace(types, i,
+						  f_type(e, t, fixdus))
+		   end
+		end
+	return(types)
+	end f_typelist
+
+f_expr = proc (e: c_env, x: expr, fixdus: bool)
+	x.typespec := f_type(e, x.typespec, fixdus)
+	tagcase x.abs
+	   tag type_ (t: typespec):
+		if t.id = 0  cor  fixdus
+		   then x.abs := exprabs$make_type_(f_type(e, t, fixdus)) end
+	   tag invoke (inv: invoke):
+		f_expr(e, inv.apply, fixdus)
+		f_exprlist(e, inv.args, fixdus)
+	   tag apply (clut: clutype):
+		clut.gen := c_env$get_du(e, clut.gen)
+		f_exprlist(e, clut.parms, fixdus)
+	   tag op (cop: clusterop):
+		cop.type_ := f_type(e, cop.type_, fixdus)
+		f_exprlist(e, cop.parms, fixdus)
+	   tag force_ (t: typespec):
+		x.abs := exprabs$make_force_(f_type(e, t, fixdus))
+	   others:
+	   end
+	end f_expr
+
+f_exprlist = proc (e: c_env, exprs: exprlist, fixdus: bool)
+	for x: expr in exprlist$elements(exprs) do
+		f_expr(e, x, fixdus)
+		end
+	end f_exprlist

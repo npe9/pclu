@@ -1,0 +1,241 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	BUILD CLU
+%
+%	CLU Compiler Version 3: DUspecs builder
+
+b_DUspecs = proc (e: c_env, specs: DUspecs) returns (DUspecs)
+	tagcase specs
+	   tag apply (inf: applyinfo):
+		if idnlist$empty(inf.parms)
+		   then inf := applyinfo$copy1(inf)
+		   else inf := b_applyinfo(e, inf)
+		   end
+		return(Duspecs$make_apply(inf))
+	   tag cluster_ (inf: typeinfo):
+		return(DUspecs$make_cluster_(b_typeinfo(e, inf)))
+	   tag select (inf: typeinfo):
+		return(DUspecs$make_select(b_typeinfo(e, inf)))
+	   tag atype (inf: typeinfo):
+		return(DUspecs$make_atype(b_typeinfo(e, inf)))
+	   others:
+		return(specs)
+	   end
+	end b_DUspecs
+
+b_typeinfo = proc (e: c_env, info: typeinfo) returns (typeinfo)
+	parms: idnlist := info.parms
+	nparms: idnlist := b_parameters(e, parms)
+	c_env$begin_scope(e)
+	c_env$push_parms(e, parms, nparms)
+	b_idnkinds(e, nparms)
+	empty: bool := idnlist$empty(parms)
+	nopers: opinfolist := opinfolist$new()
+	for inf: opinfo in opinfolist$elements(info.opers) do
+		if empty  cand  idnlist$empty(inf.info.parms)
+		   then inf := opinfo$copy1(inf)
+			inf.info := applyinfo$copy1(inf.info)
+		   else inf := opinfo${name:   inf.name,
+				       where_: b_typesetlist(e, inf.where_),
+				       info:   b_applyinfo(e, inf.info)}
+		   end
+		nopers := opinfolist$addh(nopers, inf)
+		end
+	c_env$end_scope(e)
+	return(typeinfo${parms: nparms,
+			 opers: nopers})
+	end b_typeinfo
+
+b_typesetlist = proc (e: c_env, reqs: typesetlist) returns (typesetlist)
+	nreqs: typesetlist := typesetlist$new()
+	for req: typeset in typesetlist$elements(reqs) do
+		nreqs := typesetlist$addh(nreqs,
+				  typeset${parm:  b_get_idn(e, req.parm),
+					   opers: b_opspeclist(e, req.opers)})
+		end
+	return(nreqs)
+	end b_typesetlist
+
+b_get_idn = proc (e: c_env, i: idn) returns (idn)
+	tagcase i.kind
+	   tag expr (k: expr):
+		tagcase k.abs
+		   tag idn (xa: idn):
+			return(xa)
+		   tag type_ (xa: typespec):
+			tagcase xa.abs
+			   tag idn (ta: idn):
+				return(ta)
+			   others:
+			   end
+		   others:
+		   end
+	   others:
+	   end
+	return(i)
+	end b_get_idn
+
+b_applyinfo = proc (e: c_env, info: applyinfo) returns (applyinfo)
+	parms: idnlist := info.parms
+	nparms: idnlist := b_parameters(e, parms)
+	c_env$begin_scope(e)
+	c_env$push_parms(e, parms, nparms)
+	b_idnkinds(e, nparms)
+	t: typespec := b_type(e, info.type_)
+	c_env$end_scope(e)
+	return(applyinfo${parms: nparms,
+			  type_: t})
+	end b_applyinfo
+
+b_operdecllist = proc (e: c_env, i: idn, set: typeset) returns (operdecllist)
+	c_env$begin_scope(e)
+	c_env$push_parm(e, set.parm, i)
+	opers: opspeclist := b_opspeclist(e, set.opers)
+	c_env$end_scope(e)
+	return(operdecllist$[operdecl${opers: opers,
+				       line:  0}])
+	end b_operdecllist
+
+b_parameters = proc (e: c_env, parms: idnlist) returns (idnlist)
+	nparms: idnlist := idnlist$new()
+	for i: idn in idnlist$elements(parms) do
+		nparms := idnlist$addh(nparms, idn$create(i.str, i.kind))
+		end
+	return(nparms)
+	end b_parameters
+
+b_idnkinds = proc (e: c_env, parms: idnlist)
+	for i: idn in idnlist$elements(parms) do
+		tagcase i.kind
+		   tag tparm (k: opspeclist):
+			i.kind := idnkind$make_tparm(b_opspeclist(e, k))
+		   tag vparm (k: typespec):
+			i.kind := idnkind$make_vparm(b_type(e, k))
+		   tag tconst (k: opspeclist):
+			i.kind := idnkind$make_tconst(b_opspeclist(e, k))
+		   others:
+		   end
+		end
+	end b_idnkinds
+
+b_opspeclist = proc (e: c_env, ops: opspeclist) returns (opspeclist)
+	nops: opspeclist := opspeclist$new()
+	for op: opspec in opspeclist$elements(ops) do
+		nops := opspeclist$addh(nops,
+				opspec${name:  op.name,
+					parms: b_exprlist(e, op.parms),
+					type_: b_type(e, op.type_)})
+		end
+	return(nops)
+	end b_opspeclist
+
+b_type = proc (e: c_env, t: typespec) returns (typespec)
+	nta: typeabs
+	tagcase t.abs
+	   tag cluster_ (dut: clutype):
+		nta := typeabs$make_cluster_(
+				clutype${gen:   dut.gen,
+					 parms: b_exprlist(e, dut.parms)})
+	   tag select (st: seltype):
+		parms: fieldspeclist := fieldspeclist$new()
+		for parm: fieldspec in fieldspeclist$elements(st.parms) do
+			parms := fieldspeclist$addh(parms,
+					fieldspec${sel:   parm.sel,
+						   type_: b_type(e, parm.type_)})
+			end
+		nta := typeabs$make_select(seltype${gen:   st.gen,
+						    parms: parms})
+	   tag apply (at: applytype):
+		sigs: exceptionlist := exceptionlist$new()
+		for sig: exception in exceptionlist$elements(at.sigs) do
+			sigs := exceptionlist$addh(sigs,
+					exception${name:  sig.name,
+						   types: b_typelist(e, sig.types)})
+			end
+		nta := typeabs$make_apply(
+				applytype${gen:  at.gen,
+					   args: b_typelist(e, at.args),
+					   vals: b_typelist(e, at.vals),
+					   sigs: sigs})
+	   tag idn (ta: idn):
+		tagcase ta.kind
+		   tag expr (x: expr):
+			tagcase x.abs
+			   tag type_ (tt: typespec):
+				return(tt)
+			   tag bad:
+			   others:
+			   end
+			return(e.unknown_type)
+		   others:
+			return(t)
+		   end
+	   tag other (ot: othertype):
+		tagcase ot
+		   tag du (dut: clutype):
+			ot := othertype$make_du(
+				clutype${gen:   dut.gen,
+					 parms: b_exprlist(e, dut.parms)})
+		   tag op (cop: clusterop):
+			ot := othertype$make_op(
+				clusterop${type_: b_type(e, cop.type_),
+					   name:  cop.name,
+					   parms: b_exprlist(e, cop.parms)})
+		   tag return_ (tt: typespec):
+			ot := othertype$make_return_(b_type(e, tt))
+		   end
+		nta := typeabs$make_other(ot)
+	   others:
+		return(t)
+	   end
+	return(c_env$get_type(e, nta))
+	end b_type
+
+b_typelist = proc (e: c_env, types: typelist) returns (typelist)
+	ntypes: typelist := typelist$new()
+	for t: typespec in typelist$elements(types) do
+		ntypes := typelist$addh(ntypes, b_type(e, t))
+		end
+	return(ntypes)
+	end b_typelist
+
+b_expr = proc (e: c_env, x: expr) returns (expr)
+	x.typespec := b_type(e, x.typespec)
+	nxa: exprabs
+	tagcase x.abs
+	   tag type_ (xa: typespec):
+		nxa := exprabs$make_type_(b_type(e, xa))
+	   tag idn (xa: idn):
+		tagcase xa.kind
+		   tag expr (k: expr):
+			return(k)
+		   others:
+			return(x)
+		   end
+	   tag invoke (inv: invoke):
+		nxa := exprabs$make_invoke(
+				invoke${apply:  b_expr(e, inv.apply),
+					args:   b_exprlist(e, inv.args)})
+	   tag apply (dut: clutype):
+		nxa := exprabs$make_apply(
+				clutype${gen:   c_env$get_du(e, dut.gen),
+					 parms: b_exprlist(e, dut.parms)})
+	   tag op (cop: clusterop):
+		nxa := exprabs$make_op(
+				clusterop${type_: b_type(e, cop.type_),
+					   name:  cop.name,
+					   parms: b_exprlist(e, cop.parms)})
+	   tag force_ (xa: typespec):
+		nxa := exprabs$make_force_(b_type(e, xa))
+	   others:
+		return(x)
+	   end
+	return(expr$create(nxa, b_type(e, x.typespec)))
+	end b_expr
+
+b_exprlist = proc (e: c_env, exprs: exprlist) returns (exprlist)
+	nexprs: exprlist := exprlist$new()
+	for x: expr in exprlist$elements(exprs) do
+		nexprs := exprlist$addh(nexprs, b_expr(e, x))
+		end
+	return(nexprs)
+	end b_exprlist

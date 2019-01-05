@@ -1,0 +1,289 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	SYNTAX EQUATE
+%
+%	CLU 3.1 Abstract Syntax Equates
+
+str		= string
+name		= string
+pathname	= string
+namelist	= sequence[name]
+idnlist		= sequence[idn]
+idnrow		= array[idn]
+typelist	= sequence[typespec]
+stmtlist	= sequence[stmt]
+exprlist	= sequence[expr]
+equatelist	= sequence[equate]
+
+
+%	EQUATE SUPPORT
+
+opspec		= record[name:  name,
+			 parms: exprlist,
+			 type_: typespec]
+opspeclist	= sequence[opspec]
+operdecl	= record[opers: opspeclist,
+			 line:  int]
+operdecllist	= sequence[operdecl]
+xtypeset	= record[idn:     idn,
+			 ops:     operdecllist,
+			 equates: equatelist]
+equateval	= oneof[expr:    expr,
+			typeset: xtypeset,
+			du:	 pathname]
+
+%	DU SUPPORT
+
+applyinfo	= record[parms:  idnlist,
+			 type_:  typespec]
+typeset		= record[parm:  idn,
+			 opers: opspeclist]
+typesetlist	= sequence[typeset]
+opinfo		= record[name:   name,
+			 where_: typesetlist,
+			 info:   applyinfo]
+opinfolist	= sequence[opinfo]
+typeinfo	= record[parms:  idnlist,
+			 opers:  opinfolist]
+DUspecs		= oneof[apply:    applyinfo,		% Apply generator
+			cluster_: typeinfo,		% Normal type generator
+			select:   typeinfo,		% Selector type generator
+			atype:    typeinfo,		% Apply type generator
+			none:     null]
+
+%	IDN SUPPORT
+
+idnkind		= oneof[var:     typespec,		% Variable
+			ownvar:  typespec,		% Own variable
+			tparm:   opspeclist,		% Type parameter
+			vparm:	 typespec,		% Other parameter
+			tconst:  opspeclist,		% Dynamic type constant
+			expr:    expr,			% Equate
+			typeset: typeset,		% Equate
+			gen:	 DU,			% Generator
+			opgen:   name,			% Short form of clusterop
+			unknown: null]
+
+%	TYPESPEC SUPPORT
+
+exception	= record[name:  name,
+			 types: typelist]
+exceptionlist	= sequence[exception]
+applytype	= record[gen:  DU,
+			 args: typelist,
+			 vals: typelist,
+			 sigs: exceptionlist]
+appletype	= applytype				% when in # extend mode
+clutype		= record[gen:   DU,
+			 parms: exprlist]
+fieldspec	= record[sel:    name,
+			 type_:  typespec]
+fieldspeclist	= sequence[fieldspec]
+seltype		= record[gen:   DU,
+			 parms: fieldspeclist]
+clusterop	= record[type_: typespec,		% Cluster operation
+			 name:  name,
+			 parms: exprlist]
+othertype	= oneof[du:       clutype,		% Type of
+			op:       clusterop,		% Type of
+			return_:  typespec]		% Return type of
+xseltype	= record[idn:   idn,
+			 parms: fieldspeclist]
+xclutype	= record[idn:   idn,
+			 parms: exprlist]
+typeabs		= oneof[cluster_: clutype,
+			select:   seltype,
+			apply:    applytype,
+			idn:      idn,
+			any_:     null,
+			type_:    clutype,
+			cvt_:     null,
+			other:    othertype,		% Faked type
+			xclu:     xclutype,		% Not seen by the code generator
+			xsel:     xseltype,		% Not seen by the code generator
+			unknown:  null]
+
+%	MODULE SUPPORT
+
+restrictkind	= oneof[has_: operdecllist,
+			idn:  idn,
+			set:  xtypeset]
+restrict	= record[idn:  idn,
+			 kind: restrictkind,
+			 line: int]
+restrictlist	= sequence[restrict]
+body		= record[equates: equatelist,
+			 stmts:   stmtlist]
+decl		= record[idns:  idnlist,
+			 type_: typespec]
+decllist	= sequence[decl]
+declinit	= record[decls: decllist,
+			 anys:  decllist,		% Must force to any
+			 expr:  expr]
+initform	= oneof[decl: decl,
+			init: declinit]
+init		= record[stmt: initform,
+			 line: int]
+initlist	= sequence[init]
+applydefn	= record[idn:     idn,
+			 gen:     DU,
+			 parms:   decllist,
+			 type_:   typespec,
+			 args:    decllist,
+			 vals:    typelist,
+			 sigs:    exceptionlist,
+			 where_:  restrictlist,
+			 equates: equatelist,
+			 init:    initlist,
+			 vars:    idnrow,
+			 body:    stmtlist,
+			 line:    int]
+applydefnlist	= sequence[applydefn]
+typedefn	= record[idn:     idn,
+			 parms:   decllist,
+			 up_:     typespec,
+			 down_:   typespec,
+			 ops:     idnlist,
+			 where_:  restrictlist,
+			 equates: equatelist,
+			 init:    initlist,
+			 body:    applydefnlist,
+			 line:    int]
+definition	= oneof[equates:   equatelist,
+			apply:     applydefn,
+			cluster_:  typedefn,
+			selector_: typedefn,
+			atype:     typedefn]
+
+%	STMT SUPPORT
+
+invoke		= record[apply:  expr,
+			 args:   exprlist]
+assn		= record[left:  idnlist,
+			 anys:  decllist,		% Must force to any
+			 right: exprlist]
+sugarassn	= record[left:  expr,			% Store or put sugar
+			 right: expr]
+whilestmt	= record[test: expr,
+			 body: body]
+forvars		= oneof[old:  idnlist,
+			new:  decllist]
+forstmt		= record[vars: forvars,
+			 anys: decllist,		% Must force to any
+			 call: invoke,
+			 body: body,
+			 xent: bool]			% Enter by BREAK/EXCEPT
+ifarm		= record[test: expr,
+			 body: body,
+			 line: int]
+ifarmlist	= sequence[ifarm]
+mbody		= oneof[none: null,
+			body: body]
+ifstmt		= record[arms:  ifarmlist,
+			 else_: mbody]
+mdecl		= oneof[none: null,
+			decl: decl]
+tagarm		= record[tags: namelist,
+			 var:  mdecl,			% Only one idn
+			 body: body,
+			 line: int]
+tagarmlist	= sequence[tagarm]
+tagstmt		= record[obj:     expr,
+			 arms:    tagarmlist,
+			 others_: mbody]
+condition	= record[name: name,
+			 args: exprlist]
+whendecl	= oneof[decls: decllist,
+			star:  null,
+			none:  null]
+handler		= record[names: namelist,
+			 vars:  whendecl,
+			 body:  body,
+			 line:  int]
+handlerlist	= sequence[handler]
+othersarm	= record[decl: mdecl,
+			 body: body,
+			 line: int]
+mothersarm	= oneof[none: null,
+			arm:  othersarm]
+exceptstmt	= record[stmt:    stmt,
+			 arms:    handlerlist,
+			 others_: mothersarm]
+resignalstmt	= record[stmt:   stmt,
+			 resigs: namelist]
+forcestmt	= record[val:    idn,
+			 type_:  idn,
+			 expr:   expr,
+			 where_: restrictlist]
+stmtabs		= oneof[decl:      decl,
+			declinit:  declinit,
+			assn:      assn,
+			sugarassn: sugarassn,		% Not seen by code generator
+			invoke:    invoke,
+			while_:    whilestmt,
+			for_:      forstmt,
+			if_:       ifstmt,
+			tag_:      tagstmt,
+			return_:   exprlist,
+			yield_:    exprlist,
+			signal_:   condition,
+			exit_:     condition,
+			break_:    null,
+			continue_: null,
+			body:      body,
+			except_:   exceptstmt,
+			resignal_: resignalstmt,
+			force_:	   forcestmt,
+			bad:       null]
+
+%	EXPR SUPPORT
+
+infix		= record[left:  expr,
+			 op:    name,
+			 neg:   bool,			% There was a ~ in front
+			 right: expr]
+get_sugar	= record[object: expr,			% primary.name sugar
+			 sel:    name]
+fetch_sugar	= record[object: expr,			% primary[expr] sugar
+			 index:  expr]
+condop		= record[left:  expr,
+			 right: expr]
+mexpr		= oneof[none: null,
+			one:  expr]
+arraycons	= record[type_: typespec,
+			 low:   mexpr,
+			 elts:  exprlist]
+field		= record[sels: namelist,
+			 val:  expr,
+			 line: int]
+fieldlist	= sequence[field]
+selectcons	= record[type_:  typespec,
+			 fields: fieldlist]
+bracketref	= record[idn:   idn,
+			 parms: exprlist]
+exprabs		= oneof[null_:	  null,
+			bool_:    bool,
+			int_:     int,
+			real_:    real,
+			char_:    char,
+			str:      str,
+			type_:    typespec,
+			any_:     expr,			% Anyize
+			idn:      idn,
+			cand_:    condop,
+			cor_:     condop,
+			invoke:   invoke,
+			a_cons:   arraycons,
+			s_cons:	  selectcons,
+			apply:	  clutype,		% Not produced by the parser
+			op:	  clusterop,
+			force_:   typespec,
+			type_of_: expr,
+			up_:      expr,
+			down_:    expr,
+			ref:      bracketref,		% Not seen by the code generator
+			infix:    infix,		% Ditto
+			not:      expr,			% Ditto
+			minus:    expr,			% Ditto
+			get:      get_sugar,		% Ditto
+			fetch:    fetch_sugar,		% Ditto
+			bad:      null]

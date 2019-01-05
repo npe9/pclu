@@ -1,0 +1,365 @@
+%  Copyright	Massachusetts Institute of Technology     1989
+%	PDEFN1	CLU
+%
+%	CLU Compiler:  parsing routines for definitions
+
+% In the comments, <> is used for the cursor position
+
+% definition => directive | equatelist | applydefn sc | typedefn sc
+% applydefn => procedure | iterator
+% typedefn => cluster | selector | applytype
+
+p_definition = proc (e: p_env) returns (definition) signals (eof)
+    not_oper = false
+    e.clustr := ""
+    e.applystr := ""
+    while true do
+	tagcase e.peek1
+	   tag sharp: p_env$next_token(e)
+		      return(p_directive(e))
+			 except when no_directive: end
+	   others:    break
+	   end
+	end
+    if ~p_find_a_defn(e, not_oper)
+       then signal eof end
+    def: definition
+    tagcase p_env$peek(e, 3)
+       tag defnkey (k: defnkey):
+	   tagcase k
+	      tag proc_:      return(definition$make_apply(p_applydefn(e)))
+	      tag iter_:      return(definition$make_apply(p_applydefn(e)))
+	      tag cluster_:   return(definition$make_cluster_(p_typedefn(e)))
+	      tag selector_:  return(definition$make_selector_(p_typedefn(e)))
+	      tag applytype_: return(definition$make_atype(p_typedefn(e)))
+	      end
+       others:
+	   return(definition$make_equates(p_slist[equate](e, p_equate)))
+       end
+    end p_definition
+
+% directive => # <> INCLUDE string | # <> EXTEND | # <> NORMAL | # <> SIGNAL
+% The include file must have only equates
+
+p_directive = proc (e: p_env) returns (definition) signals (no_directive)
+    tagcase e.peek1
+       tag idn (dir: idn):
+	   if dir.str = "include"
+	      then p_env$next_token(e)
+		   return(p_include(e))
+	    elseif dir.str = "extend"
+	      then p_env$hack(e)
+	    elseif dir.str = "normal"
+	      then p_env$unhack(e)
+	    else p_env$err(e, "unrecognized directive", serious) end
+	   p_env$next_token(e)
+	   signal no_directive
+       tag stmtkey (k: stmtkey):
+	   if stmtkey$is_signal_(k)
+	      then p_env$next_token(e)
+		   tagcase cmpvar$stuffs().genv
+		      tag one (ge: g_env): g_env$force_signal(ge)
+		      others:
+		      end
+		   signal no_directive
+	      end
+       others:
+       end except when include_failed: signal no_directive end
+    p_env$err(e, "missing directive after #", serious)
+    signal no_directive
+    end p_directive
+
+p_include = proc (e: p_env) returns (definition) signals (include_failed)
+    begin
+	s: str := exprabs$value_str(token$value_expr(e.peek1))
+	p_env$next_token(e)
+	x: stuff := cmpvar$stuffs()
+	ost: stream := x.inst
+	fn: fname := fname$parse(s)
+	if str$empty(fn.dir)
+	   then fn := fname$create(ost.name.dir, fn.name, fn.suffix, fn.other)
+	   end
+	fn := file_name_fill(fn, equate_suffix())
+	inst: stream := stream$open(check_file_name(fn), "read")
+	x.inst := inst
+	e1: p_env := p_env$new_env(e, inst)
+	def: definition := definition$make_equates(
+			       p_slist[equate](e1, p_equate))
+	tagcase e1.peek1
+	   tag eof: 
+	   others:  p_env$err(e1, "more than equates in include file", minor)
+	   end
+	stream$close(inst)
+	x.inst := ost
+	e.err := e1.err
+	return(def)
+	end
+       except when bad_format:
+		   p_env$err(e, "file name has bad format", serious)
+	      when not_possible (xx: str):
+		   p_env$err(e, "cannot open include file: " || xx, serious)
+	      when wrong_tag:
+		   p_env$err(e, "missing file name string after # include",
+			     serious)
+	      end
+    signal include_failed
+    end p_include
+
+% procedure => idn = PROC parms args returns signals where body END idn
+% iterator => idn = ITER parms args yields signals where body END idn
+
+p_applydefn = proc (e: p_env) returns (applydefn)
+    id: idn := p_idn(e)
+    line: int := e.line
+    p_env$next_token(e)
+    gen: DU
+    procdef: bool
+    tagcase token$value_defnkey(p_env$next_token(e))
+       tag proc_ (d: DU):
+	   gen := d
+	   procdef := true
+       tag iter_(d: DU):
+	   gen := d
+	   procdef := false
+       others:
+       end
+    parms: decllist := p_blist[decl](e, p_decl, _none_ok, "parameter")
+    args: decllist := p_plist[decl](e, p_decl, _no_none, _empty_ok,
+				    "argument")
+    vals: typelist := p_values(e, procdef)
+    sigs: exceptionlist := p_signals(e)
+    wher: restrictlist := p_where(e)
+    e.applystr := id.str
+    p_env$set_deftype(e, gen, ~typelist$empty(vals))
+    p_semi(e)
+    p_env$begin_body(e, misc_body)
+    eqs: equatelist := p_slist[equate](e, p_equate)
+    inits: initlist := p_slist[init](e, p_init)
+    bod: stmtlist := p_slist[stmt](e, p_stmt)
+    p_env$end_body(e)
+    p_defn_end(e, id.str)
+    return(applydefn${idn:     id,
+		      gen:     gen,
+		      type_:   e.unknown_type,
+		      parms:   parms,
+		      args:    args,
+		      vals:    vals,
+		      sigs:    sigs,
+		      where_:  wher,
+		      equates: eqs,
+		      init:    inits,
+		      vars:    idnrow$predict(1, 10),
+		      body:    bod,
+		      line:    line})
+    end p_applydefn
+
+% cluster => idn = CLUSTER parms IS idnlist where sc equatelist applydefnlist END idn
+% selector => idn = SELECTOR ...
+% applytype => idn = APPLYTYPE ...
+
+p_typedefn = proc (e: p_env) returns (typedefn)
+    ft = oneof[cvt_, xt, id:null]
+    id: idn := p_idn(e)
+    line: int := e.line
+    p_env$next_token(e)
+    p_env$next_token(e)
+    parms: decllist := p_blist[decl](e, p_decl, _none_ok, "parameter")
+    ops: idnlist
+    tagcase e.peek1
+       tag is_: p_env$next_token(e)
+		ops := p_order[idn](e, p_idn1, idn$get_str, "idn")
+       others:  p_env$assume(e, "IS idn_list in module header")
+		ops := idnlist$new()
+       end
+    wher: restrictlist := p_where(e)
+    p_semi(e)
+    e.clustr := id.str
+    equates: equatelist := p_slist[equate](e, p_equate)
+    inits: initlist := p_slist[init](e, p_init)
+    bod: applydefnlist := p_list[applydefn](e, p_operdefn, _no_empty,
+					    "operation")
+    % begin
+    % add debug_print applydefn to bod
+    % check bod for print function with correct signature
+    found: bool := false
+    form: ft
+    wh: restrictlist := restrictlist$new()
+    % for each: applydefn in applydefnlist$elements(bod) do
+	% if each.idn.str = "debug_print" then exit exists end
+	% end
+    for each: applydefn in applydefnlist$elements(bod) do
+	if each.idn.str = "print" then
+	   if decllist$empty(each.parms) cand typelist$empty(each.vals)
+		cand exceptionlist$empty(each.sigs)
+		cand decllist$size(each.args) = 2
+	      then
+		   arg1: decl := each.args[1]
+		   arg2: decl := each.args[2]
+		   if idnlist$size(arg1.idns) = 1 cand idnlist$size(arg2.idns) = 1
+		      then
+			   tagcase arg2.type_.abs
+			      tag idn (i: idn):
+				  if i.str ~= "pstream" then break end
+			      others:
+				  break
+			      end
+			   tagcase arg1.type_.abs
+			      tag idn (i: idn):
+				  if i.str = id.str then
+				     form := ft$make_id(nil)
+				     else break end
+			      tag cvt_:
+				  form := ft$make_cvt_(nil)
+				  wh := each.where_
+			      tag xclu (x: xclutype):
+				  if x.idn.str = id.str then
+				     form := ft$make_xt(nil)
+				     wh := each.where_
+				     else break end
+			      others:
+				  break
+			      end
+			   found := true
+		      end
+		   break
+	      end
+	   end
+	end
+    %	select appropriate string to parse
+    %   if print operation found, debug_print should call it
+    %   else just do rep print
+    apstr: string
+    if found
+       then
+	    wclause: string := ""
+	    for each_r: restrict in restrictlist$elements(wh) do
+	    wclause := wclause ||
+		       "where " || each_r.idn.str || " has print: proctype(" ||
+		       each_r.idn.str || ", pstream)\n"
+		end
+	    apstr := "debug_print = proc(_rep: cvt, ps: pstream)\n" ||
+		     wclause ||
+		     " print(up(_rep), ps)\n" ||
+		     " end debug_print\n"
+       else
+	    apstr := "debug_print = proc(_rep: cvt, ps: pstream)\n" ||
+		     " rep$debug_print(_rep, ps)\n" ||
+		     " end debug_print\n"
+       end
+    %	put it into a stream
+    newst: stream := stream$create_input(apstr)
+    %	switch streams
+    e := p_env$push(e, newst)
+    %	parse it
+    new: applydefnlist := p_list[applydefn](e, p_operdefn, _no_empty,
+					    "operation")
+    %	switch streams back
+    e := p_env$pop(e)
+    %	add new defn to bod
+    bod := bod || new
+    % end
+	% except when exists: end
+
+    p_defn_end(e, id.str)
+    return(typedefn${idn:     id,
+		     parms:   parms,
+		     up_:     e.unknown_type,
+		     down_:   e.unknown_type,
+		     ops:     ops,
+		     where_:  wher,
+		     equates: equates,
+		     init:    inits,
+		     body:    bod,
+		     line:    line})
+    end p_typedefn
+
+% equate => idn = expr | idn = typeset | idn = PATHNAME string
+
+p_equate = proc (e: p_env) returns (equate) signals (none, bad)
+    id: idn
+    tagcase e.peek1
+       tag idn (k: idn):
+	   id := k
+       tag typekey (k: typekey):
+	   tagcase k
+	      tag rep_ (i: idn):
+		  id := i
+	      others:
+		  signal none
+	      end
+       others:
+	   signal none
+       end
+    tagcase p_env$peek(e, 2)
+       tag equal:
+       others:    signal none
+       end
+    k: token := p_env$peek(e, 3)
+    tagcase k
+       tag defnkey: signal none             % Don't gobble a module!
+       others:
+       end
+    p_env$next_token(e)
+    line: int := e.line
+    p_env$next_token(e)
+    val: equateval
+    tagcase k
+       tag l_curly:
+	   p_env$next_token(e)
+	   val := equateval$make_typeset(p_typeset(e))
+       tag idn (tk: idn):
+	   if "pathname" = tk.str
+	      then p_env$next_token(e)
+		   val := equateval$make_du(p_pathname(e))
+	      else val := equateval$make_expr(p_expr(e))
+	      end
+       others:
+	   val := equateval$make_expr(p_expr(e))
+       end
+       except when none: p_env$assume(e, "right side of equate")
+			 val := equateval$make_expr(e.bad_expr)
+	      when bad:  val := equateval$make_expr(e.bad_expr)
+	      end
+    return(equate$create(id, val, line))
+    end p_equate
+
+% init => OWN decl | OWN declinit
+
+p_init = proc (e: p_env) returns (init) signals (none, bad)
+    tagcase e.peek1
+       tag stmtkey (k: stmtkey):
+	   tagcase k
+	      tag own_: p_env$next_token(e)
+	      others:   signal none
+	      end
+       others:
+	   signal none
+       end
+    line: int := e.line
+    di: initform := p_owninit(e)
+    return(init${stmt: di,
+		 line: line})
+    end p_init
+
+p_operdefn = proc (e: p_env) returns (applydefn) signals (none, bad)
+    want_oper = true
+    while p_find_a_defn(e, want_oper) do
+	tagcase p_env$peek(e, 3)
+	   tag defnkey (k: defnkey):
+	       tagcase k
+		  tag proc_: return(p_applydefn(e))
+		  tag iter_: return(p_applydefn(e))
+		  others:    signal none
+		  end
+	   others:
+	       p_env$err(e, "equates legal only at start of cluster",
+			 serious)
+	       p_slist[equate](e, p_equate)
+	   end
+	end
+    signal none
+    end p_operdefn
+
+% parms => empty | [decllist]
+
+% args => () | (decllist)

@@ -1,0 +1,9 @@
+locals false
+optimize time
+externals false
+merge ~CLU/lib/lowlev,~CLU/lib/useful,~CLU/lib/misc
+merge cmp
+cfiles
+ccopt 0
+ce syntax,passes,codgen,bin,gen
+bindir ../code/cmp
