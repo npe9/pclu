@@ -30,6 +30,7 @@ static char rcsid[] = "$Header: rename_file.c,v 1.3 91/06/06 13:30:36 root Exp $
 extern CLUREF empty_string;
 
 #include <errno.h>
+#include <stdio.h>
 
 errcode rename_file(ofn, nfn)
 CLUREF ofn, nfn;

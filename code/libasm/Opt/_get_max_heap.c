@@ -3,11 +3,11 @@
 #include "pclu_err.h"
 #include "pclu_sys.h"
 
-#ifndef LINUX
+#ifndef HAVE_GET_MAX_HEAP_SIZE
 errcode _get_max_heap(ans)
 CLUREF *ans;
 {
-	ans->num = blks_hard_limit * HBLKSIZE;
+	ans->num = 0;
 	signal(ERR_ok);
 	}
 #else

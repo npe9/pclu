@@ -24,6 +24,7 @@ static char rcsid[] = "$Header: delete_file.c,v 1.3 91/06/06 13:27:16 root Exp $
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <unistd.h>
 
 #include "pclu_err.h"
 #include "pclu_sys.h"

@@ -39,7 +39,11 @@ static char rcsid[] = "$Header: connected_dir.c,v 1.5 91/07/08 10:38:01 root Exp
 #else
 extern char *getwd();
 #endif
-extern char *strcat();
+
+#ifdef HAVE_STRING_H
+#include <string.h>
+#endif
+
 
 errcode connected_dir(ans)
 CLUREF *ans;

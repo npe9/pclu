@@ -27,6 +27,8 @@
 /*						  */
 /*	Defines system constants		  */
 
+#include "acconfig.h"
+
 #ifdef sparc
 #include <sys/param.h>
 #endif
@@ -338,7 +340,7 @@ typedef union {
 	CLUARRAY array;
 	CLUSTORE store;
 	struct obj * obj;
-} CLUREF;
+        } CLUREF;
 
 #define CLUREFSZ (sizeof(CLUREF))
 
@@ -363,7 +365,12 @@ extern struct OPS *NULL_OPS;
 #define zero_ops (struct OPS**)0
 #define m1_ops (struct OPS**)-1
 
+#ifdef HAVE_STRING_H
+#include <string.h>
+#else
 extern void bcopy();
+#endif
+
 extern void perror();
 extern void clu_alloc();
 extern void clu_alloc_atomic();
@@ -373,7 +380,69 @@ extern void   pclu_unhandled();
 typedef CLUREF errlist[MAX_SIG_VALS];
 extern errlist elist;
 
+/* Various routines that need at least minimal prototypes for C99 */
+extern errcode _OPenviron();
+extern errcode _bytevecOPcreate();
+extern errcode _chanOP_save_tty();
+extern errcode _fixup_file_name();
+extern errcode _local_time();
+extern errcode arrayOPOPnewdesc();
+extern errcode arrayOPOPnewstore();
+extern errcode arrayOPinternal_print();
+extern errcode arrayOPpredict();
+extern errcode boolOPprint();
+extern errcode dateOPcreate();
+extern errcode file_nameOPcreate();
+extern errcode file_nameOPget_dir();
+extern errcode file_nameOPparse();
+extern errcode file_nameOPprint();
+extern errcode file_nameOPunparse();
+extern errcode file_name_fill();
+extern errcode gcd_tabOPinsert();
+extern errcode intOPprint();
+extern errcode intOPunparse();
+extern errcode istreamOPgeti();
+extern errcode istreamOPgetbv();
+extern errcode istreamOPputi();
+extern errcode istreamOPputbv();
+extern errcode istreamOPget_chan();
+extern errcode oneofOPnew();
+extern errcode proctypeOPnew();
+extern errcode pstreamOPpause();
+extern errcode pstreamOPstart();
+extern errcode pstreamOPstop();
+extern errcode pstreamOPtext();
+extern errcode pstreamOPtextc();
+extern errcode pstreamOPget_max_width();
+extern errcode recordOPnew();
+extern errcode sequenceOPfill();
+extern errcode sequenceOPnew();
+extern errcode sequenceOPnew2();
+extern errcode sequenceOPinternal_print();
+extern errcode streamOPget_chan();
+extern errcode streamOP_close_all();
+extern errcode stringOPconcat();
+extern errcode stringOPfetch();
+extern errcode stringOPsize();
+extern errcode stringOPcons();
+extern errcode stringOPcons();
+extern errcode stringOPcons0();
+extern errcode stringOPdebug_print();
+extern errcode stringOPprint();
+extern errcode stringOPsubstr();
+extern errcode working_dir();
+extern errcode find_selector_ops();
+extern errcode add_selector_info();
+extern errcode variantOPnew();
+extern errcode start_up();
+extern errcode _gcOPgc();
+
+extern errcode _cleanup_();
+extern errcode _OPexit();
+extern void sigfixmask();
+
 /*	Storage allocation macros	*/
+
 
 /*	usage: Alloc(size_in_words, result_name) */
 
@@ -493,57 +562,58 @@ extern CLUREF CLU_48;
 extern CLUREF CLU_49;
 extern CLUREF CLU_50;
 #else
-#define CLU_0 0
-#define CLU_1 1
-#define CLU_2 2
-#define CLU_3 3
-#define CLU_4 4
-#define CLU_5 5
-#define CLU_6 6
-#define CLU_7 7
-#define CLU_8 8
-#define CLU_9 9
-#define CLU_10 10
-#define CLU_11 11
-#define CLU_12 12
-#define CLU_13 13
-#define CLU_14 14
-#define CLU_15 15
-#define CLU_16 16
-#define CLU_17 17
-#define CLU_18 18
-#define CLU_19 19
-#define CLU_20 20
-#define CLU_21 21
-#define CLU_22 22
-#define CLU_23 23
-#define CLU_24 24
-#define CLU_25 25
-#define CLU_26 26
-#define CLU_27 27
-#define CLU_28 28
-#define CLU_29 29
-#define CLU_30 30
-#define CLU_31 31
-#define CLU_32 32
-#define CLU_33 33
-#define CLU_34 34
-#define CLU_35 35
-#define CLU_36 36
-#define CLU_37 37
-#define CLU_38 38
-#define CLU_39 39
-#define CLU_40 40
-#define CLU_41 41
-#define CLU_42 42
-#define CLU_43 43
-#define CLU_44 44
-#define CLU_45 45
-#define CLU_46 46
-#define CLU_47 47
-#define CLU_48 48
-#define CLU_49 49
-#define CLU_50 50
+#define INTREF(n) (CLUREF)(long)n
+#define CLU_0 INTREF(0)
+#define CLU_1 INTREF(1)
+#define CLU_2 INTREF(2)
+#define CLU_3 INTREF(3)
+#define CLU_4 INTREF(4)
+#define CLU_5 INTREF(5)
+#define CLU_6 INTREF(6)
+#define CLU_7 INTREF(7)
+#define CLU_8 INTREF(8)
+#define CLU_9 INTREF(9)
+#define CLU_10 INTREF(10)
+#define CLU_11 INTREF(11)
+#define CLU_12 INTREF(12)
+#define CLU_13 INTREF(13)
+#define CLU_14 INTREF(14)
+#define CLU_15 INTREF(15)
+#define CLU_16 INTREF(16)
+#define CLU_17 INTREF(17)
+#define CLU_18 INTREF(18)
+#define CLU_19 INTREF(19)
+#define CLU_20 INTREF(20)
+#define CLU_21 INTREF(21)
+#define CLU_22 INTREF(22)
+#define CLU_23 INTREF(23)
+#define CLU_24 INTREF(24)
+#define CLU_25 INTREF(25)
+#define CLU_26 INTREF(26)
+#define CLU_27 INTREF(27)
+#define CLU_28 INTREF(28)
+#define CLU_29 INTREF(29)
+#define CLU_30 INTREF(30)
+#define CLU_31 INTREF(31)
+#define CLU_32 INTREF(32)
+#define CLU_33 INTREF(33)
+#define CLU_34 INTREF(34)
+#define CLU_35 INTREF(35)
+#define CLU_36 INTREF(36)
+#define CLU_37 INTREF(37)
+#define CLU_38 INTREF(38)
+#define CLU_39 INTREF(39)
+#define CLU_40 INTREF(40)
+#define CLU_41 INTREF(41)
+#define CLU_42 INTREF(42)
+#define CLU_43 INTREF(43)
+#define CLU_44 INTREF(44)
+#define CLU_45 INTREF(45)
+#define CLU_46 INTREF(46)
+#define CLU_47 INTREF(47)
+#define CLU_48 INTREF(48)
+#define CLU_49 INTREF(49)
+#define CLU_50 INTREF(50)
 #endif
 
 /*							*/
@@ -595,9 +665,9 @@ typedef struct {
 
 typedef struct {
 	char 	*name;
-	errcode (*proc)();
+	errcode (*tg_proc)();
 	bool	restricted;
-	PTABLE  *restrict;
+	PTABLE  *tg_restrict;
 	} TG_ENTRY;
 
 typedef struct {

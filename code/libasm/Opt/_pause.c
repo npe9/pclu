@@ -22,6 +22,8 @@ static char rcsid[] = "$Header: _pause.c,v 1.2 91/06/06 13:49:36 dcurtis Exp $";
 #include "pclu_err.h"
 #include "pclu_sys.h"
 
+#include <signal.h>
+
 errcode _pause()
 {
 	sigpause(0);
