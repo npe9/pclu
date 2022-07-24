@@ -1,0 +1,11 @@
+#ifndef ACCONFIG_H
+#define ACCONFIG_H
+
+#define HAVE_STRING_H 1
+#define HAVE_SYS_STAT_H 1
+#define HAVE_SYS_IOCTL_H 1
+#define HAVE_SYS_SOCKET_H 1
+#define HAVE_SIGNAL_H 1
+#undef LINUX_STYLE_SIGACTION
+
+#endif /* ACCONFIG_H */
