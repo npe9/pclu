@@ -436,6 +436,10 @@ extern errcode add_selector_info();
 extern errcode variantOPnew();
 extern errcode start_up();
 extern errcode _gcOPgc();
+extern errcode add_parm_info_type();
+extern errcode find_type_instance();
+extern errcode find_typeop_instance();
+extern errcode find_prociter_instance();
 
 extern errcode _cleanup_();
 extern errcode _OPexit();
