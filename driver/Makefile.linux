@@ -5,7 +5,8 @@
 # Options for compiling the driver
 
 CC     = gcc
-CFLAGS = -g
+CFLAGS = -g $(CINCLUDES)
+CINCLUDES = -I../include
 
 # Options to compile into the driver
 

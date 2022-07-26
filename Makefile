@@ -34,8 +34,9 @@ INSTALL_FILES	= ./include ./lib/*.lib ./lib/*.spc ./lib/short.help \
 		  ./code/cmp/ccdbg.cmd* ./code/cmp/ccopt.cmd* \
 		  ./clu.order ./doc/pclu.pdf ./doc/mini-pclu.pdf \
 		  ${EXEDIR}/pclu ${EXEDIR}/plink ${EXEDIR}/cludent \
-		  ./example ./elisp 
-		# ./code/libpclu_debug.a ./driver
+		  ./example ./elisp  \
+		 ./code/libpclu_debug.a \
+# ./driver
 
 INSTALL_TAR_FILE = ../pclu-install.tar.Z
 INSTALL_TARGZ_FILE = ../pclu-install.tar.gz

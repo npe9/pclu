@@ -6,6 +6,8 @@
 #define HAVE_SYS_IOCTL_H 1
 #define HAVE_SYS_SOCKET_H 1
 #define HAVE_SIGNAL_H 1
+#define HAVE_STDLIB_H 1
+#undef HAVE_MALLOC_H
 #undef LINUX_STYLE_SIGACTION
 
 #endif /* ACCONFIG_H */

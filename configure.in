@@ -5,7 +5,7 @@ AC_CONFIG_HEADERS([code/include/acconfig.h])
 AC_PROG_CC
 AC_PROG_CPP
 
-AC_CHECK_HEADERS(unistd.h string.h sys/stat.h sys/ioctl.h sys/socket.h)
+AC_CHECK_HEADERS(unistd.h string.h sys/stat.h sys/ioctl.h sys/socket.h stdlib.h malloc.h)
 
 AC_COMPILE_IFELSE([AC_LANG_SOURCE([
 #include <signal.h>

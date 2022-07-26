@@ -41,7 +41,7 @@ debug: fictitious_file
 	cd Debug; ${RM} *.c; ${LN} ../Opt/*.c .
 	cd Debug; make CFLAGS="${CFLAGS} ${DEBUG_FLAGS}" OBJS="${OBJS}"
 
-fictitious_file:
+.PHONY: fictitious_file
 
 clean:
 	${RM} ${FLUFF}
