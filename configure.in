@@ -20,4 +20,4 @@ int main() {
 AC_OUTPUT
 
 [echo Configuring garbage collector...]
-[cd code/gc; configure]
+[cd code/gc; ./configure]
