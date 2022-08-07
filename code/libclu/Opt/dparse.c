@@ -4,7 +4,7 @@
 #include "pclu_err.h"
 #include "pclu_sys.h"
 
-
+extern errcode arrayOPcreate();
 extern errcode arrayOPnew();
 extern errcode stringOPfetch();
 extern errcode charOPequal();
