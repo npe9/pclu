@@ -87,8 +87,12 @@ libpclu:
 	cd code; make optlib
 
 compiler:
-	echo Building and installing the pclu compiler
-	echo Assumes that CLUHOME is set properly
+	@echo Building and installing the pclu compiler
+	@if /bin/echo -n "CLUHOME = "; printenv CLUHOME; then		      \
+	    echo "Assumes that CLUHOME is set properly";		      \
+	else								      \
+	    echo "Error: Environment variable CLUHOME is not set. Should be set to the top directory."; exit 1;\
+	fi
 	cd code/cmp; make
 	mv code/cmp/pclu $(EXEDIR)/pclu
 
