@@ -9,8 +9,8 @@ CC = gcc
 
 FLUFF = *~ *.old *.bak .*~ .*.old .*.bak
 
-CFLAGS = -c -O -w -I../include
-#CFLAGS = -c -g -I../include 
+#CFLAGS = -c -O -w -I../include
+CFLAGS = -c -Wno-parentheses-equality -g -I../include 
 LFLAGS = -L${CLUHOME}/code -lpclu_opt -lgc -lm -lc -lpthread -g
 
 O_FILES = build.o cconst.o cdchan.o cdefn1.o cdefn2.o ce.o cenv.o \

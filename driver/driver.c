@@ -9,19 +9,20 @@
    11/7/16 sjg: added -lgc -lpthread to CLU_OTHER_LIBS
 */
 
+#include "acconfig.h"
+
+#ifdef HAVE_MALLOC_H
 #include <malloc.h>
+#endif
+#ifdef HAVE_STDLIB_H
+#include <stdlib.h>
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
 #include "proto.h"
-
-extern char* getenv ARGS((char*));
-extern int   setenv ARGS((char*, char*, int));
-extern int   system ARGS((char*));
-
-extern int unlink ARGS((char*));
 
 /*
  * Collect up various compile time options.

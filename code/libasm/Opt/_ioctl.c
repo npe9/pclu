@@ -24,18 +24,22 @@ static char rcsid[] = "$Header: _ioctl.c,v 1.2 91/06/06 13:48:07 dcurtis Exp $";
 
 #include <errno.h>
 
+#if HAVE_SYS_IOCTL_H
+#include <sys/ioctl.h>
+#endif
+
 errcode _ioctl(fdesc, reqh, reql, argp, disp)
 CLUREF fdesc, reqh, reql, argp, disp;
 {
 int req;
 int err;
 
-	req = reqh.num<<16 + reql.num;
-	err = ioctl(fdesc, req, argp.vec->data[disp.num]);
+	req = (reqh.num << 16) + reql.num;
+	err = ioctl((int)fdesc.num, req, argp.vec->data[disp.num]);
 	if (err != 0) {
-		elist[0] = _unix_erstr(errno);
-		signal(ERR_not_possible);
-		}
+            elist[0] = _unix_erstr(errno);
+            signal(ERR_not_possible);
+        }
 	signal(ERR_ok);
 	}
 

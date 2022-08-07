@@ -99,6 +99,8 @@ Slist0 NO_PARMS = {0,0};
 long maxheapsize = 0;
 /* extern long STACKTOP; */
 
+extern int main_2(int _argc, char **_argv, char **_envp);
+
 int main(_argc, _argv, _envp)
 int _argc;
 char **_argv, **_envp;
@@ -122,7 +124,7 @@ int err;
 	}
 
 /* Routine to get the ball rolling */
-main_2(_argc, _argv, _envp)
+int main_2(_argc, _argv, _envp)
 int _argc;
 char **_argv, **_envp;
 {
@@ -314,7 +316,6 @@ long longs2 = (long)s2;
 	}
 #endif
 
-extern int sys_nerr;
 extern long clu_nerr;
 
 /* Routine to convert a clu signal to a string */
@@ -675,7 +676,7 @@ char * mystrcat(s1, s2)
 char *s1, *s2;
 {
 long size, i, j, len1, len2;
-const char *temp;
+char *temp;
 
 	len1 = strlen(s1);
 	len2 = strlen(s2);

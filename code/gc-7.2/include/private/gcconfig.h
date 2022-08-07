@@ -2169,6 +2169,8 @@
 #       endif
 #   endif
 #   ifdef DARWIN
+#undef OS_TYPE
+#undef DATASTART
 #     define OS_TYPE "DARWIN"
 #     define DARWIN_DONT_PARSE_STACK
 #     define DYNAMIC_LOADING

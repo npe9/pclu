@@ -1254,7 +1254,7 @@ CLUREF vnt, *ans;
 errcode err;
 CLUREF temp;
 
-	err = oneofOPnew(vnt.cell->tag, vnt.cell->value, &temp);
+	err = oneofOPnew(INTREF(vnt.cell->tag), INTREF(vnt.cell->value), &temp);
 	if (err != ERR_ok) resignal(err);
 	ans->cell = temp.cell;
 	signal(ERR_ok);

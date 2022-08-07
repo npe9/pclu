@@ -38,7 +38,7 @@ int err;
 struct sigaction vec, ovec;
 
 	vec.sa_handler = (void (*)())label.ref;
-#if defined(LINUX) && !defined(OLD_LINUX)
+#ifdef LINUX_STYLE_SIGACTION
 	vec.sa_mask.__val[0] = 0xff7bf0e0;
 #else
 	vec.sa_mask = 0xff7bf0e0;

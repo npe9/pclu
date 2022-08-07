@@ -34,8 +34,9 @@ INSTALL_FILES	= ./include ./lib/*.lib ./lib/*.spc ./lib/short.help \
 		  ./code/cmp/ccdbg.cmd* ./code/cmp/ccopt.cmd* \
 		  ./clu.order ./doc/pclu.pdf ./doc/mini-pclu.pdf \
 		  ${EXEDIR}/pclu ${EXEDIR}/plink ${EXEDIR}/cludent \
-		  ./example ./elisp 
-		# ./code/libpclu_debug.a ./driver
+		  ./example ./elisp  \
+		 ./code/libpclu_debug.a \
+# ./driver
 
 INSTALL_TAR_FILE = ../pclu-install.tar.Z
 INSTALL_TARGZ_FILE = ../pclu-install.tar.gz
@@ -86,8 +87,12 @@ libpclu:
 	cd code; make optlib
 
 compiler:
-	echo Building and installing the pclu compiler
-	echo Assumes that CLUHOME is set properly
+	@echo Building and installing the pclu compiler
+	@if /bin/echo -n "CLUHOME = "; printenv CLUHOME; then		      \
+	    echo "Assumes that CLUHOME is set properly";		      \
+	else								      \
+	    echo "Error: Environment variable CLUHOME is not set. Should be set to the top directory."; exit 1;\
+	fi
 	cd code/cmp; make
 	mv code/cmp/pclu $(EXEDIR)/pclu
 
