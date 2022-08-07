@@ -176,9 +176,9 @@ CLUREF temp_str;
 		}
 	newch->rd.num = -1;
 	newch->wr.num = -1;
-	if (flags & O_RDWR) {
+	if ((flags & O_ACCMODE) == O_RDWR || (flags & O_ACCMODE) == O_RDONLY) {
 		newch->rd.num = fd;}
-	if (flags & O_RDWR || flags & O_WRONLY) {
+	if ((flags & O_ACCMODE) == O_RDWR || (flags & O_ACCMODE) == O_WRONLY) {
 		newch->wr.num = fd;}
 	newch->typ.num = oth;
 	err = tcgetattr(fd, &obuf);
@@ -2103,7 +2103,8 @@ errcode _chanOPsockname(chref, name, ans)
 CLUREF chref;
 CLUREF name, *ans;
 {
-int fd, uerr, size;
+int fd, uerr;
+socklen_t size;
 _chan *ch  = (_chan *)chref.ref;
 
 	if (ch->rd.num < 0 && ch->wr.num < 0) {
