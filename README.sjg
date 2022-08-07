@@ -1,1 +1,81 @@
-Status of PCLU update (November 29, 2016)Done----Finished work started by Dorothy Curtis on making pclu work with glibc on 64-bitarchitectures.  See ~CLU/CHANGES for a list of changes.Fixed LP compilation problems by * disabling LP's command-line options related to garbage collection and  heap size, and * changing the output of LP's "version" command to omit information about  garbage collection and the heap.These changes eliminated undefined references (detected when linking LP) in* _get_max_heap.c to GC_get_max_heap_size in* _get_min_gc.c and _set_min_gc.c to blks_min_gc Work still to be done---------------------Fix problems (definition of CFLAGS?) in debug/call_clu.c that cause "makedebugger" to fail.Fix makefiles to work for Mac OS X  (look at earlier Mac port).Fix the line-editing behavior of the DEL key.  This key works in the version offactorial.clu compiled for Mac OS X (using the earlier Mac port of PCLU), butnot in the version compiled for Debian Linux (at least when run in a virtualmachine under Mac OS X).Other potential clean-up------------------------Consider resolving, rather than eliminating, the undefined gc-related referencesthat caused problems for LP.  This may not be worth the effort.  Formerly, itwas useful to have some control over how the garbage collector worked, but itmay work well enough now on machines with lots of memory so that we don’t haveto worry about things like excessively large heaps causing page faults.Discard pclu/code/libasm/Opt/_job.c, which fails to compile Is it needed?Eliminate _wordvecOPget_byte in pclu/code/libasm/Opt.  It's never used.  Dittofor set_byte.  If these routines are still needed, it may be necessary to change32 to 64 in them.Re-institute check for "insufficient room" in cludent/_buffered_read.clu.  Thischeck failed because _free_space() always returns zero.Improve/eliminate PCLU. * Make it recognize .spc files.* Enhance it so that it can be invoked just once, not three separate times with  the -create, -compile, and -link options.* Is PCLU still needed in addition to pclu/plink (which also requires three  invocations to build an executable)?Remove references to athena in ~CLU/Makefile, ~CLU/code/Makefile,~CLU/include/pclu_sys.h (which has #define athena, even though ~CLU/Makefilesuggests that be done only if you want "smaller executables at the cost of somespeed"), and ~CLU/lib/clu/_resolve.clu).Questions---------Is it worth investing more effort in PCLU?  What would be the  goals?Do we still need config_G0 and config_G4 in ~CLU/Makefile?  Are symbolic links to two .o files needed in ~CLU/debug?How is building the compiler bootstrapped?  The Makefile in ~CLU/cmpclu said touse "make new" when changing architectures or on initial installation, but thereis no target for "new" in the Makefile.What is the difference between pclu/code/lib*/Debug and pclu/code/lib*/Debugger?Are both needed?What's the purpose of grindc and grindp in gcd_tab?  Are they needed?  Ditto forthe internal pgrind.What is gcdprt in ~CLU/util?
+-i used with no filenames on the command line, reading from STDIN.
+Status of PCLU update (November 29, 2016)
+
+Done
+----
+
+Finished work started by Dorothy Curtis on making pclu work with glibc on 64-bit
+architectures.  See ~CLU/CHANGES for a list of changes.
+
+Fixed LP compilation problems by 
+* disabling LP's command-line options related to garbage collection and
+  heap size, and 
+* changing the output of LP's "version" command to omit information about
+  garbage collection and the heap.
+These changes eliminated undefined references (detected when linking LP) in
+* _get_max_heap.c to GC_get_max_heap_size in
+* _get_min_gc.c and _set_min_gc.c to blks_min_gc 
+
+Work still to be done
+---------------------
+
+Fix problems (definition of CFLAGS?) in debug/call_clu.c that cause "make
+debugger" to fail.
+
+Fix makefiles to work for Mac OS X  (look at earlier Mac port).
+
+Fix the line-editing behavior of the DEL key.  This key works in the version of
+factorial.clu compiled for Mac OS X (using the earlier Mac port of PCLU), but
+not in the version compiled for Debian Linux (at least when run in a virtual
+machine under Mac OS X).
+
+Other potential clean-up
+------------------------
+
+Consider resolving, rather than eliminating, the undefined gc-related references
+that caused problems for LP.  This may not be worth the effort.  Formerly, it
+was useful to have some control over how the garbage collector worked, but it
+may work well enough now on machines with lots of memory so that we don’t have
+to worry about things like excessively large heaps causing page faults.
+
+Discard pclu/code/libasm/Opt/_job.c, which fails to compile Is it needed?
+
+Eliminate _wordvecOPget_byte in pclu/code/libasm/Opt.  It's never used.  Ditto
+for set_byte.  If these routines are still needed, it may be necessary to change
+32 to 64 in them.
+
+Re-institute check for "insufficient room" in cludent/_buffered_read.clu.  This
+check failed because _free_space() always returns zero.
+
+Improve/eliminate PCLU. 
+* Make it recognize .spc files.
+* Enhance it so that it can be invoked just once, not three separate times with
+  the -create, -compile, and -link options.
+* Is PCLU still needed in addition to pclu/plink (which also requires three
+  invocations to build an executable)?
+
+Remove references to athena in ~CLU/Makefile, ~CLU/code/Makefile,
+~CLU/include/pclu_sys.h (which has #define athena, even though ~CLU/Makefile
+suggests that be done only if you want "smaller executables at the cost of some
+speed"), and ~CLU/lib/clu/_resolve.clu).
+
+Questions
+---------
+
+Is it worth investing more effort in PCLU?  What would be the  goals?
+
+Do we still need config_G0 and config_G4 in ~CLU/Makefile?  
+
+Are symbolic links to two .o files needed in ~CLU/debug?
+
+How is building the compiler bootstrapped?  The Makefile in ~CLU/cmpclu said to
+use "make new" when changing architectures or on initial installation, but there
+is no target for "new" in the Makefile.
+
+What is the difference between pclu/code/lib*/Debug and pclu/code/lib*/Debugger?
+Are both needed?
+
+What's the purpose of grindc and grindp in gcd_tab?  Are they needed?  Ditto for
+the internal pgrind.
+
+What is gcdprt in ~CLU/util?

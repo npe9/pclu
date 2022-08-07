@@ -49,6 +49,7 @@ static char rcsid[] = "$Header: /pm/src/site/pclu/code/base/RCS/real.c,v 1.8 91/
 extern errcode realOPprint();
 
 #include <errno.h>
+#include <math.h>
 extern double pow();
 extern double drem();
 extern double logb();

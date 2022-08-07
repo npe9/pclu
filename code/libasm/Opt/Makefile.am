@@ -1,0 +1,5 @@
+noinst_LIBRARIES = libasm_opt.a
+libasm_opt_a_SOURCES = _all_dir_entries_.c _byteptr.c _byteptr8.c _change_mode.c _change_owner.c _change_signal.c _cluref_size.c _dtable_size.c _exit.c _file_access.c _file_exists.c _file_facts.c _file_owner.c _free_space.c _get_active_heap.c _get_gid.c _get_max_heap.c _get_min_gc.c _get_pname.c _get_priority.c _get_runtime.c _get_uid.c _get_version.c _get_xjname.c _groups.c _heap_size.c _host_address.c _host_id.c _host_name.c _ioctl.c  _lstat.c _micro_time.c _nice.c _obj.c _page_size.c _pause.c _read_link.c _real_time.c _rusage.c _select.c _set_alarm.c _set_limit.c _set_max_heap.c _set_min_gc.c _set_priority.c _signal.c _sleep.c _stat.c _stop.c _type_base.c _umask.c _wordvec.c create_directory.c delete_directory.c file_date.c file_exists.c gc.c get_argv.c get_env.c get_jcl.c hash.c hash_int.c hash_obj.c istream2chan.c link_file.c mint.c pause.c quit_.c random.c set_connected_dir.c sleep.c stream2chan.c symlink_file.c version.c # _job.c
+
+libasm_opt_a_CFLAGS= -I../../include/ -DLINUX
+LDADD = ../../libclu/Opt/libclu_opt.a 

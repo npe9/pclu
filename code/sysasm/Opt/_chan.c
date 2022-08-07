@@ -68,7 +68,14 @@ static char rcsid[] = "$Header: /pm/src/site/pclu/code/base/RCS/_chan.c,v 1.11 9
 #else
 /* #include <sgtty.h> */
 #endif
+
+#ifdef HAVE_SYS_STAT_H
 #include <sys/stat.h>
+#endif
+
+#ifdef HAVE_SYS_SOCKET_H
+#include <sys/socket.h>
+#endif
 
 extern char *index();
 extern int _chanOPtstop();
@@ -169,7 +176,7 @@ CLUREF temp_str;
 		}
 	newch->rd.num = -1;
 	newch->wr.num = -1;
-	if (flags & O_RDWR || (!flags & 1)) {
+	if (flags & O_RDWR) {
 		newch->rd.num = fd;}
 	if (flags & O_RDWR || flags & O_WRONLY) {
 		newch->wr.num = fd;}
@@ -243,7 +250,7 @@ CLUREF temp_str;
 		}
 	newch->rd.num = -1;
 	newch->wr.num = -1;
-	if (flags.num & O_RDWR || (!flags.num & 1)) {
+	if (flags.num & O_RDWR) {
 		newch->rd.num = fd;}
 	if (flags.num & O_RDWR || flags.num & O_WRONLY) {
 		newch->wr.num = fd;}
@@ -364,7 +371,7 @@ errcode err;
 	temp_chan2->fn.str = fname.str;
 	temp_chan2->typ.num = oth;
 
-	result = socketpair(fildes);
+	result = socketpair(domain.num, socktype.num, protocol.num, fildes);
 	if (result == -1) {
 		elist[0] = _unix_erstr(errno);
 		signal(ERR_not_possible);
@@ -1738,7 +1745,7 @@ CLUREF chref;
 CLUREF bv, flags, addr;
 CLUREF *ans1, *ans2;
 {
-int result, fromlen;
+int result; socklen_t fromlen;
 _chan *ch  = (_chan *)chref.ref;
 
 	if (ch->rd.num < 0) {
@@ -1748,7 +1755,7 @@ _chan *ch  = (_chan *)chref.ref;
 	fromlen = addr.str->size;
 	while (1) {
 		result = recvfrom(ch->rd.num, bv.str->data, bv.str->size, 
-			flags.num, addr.str->data, &fromlen);
+			flags.num, (struct sockaddr *)addr.str->data, &fromlen);
 		if (result == -1 && errno == EINTR) continue;
 		if (result >= 0) break;
 		elist[0] = _unix_erstr(errno);
@@ -1806,7 +1813,7 @@ _chan *ch  = (_chan *)chref.ref;
 	else signal(ERR_bounds);
 	for (;;) {
 		result = sendto(ch->wr.num, buf.vec->data, size, flags.num,
-				addr.vec->data, asize);
+				(struct sockaddr *)addr.vec->data, asize);
 		if (result == -1 && errno == EINTR) continue;
 		if (result == -1) {
 			elist[0] = _unix_erstr(errno);
@@ -1966,7 +1973,8 @@ CLUREF chref;
 CLUREF addr, *ans1, *ans2;
 {
 errcode err;
-int fd, result, len, s, z;
+int fd, result, s, z;
+socklen_t len;
 _chan *newch;
 CLUREF temp_str, fn;
 _chan *ch  = (_chan *)chref.ref;
@@ -1979,7 +1987,7 @@ _chan *ch  = (_chan *)chref.ref;
 	if (fd < 0) fd = ch->wr.num;
 	len = addr.vec->size;
 	for (;;) {
-		result = accept(fd, addr.vec->data, &len);
+		result = accept(fd, (struct sockaddr *)addr.vec->data, &len);
 		if (result == -1 && errno == EINTR) continue;
 		if (result == -1) {
 			elist[0] = _unix_erstr(errno);
@@ -2019,7 +2027,7 @@ _chan *ch  = (_chan *)chref.ref;
 	fd = ch->rd.num;
 	if (fd < 0) fd = ch->wr.num;
 	if (len.num > name.vec->size) signal(ERR_bounds);
-	uerr = bind(fd, name.vec->data, len.num);
+	uerr = bind(fd, (const struct sockaddr *)name.vec->data, len.num);
 	if (uerr == 0) signal(ERR_ok);
 	elist[0] = _unix_erstr(errno);
 	signal(ERR_not_possible);
@@ -2040,7 +2048,7 @@ _chan *ch  = (_chan *)chref.ref;
 	fd = ch->rd.num;
 	if (fd < 0) fd = ch->wr.num;
 	if (len.num > name.vec->size) signal(ERR_bounds);
-	uerr = connect(fd, name.vec->data, len.num);
+	uerr = connect(fd, (struct sockaddr *)name.vec->data, len.num);
 	if (uerr == 0) signal(ERR_ok);
 	elist[0] = _unix_erstr(errno);
 	signal(ERR_not_possible);
@@ -2070,7 +2078,8 @@ errcode _chanOPpeername(chref, name, ans)
 CLUREF chref;
 CLUREF name, *ans;
 {
-int fd, uerr, size;
+int fd, uerr;
+socklen_t size;
 _chan *ch  = (_chan *)chref.ref;
 
 	if (ch->rd.num < 0 && ch->wr.num < 0) {
@@ -2080,7 +2089,7 @@ _chan *ch  = (_chan *)chref.ref;
 	fd = ch->rd.num;
 	if (fd < 0) fd = ch->wr.num;
 	size = name.vec->size;
-	uerr = getpeername(fd, name.vec->data, &size);
+	uerr = getpeername(fd, (struct sockaddr *)name.vec->data, &size);
 	if (uerr == 0) {
 		ans->num = size;
 		signal(ERR_ok);
@@ -2104,7 +2113,7 @@ _chan *ch  = (_chan *)chref.ref;
 	fd = ch->rd.num;
 	if (fd < 0) fd = ch->wr.num;
 	size = name.vec->size;
-	uerr = getsockname(fd, name.vec->data, &size);
+	uerr = getsockname(fd, (struct sockaddr *)name.vec->data, &size);
 	if (uerr == 0) {
 		ans->num = size;
 		signal(ERR_ok);
@@ -2119,7 +2128,8 @@ CLUREF chref;
 CLUREF level, option, *ans;
 {
 int fd, uerr;
-int optlen, optval;
+socklen_t optlen;
+int optval;
 _chan *ch  = (_chan *)chref.ref;
 
 	if (ch->rd.num < 0 && ch->wr.num < 0) {

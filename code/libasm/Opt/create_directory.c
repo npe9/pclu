@@ -22,6 +22,10 @@ static char rcsid[] = "$Header: create_directory.c,v 1.2 91/06/06 13:52:43 dcurt
 #include "pclu_err.h"
 #include "pclu_sys.h"
 
+#ifdef HAVE_SYS_STAT_H
+#include <sys/stat.h>
+#endif
+
 #include <errno.h>
 extern CLUREF empty_string;
 

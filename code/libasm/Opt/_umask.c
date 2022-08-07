@@ -25,12 +25,18 @@ static char rcsid[] = "$Header: _umask.c,v 1.2 91/06/06 13:52:14 dcurtis Exp $";
 
 #include <errno.h>
 
+#if HAVE_SYS_STAT_H
+#include <sys/stat.h>
+#else
+extern int umask();
+#endif
+
 errcode _umask(mask, ans)
 CLUREF mask, *ans;
 {
 int err;
 
-	err = umask(mask);
+	err = umask((mode_t)mask.num);
 	ans->num = err;
 	signal(ERR_ok);
 /*

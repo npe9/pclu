@@ -19,6 +19,9 @@ static char rcsid[] = "$Header: _pause.c,v 1.2 91/06/06 13:49:36 dcurtis Exp $";
 /*			_pause			*/
 /*						*/
 
+#include <signal.h>
+#undef signal
+
 #include "pclu_err.h"
 #include "pclu_sys.h"
 

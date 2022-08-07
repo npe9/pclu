@@ -1,6 +1,0 @@
-real_malloc.o: real_malloc.c /usr/include/stdc-predef.h \
- include/private/config.h
-
-/usr/include/stdc-predef.h:
-
-include/private/config.h:

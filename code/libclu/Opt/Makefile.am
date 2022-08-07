@@ -1,0 +1,4 @@
+noinst_LIBRARIES = libclu_opt.a
+libclu_opt_a_SOURCES = _all_file_names_.c _int_range.c _job_stuff.c _longsub.c _qindexc.c _resolve.c _signal_type.c _system_root.c _time_format.c _unquote.c all_file_names.c array_replace.c bigint.c cos.c delete_expunge.c dparse.c gc_copy.c gc_dump.c gc_read.c gcd_tab.c heap.c hex.c host_address.c inet_address.c isqrt.c istream.c lex_scan.c maybe.c octal.c open_append.c open_read.c open_write.c os.c parse_line.c pstream.c quick_sort.c quicksort.c run_time.c scase.c split_line.c strim.c string_lindexs.c string_ops.c table.c tan.c time.c unify_spacing.c xref.c 
+libclu_opt_a_CFLAGS= -I../../include/ -DLINUX
+LDADD = ../../sysasm/Opt/libsysasm_opt.a 

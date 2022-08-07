@@ -26,6 +26,12 @@ static char rcsid[] = "$Header: _change_mode.c,v 1.2 91/06/06 13:43:45 dcurtis E
 //extern int errno;
 extern CLUREF empty_string;
 
+#ifdef HAVE_SYS_STAT_H
+#include <sys/stat.h>
+#else
+extern int chmod();
+#endif
+
 errcode _change_mode(fn, mode)
 CLUREF fn, mode;
 {
@@ -36,7 +42,7 @@ int err;
 	if (err != ERR_ok) resignal(err);
 	err = file_nameOPunparse(newfn, &name);
 	if (err != ERR_ok) resignal(err);
-	err = chmod(name.vec->data, mode.num);
+	err = chmod((const char *)name.vec->data, mode.num);
 	if (err != 0) {
 		elist[0] = _unix_erstr(errno);
 		signal(ERR_not_possible);

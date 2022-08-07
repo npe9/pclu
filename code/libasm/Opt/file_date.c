@@ -20,6 +20,7 @@ static char rcsid[] = "$Header: file_date.c,v 1.2 91/06/06 13:53:04 dcurtis Exp 
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include "pclu_err.h"
 #include "pclu_sys.h"
